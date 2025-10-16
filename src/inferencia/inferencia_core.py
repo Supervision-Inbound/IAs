@@ -20,10 +20,18 @@ TARGET_CALLS = "recibidos_nacional"
 TARGET_TMO = "tmo_general"
 
 def _load_cols(path):
-    with open(path,"r") as f: return json.load(f)
+    with open(path,"r") as f: 
+        return json.load(f)
 
 def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120):
-    # Cargamos artefactos
+    """
+    Orquesta:
+      1) Planner iterativo (120d x 24h) -> llamadas por hora
+      2) TMO por hora con últimos valores conocidos (si faltan columnas específicas)
+      3) Erlang C -> agentes requeridos programados
+      4) Salida JSON horaria y diaria (sin suavizado ni recalibración postmodelo)
+    """
+    # ===== Cargar artefactos =====
     m_pl = tf.keras.models.load_model(PLANNER_MODEL, compile=False)
     sc_pl = joblib.load(PLANNER_SCALER)
     cols_pl = _load_cols(PLANNER_COLS)
@@ -32,23 +40,28 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120):
     sc_tmo = joblib.load(TMO_SCALER)
     cols_tmo = _load_cols(TMO_COLS)
 
-    # Base histórica (mínimo: ts, recibidos_nacional, feriados, es_dia_de_pago si existe)
+    # ===== Base histórica =====
     df = ensure_ts(df_hist_calls)
     if TARGET_CALLS not in df.columns:
         raise ValueError(f"Falta columna {TARGET_CALLS} en historical_data.csv")
 
-    # forward-fill de auxiliares
+    # forward-fill de auxiliares comunes
     for aux in ["feriados","es_dia_de_pago","tmo_comercial","tmo_tecnico","proporcion_comercial","proporcion_tecnica"]:
         if aux in df.columns:
             df[aux] = df[aux].ffill()
 
-    # Horizonte futuro
+    # ===== Horizonte futuro =====
     start = df.index.max() + pd.Timedelta(hours=1)
-    future_ts = pd.date_range(start, periods=horizon_days*24, freq="H", tz=TIMEZONE)
+    future_ts = pd.date_range(start, periods=horizon_days*24, freq="h", tz=TIMEZONE)
 
     # ===== Planner iterativo =====
-    dfp = df[[TARGET_CALLS,"feriados"]].copy() if "feriados" in df.columns else df[[TARGET_CALLS]].copy()
-    dfp[TARGET_CALLS] = dfp[TARGET_CALLS].astype(float)
+    if "feriados" in df.columns:
+        dfp = df[[TARGET_CALLS,"feriados"]].copy()
+    else:
+        dfp = df[[TARGET_CALLS]].copy()
+
+    dfp[TARGET_CALLS] = pd.to_numeric(dfp[TARGET_CALLS], errors="coerce").ffill().fillna(0.0)
+
     for ts in future_ts:
         tmp = pd.concat([dfp, pd.DataFrame(index=[ts])])
         tmp[TARGET_CALLS] = tmp[TARGET_CALLS].ffill()
@@ -63,11 +76,17 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120):
     # ===== TMO por hora =====
     base_tmo = pd.DataFrame(index=future_ts)
     base_tmo[TARGET_CALLS] = pred_calls.values
-    # usar últimos valores conocidos para columnas necesarias si no están
-    last_vals = df.ffill().iloc[[-1]].reindex(columns=["proporcion_comercial","proporcion_tecnica","tmo_comercial","tmo_tecnico"], fill_value=0)
-    for c in last_vals.columns:
-        base_tmo[c] = float(last_vals[c].iloc[0]) if c in last_vals else 0.0
-    if "feriados" in df.columns: base_tmo["feriados"] = 0
+
+    # Rellenos seguros a partir del último registro histórico disponible
+    last_vals = df.ffill().iloc[[-1]].reindex(
+        columns=["proporcion_comercial","proporcion_tecnica","tmo_comercial","tmo_tecnico"], 
+        fill_value=0
+    )
+    for c in ["proporcion_comercial","proporcion_tecnica","tmo_comercial","tmo_tecnico"]:
+        base_tmo[c] = float(last_vals[c].iloc[0]) if c in last_vals.columns else 0.0
+
+    if "feriados" in df.columns:
+        base_tmo["feriados"] = 0  # por defecto 0 hacia futuro (sin tocarlos postmodelo)
 
     base_tmo = add_time_parts(base_tmo)
     Xt = dummies_and_reindex(base_tmo, cols_tmo)
@@ -79,13 +98,17 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120):
     df_hourly["calls"] = np.round(pred_calls).astype(int)
     df_hourly["tmo_s"] = np.round(y_tmo).astype(int)
     df_hourly["agents_prod"] = 0
+
     for ts in df_hourly.index:
         a,_ = required_agents(float(df_hourly.at[ts,"calls"]), float(df_hourly.at[ts,"tmo_s"]))
-        df_hourly.at[ts,"agents_prod"] = a
+        df_hourly.at[ts,"agents_prod"] = int(a)
+
     df_hourly["agents_sched"] = df_hourly["agents_prod"].apply(schedule_agents)
 
-    # Output JSONs
+    # ===== Salidas =====
     write_hourly_json(f"{PUBLIC_DIR}/prediccion_horaria.json", df_hourly, "calls", "tmo_s", "agents_sched")
     write_daily_json(f"{PUBLIC_DIR}/prediccion_diaria.json", df_hourly, "calls", "tmo_s")
+
     return df_hourly
+
 
