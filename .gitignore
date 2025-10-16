@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# Data/artefactos locales
+models/
+*.pkl
+*.keras
+*.h5
+*.zip
+
+# Jupyter / OS
+.ipynb_checkpoints/
+.DS_Store
