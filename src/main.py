@@ -1,8 +1,8 @@
 # src/main.py
 import argparse, pandas as pd, os
-from inferencia.inferencia_core import forecast_120d
-from inferencia.features import ensure_ts
-from inferencia.alertas_clima import generar_alertas
+from src.inferencia.inferencia_core import forecast_120d
+from src.inferencia.features import ensure_ts
+from src.inferencia.alertas_clima import generar_alertas
 
 def main(horizonte_dias: int):
     os.makedirs("public", exist_ok=True)
