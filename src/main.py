@@ -3,6 +3,8 @@ import argparse
 import pandas as pd
 import numpy as np
 import os
+from datetime import datetime
+import pytz
 
 from src.inferencia.inferencia_core import forecast_120d
 from src.inferencia.features import ensure_ts
@@ -12,23 +14,17 @@ HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
 
 TARGET_CALLS_NEW = "recibidos_nacional"
 TARGET_TMO_NEW = "tmo_general"
+TZ = "America/Santiago"
 
-# ---- helpers robustos (alineados con la inferencia original) ----
 def smart_read_historical(path: str) -> pd.DataFrame:
-    """Lee CSV con autodetección de separador (“;”, “,”) y fallback."""
-    # 1) intento default (coma)
     try:
         df = pd.read_csv(path)
         if df.shape[1] > 1:
             return df
     except Exception:
         pass
-    # 2) intento con ';'
-    try:
-        df = pd.read_csv(path, delimiter=';')
-        return df
-    except Exception as e:
-        raise FileNotFoundError(f"No pude leer {path}: {e}")
+    df = pd.read_csv(path, delimiter=';')
+    return df
 
 def parse_tmo_to_seconds(val):
     if pd.isna(val): return np.nan
@@ -45,61 +41,49 @@ def parse_tmo_to_seconds(val):
         return np.nan
 
 def load_holidays(csv_path: str) -> set:
-    if not os.path.exists(csv_path):
-        return set()
+    if not os.path.exists(csv_path): return set()
     fer = pd.read_csv(csv_path)
     cols_map = {c.lower().strip(): c for c in fer.columns}
     fecha_col = None
     for cand in ["fecha", "date", "dia", "día"]:
-        if cand in cols_map:
-            fecha_col = cols_map[cand]
-            break
-    if not fecha_col:
-        return set()
+        if cand in cols_map: fecha_col = cols_map[cand]; break
+    if not fecha_col: return set()
     fechas = pd.to_datetime(fer[fecha_col].astype(str), dayfirst=True, errors="coerce").dropna().dt.date
     return set(fechas)
 
 def mark_holidays_index(dt_index, holidays_set: set) -> pd.Series:
     tz = getattr(dt_index, "tz", None)
-    idx_dates = dt_index.tz_convert("America/Santiago").date if tz is not None else dt_index.date
+    idx_dates = dt_index.tz_convert(TZ).date if tz is not None else dt_index.date
     return pd.Series([d in holidays_set for d in idx_dates], index=dt_index, dtype=int, name="feriados")
 
 def add_es_dia_de_pago(df_idx: pd.DataFrame) -> pd.Series:
     dias = [1,2,15,16,29,30,31]
     return pd.Series(df_idx.index.day.isin(dias).astype(int), index=df_idx.index, name="es_dia_de_pago")
 
-# ----------------------------------------------------------------------
-
 def main(horizonte_dias: int):
     os.makedirs("public", exist_ok=True)
 
-    # 1) Leer histórico con autodetección y normalizar columnas
+    # 1) Leer histórico
     dfh = smart_read_historical(DATA_FILE)
     dfh.columns = dfh.columns.str.strip()
 
-    # Mapear columnas antiguas a las nuevas
+    # Mapear columnas
     if TARGET_CALLS_NEW not in dfh.columns:
         for cand in ["recibidos_nacional", "recibidos", "total_llamadas", "llamadas"]:
             if cand in dfh.columns:
                 dfh = dfh.rename(columns={cand: TARGET_CALLS_NEW})
                 break
-
     if TARGET_TMO_NEW not in dfh.columns:
         tmo_source = None
         for cand in ["tmo (segundos)", "tmo_seg", "tmo", "tmo_general"]:
             if cand in dfh.columns:
-                tmo_source = cand
-                break
-        if tmo_source:
-            dfh[TARGET_TMO_NEW] = dfh[tmo_source].apply(parse_tmo_to_seconds)
-        else:
-            dfh[TARGET_TMO_NEW] = np.nan  # se imputará más adelante si hace falta
+                tmo_source = cand; break
+        dfh[TARGET_TMO_NEW] = dfh[tmo_source].apply(parse_tmo_to_seconds) if tmo_source else np.nan
 
-    # 2) Asegurar índice temporal (tolerante a 'fecha'+'hora' o 'ts')
     print("Cols historical_data.csv:", list(dfh.columns))
     dfh = ensure_ts(dfh)
 
-    # 3) Derivar features de calendario usados en los modelos
+    # 2) Derivar calendario
     holidays_set = load_holidays(HOLIDAYS_FILE)
     if "feriados" not in dfh.columns:
         dfh["feriados"] = mark_holidays_index(dfh.index, holidays_set).values
@@ -107,33 +91,37 @@ def main(horizonte_dias: int):
     if "es_dia_de_pago" not in dfh.columns:
         dfh["es_dia_de_pago"] = add_es_dia_de_pago(dfh).values
 
-    # 👇 CLAVE: como en el original, quedarnos SOLO con filas con llamadas válidas
-    # (aquí vamos un paso más: >0 para evitar filas “plantilla” a futuro con 0)
+    # 3) CAP DE FECHAS FUTURAS + FILTRO DE LLAMADAS (CLAVE)
+    now_tz = pytz.timezone(TZ).localize(datetime.now()).tz_convert(TZ)
+    max_ts_bruto = dfh.index.max()
+    dfh = dfh.loc[dfh.index <= now_tz]  # nunca mirar más allá de "hoy"
+    max_ts_hoy = dfh.index.max()
+
     dfh[TARGET_CALLS_NEW] = pd.to_numeric(dfh[TARGET_CALLS_NEW], errors="coerce")
     mask_valid = dfh[TARGET_CALLS_NEW].notna() & (dfh[TARGET_CALLS_NEW] > 0)
     if not mask_valid.any():
-        # fallback al comportamiento del original (solo dropna)
         mask_valid = dfh[TARGET_CALLS_NEW].notna()
     dfh = dfh.loc[mask_valid]
 
-    # 4) Forward-fill básico de auxiliares
     for c in [TARGET_TMO_NEW, "feriados", "es_dia_de_pago"]:
         if c in dfh.columns:
             dfh[c] = dfh[c].ffill()
 
-    # Debug útil: última fecha real que se usará
     last_used = dfh.index.max()
-    print("Última fecha con llamadas válidas (>0 preferente):", last_used)
-    print("Últimas 5 filas del histórico usado:")
+    print("DEBUG fechas")
+    print("  max_ts_bruto del CSV:", max_ts_bruto)
+    print("  max_ts_<=hoy        :", max_ts_hoy)
+    print("  last_ts_valido      :", last_used)
+    print("  tail llamadas:")
     try:
-        print(dfh[[TARGET_CALLS_NEW]].tail(5))
+        print(dfh[[TARGET_CALLS_NEW]].tail(8))
     except Exception:
-        print(dfh.tail(5))
+        print(dfh.tail(8))
 
-    # 5) Ejecutar orquestador (planner + tmo + erlang) → genera JSON horario y diario
+    # 4) Forecast
     df_hourly = forecast_120d(dfh.reset_index(), horizon_days=horizonte_dias)
 
-    # 6) Generar alertas climáticas usando la curva del planner para calcular uplift
+    # 5) Alertas clima
     from src.inferencia.alertas_clima import generar_alertas
     generar_alertas(df_hourly[["calls"]])
 
