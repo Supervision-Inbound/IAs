@@ -1,6 +1,5 @@
 # src/inferencia/inferencia_core.py
 import json, joblib, numpy as np, pandas as pd, tensorflow as tf
-from pathlib import Path
 from .features import ensure_ts, add_time_parts, add_lags_mas, dummies_and_reindex
 from .erlang import required_agents, schedule_agents
 from .utils_io import write_daily_json, write_hourly_json
@@ -19,19 +18,23 @@ TMO_COLS = "models/training_columns_tmo.json"
 TARGET_CALLS = "recibidos_nacional"
 TARGET_TMO = "tmo_general"
 
+# Usar ventana reciente para construir lags/MA (coincide con “últimos ~90 días”)
+HIST_WINDOW_DAYS = 90
+
 def _load_cols(path):
-    with open(path,"r") as f: 
+    with open(path,"r") as f:
         return json.load(f)
 
 def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120):
     """
-    Orquesta:
-      1) Planner iterativo (120d x 24h) -> llamadas por hora
-      2) TMO por hora con últimos valores conocidos (si faltan columnas específicas)
-      3) Erlang C -> agentes requeridos programados
-      4) Salida JSON horaria y diaria (sin suavizado ni recalibración postmodelo)
+    1) Usa SOLO histórico válido (llamadas > 0 preferente) y corta cualquier fila futura.
+    2) Construye features a partir de una ventana reciente (90d) para lags/MA.
+    3) Planner iterativo → calls por hora.
+    4) TMO hora (con rellenos seguros).
+    5) Erlang C → agentes programados.
+    6) Salidas JSON horaria y diaria.
     """
-    # ===== Cargar artefactos =====
+    # ===== Artefactos =====
     m_pl = tf.keras.models.load_model(PLANNER_MODEL, compile=False)
     sc_pl = joblib.load(PLANNER_SCALER)
     cols_pl = _load_cols(PLANNER_COLS)
@@ -45,20 +48,39 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120):
     if TARGET_CALLS not in df.columns:
         raise ValueError(f"Falta columna {TARGET_CALLS} en historical_data.csv")
 
+    # Filtrado robusto de llamadas válidas (coherente con main.py)
+    df[TARGET_CALLS] = pd.to_numeric(df[TARGET_CALLS], errors="coerce")
+    mask_valid = df[TARGET_CALLS].notna() & (df[TARGET_CALLS] > 0)
+    if not mask_valid.any():
+        mask_valid = df[TARGET_CALLS].notna()
+    df = df.loc[mask_valid]
+
     # forward-fill de auxiliares comunes
     for aux in ["feriados","es_dia_de_pago","tmo_comercial","tmo_tecnico","proporcion_comercial","proporcion_tecnica"]:
         if aux in df.columns:
             df[aux] = df[aux].ffill()
 
-    # ===== Horizonte futuro =====
-    start = df.index.max() + pd.Timedelta(hours=1)
-    future_ts = pd.date_range(start, periods=horizon_days*24, freq="h", tz=TIMEZONE)
+    # ===== Horizonte futuro (justo después de la última fila válida) =====
+    last_ts = df.index.max()
+    # Asegura que no usamos filas que el CSV tenga más allá de last_ts
+    df = df.loc[:last_ts]
 
-    # ===== Planner iterativo =====
-    if "feriados" in df.columns:
-        dfp = df[[TARGET_CALLS,"feriados"]].copy()
+    # Usar solo una ventana reciente para construir lags/MA
+    start_hist = last_ts - pd.Timedelta(days=HIST_WINDOW_DAYS)
+    df_recent = df.loc[df.index >= start_hist].copy()
+    if df_recent.empty:
+        # fallback: usa todo df
+        df_recent = df.copy()
+
+    # Fechas futuras a predecir
+    future_ts = pd.date_range(last_ts + pd.Timedelta(hours=1),
+                              periods=horizon_days*24, freq="h", tz=TIMEZONE)
+
+    # ===== Planner iterativo (sobre df_recent) =====
+    if "feriados" in df_recent.columns:
+        dfp = df_recent[[TARGET_CALLS,"feriados"]].copy()
     else:
-        dfp = df[[TARGET_CALLS]].copy()
+        dfp = df_recent[[TARGET_CALLS]].copy()
 
     dfp[TARGET_CALLS] = pd.to_numeric(dfp[TARGET_CALLS], errors="coerce").ffill().fillna(0.0)
 
@@ -77,7 +99,7 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120):
     base_tmo = pd.DataFrame(index=future_ts)
     base_tmo[TARGET_CALLS] = pred_calls.values
 
-    # Rellenos seguros a partir del último registro histórico disponible
+    # Rellenos seguros desde el último histórico
     last_vals = df.ffill().iloc[[-1]].reindex(
         columns=["proporcion_comercial","proporcion_tecnica","tmo_comercial","tmo_tecnico"], 
         fill_value=0
@@ -86,7 +108,7 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120):
         base_tmo[c] = float(last_vals[c].iloc[0]) if c in last_vals.columns else 0.0
 
     if "feriados" in df.columns:
-        base_tmo["feriados"] = 0  # por defecto 0 hacia futuro (sin tocarlos postmodelo)
+        base_tmo["feriados"] = 0  # hacia futuro
 
     base_tmo = add_time_parts(base_tmo)
     Xt = dummies_and_reindex(base_tmo, cols_tmo)
@@ -110,5 +132,4 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120):
     write_daily_json(f"{PUBLIC_DIR}/prediccion_diaria.json", df_hourly, "calls", "tmo_s")
 
     return df_hourly
-
 
