@@ -1,1 +1,37 @@
-[{"fecha":"2025-10-17","llamadas_diarias":12345,"tmo_diario":207.3}]
+[
+  {
+    "fecha": "2025-12-08",
+    "llamadas_diarias": 2268,
+    "tmo_diario": 107.875
+  },
+  {
+    "fecha": "2025-12-09",
+    "llamadas_diarias": 2249,
+    "tmo_diario": 109.29166666666667
+  },
+  {
+    "fecha": "2025-12-10",
+    "llamadas_diarias": 2285,
+    "tmo_diario": 113.125
+  },
+  {
+    "fecha": "2025-12-11",
+    "llamadas_diarias": 2161,
+    "tmo_diario": 114.375
+  },
+  {
+    "fecha": "2025-12-12",
+    "llamadas_diarias": 2056,
+    "tmo_diario": 110.45833333333333
+  },
+  {
+    "fecha": "2025-12-13",
+    "llamadas_diarias": 1342,
+    "tmo_diario": 115.75
+  },
+  {
+    "fecha": "2025-12-14",
+    "llamadas_diarias": 996,
+    "tmo_diario": 110.125
+  }
+]
