@@ -1,6 +1,6 @@
 [
   {
-    "comuna": "Coyhaique",
+    "comuna": "Castro",
     "rango_alertas": [
       {
         "fecha": "2025-10-20",
@@ -11,7 +11,40 @@
     ]
   },
   {
-    "comuna": "Hualaihue",
+    "comuna": "Chonchi",
+    "rango_alertas": [
+      {
+        "fecha": "2025-10-20",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Cochamo",
+    "rango_alertas": [
+      {
+        "fecha": "2025-10-20",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Lago Verde",
+    "rango_alertas": [
+      {
+        "fecha": "2025-10-20",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Ohiggins",
     "rango_alertas": [
       {
         "fecha": "2025-10-20",
@@ -23,17 +56,6 @@
   },
   {
     "comuna": "Puerto Cisnes",
-    "rango_alertas": [
-      {
-        "fecha": "2025-10-20",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Rio Ibañez",
     "rango_alertas": [
       {
         "fecha": "2025-10-20",
@@ -80,10 +102,6 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Castro",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Cañete",
     "rango_alertas": []
   },
@@ -97,14 +115,6 @@
   },
   {
     "comuna": "Cholchol",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Chonchi",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Cochamo",
     "rango_alertas": []
   },
   {
@@ -125,6 +135,10 @@
   },
   {
     "comuna": "Corral",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Coyhaique",
     "rango_alertas": []
   },
   {
@@ -192,6 +206,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Hualaihue",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Hualqui",
     "rango_alertas": []
   },
@@ -201,10 +219,6 @@
   },
   {
     "comuna": "Lago Ranco",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Lago Verde",
     "rango_alertas": []
   },
   {
@@ -293,10 +307,6 @@
   },
   {
     "comuna": "Nueva Imperial",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Ohiggins",
     "rango_alertas": []
   },
   {
@@ -405,6 +415,10 @@
   },
   {
     "comuna": "Rio Bueno",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Rio Ibañez",
     "rango_alertas": []
   },
   {
