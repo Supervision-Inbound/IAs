@@ -33,7 +33,7 @@ PUBLIC_DIR = "public"
 # Aceptar ambos nombres (Coordenadas vs Cordenadas)
 CANDIDATE_COORDS = [
     "data/Comunas_Coordenadas.csv",   # nombre correcto
-    "data/Comunas_Cordenadas.csv",    # nombre en tu captura
+    "data/Comunas_Cordenadas.csv",    # variante en tu repo
 ]
 
 # Modelos / artefactos de riesgos
@@ -203,30 +203,46 @@ def generar_alertas(pred_calls_hourly: pd.DataFrame) -> None:
         "anomalia_precipitacion_max","anomalia_precipitacion_sum","anomalia_precipitacion_pct_comunas_afectadas",
         "anomalia_lluvia_max","anomalia_lluvia_sum","anomalia_lluvia_pct_comunas_afectadas"
     ]
-    agg = agg.reindex(columns=cols, fill_value=0.0).fillna(0.0)
 
-    # 3) Probabilidad de evento alto volumen
-    proba_evento = m.predict(sc.transform(agg.values), verbose=0).flatten()
+    # Asegurar DataFrame con mismas columnas y orden que el scaler/modelo
+    agg = agg.reindex(columns=cols, fill_value=0.0).astype(float)
+
+    # 3) Probabilidad de evento alto volumen (usar DataFrame, no .values)
+    Xs = sc.transform(agg)  # conserva nombres de columnas
+    proba_evento = m.predict(Xs, verbose=0).flatten()
     proba = pd.Series(proba_evento, index=agg.index)
 
     # 4) Construir salida por comuna con uplift vs planner
     salida = []
     zed["score_comuna"] = zed[["z_temperatura","z_precipitacion","z_lluvia"]].clip(lower=0).mean(axis=1)
+
+    # Normalizar el índice del planner por si viene naive/otra zona
+    pred_calls_hourly = pred_calls_hourly.copy()
+    if getattr(pred_calls_hourly.index, "tz", None) is None:
+        pred_calls_hourly.index = pred_calls_hourly.index.tz_localize(TIMEZONE)
+
     for comuna, dfc in zed.groupby("comuna"):
         dfc = dfc.sort_values("ts")
         dfc["alerta"] = dfc["score_comuna"] > ALERT_Z
-        dfc["proba_global"] = proba.reindex(dfc["ts"]).fillna(0.0).values
 
-        max_s = max(dfc["score_comuna"].max(), ALERT_Z)
-        score_norm = (dfc["score_comuna"] / max_s).clip(0,1)
-        planner = pred_calls_hourly.reindex(dfc["ts"]).fillna(method="ffill").fillna(0)["calls"].values
-        extra = np.round(dfc["proba_global"] * UPLIFT_ALPHA * score_norm * planner).astype(int)
-        dfc["extra_calls"] = extra
+        # Alinear proba_global y planner
+        dfc["proba_global"] = proba.reindex(dfc["ts"]).ffill().fillna(0.0).values
+        planner_series = pred_calls_hourly.reindex(dfc["ts"]).ffill().fillna(0.0)["calls"].astype(float).values
 
-        d = dfc[["ts","alerta","extra_calls"]].copy()
+        # score normalizado y robustez numérica
+        max_s = float(max(dfc["score_comuna"].max(), ALERT_Z))
+        score_norm = (dfc["score_comuna"] / max_s).clip(0, 1).astype(float)
+
+        # Uplift robusto: reemplaza NaN/inf por 0, garantiza no-negatividad
+        extra_raw = dfc["proba_global"].astype(float).values * float(UPLIFT_ALPHA) * score_norm.values * planner_series
+        extra_clean = np.nan_to_num(extra_raw, nan=0.0, posinf=0.0, neginf=0.0)
+        extra_clean = np.clip(extra_clean, 0, np.iinfo(np.int32).max)
+        dfc["extra_calls"] = np.round(extra_clean).astype(int)
+
+        # agrupar horas consecutivas en rangos por día
+        d = dfc.loc[dfc["alerta"], ["ts","extra_calls"]].copy()
         d["fecha"] = d["ts"].dt.date
         d["hora"] = d["ts"].dt.hour
-        d = d[d["alerta"]]
 
         rangos = []
         if not d.empty:
@@ -253,4 +269,3 @@ def generar_alertas(pred_calls_hourly: pd.DataFrame) -> None:
     # Ordenar: comunas con alertas primero
     salida.sort(key=lambda x: (len(x["rango_alertas"]) == 0, x["comuna"]))
     write_json(f"{PUBLIC_DIR}/alertas_clima.json", salida)
-
