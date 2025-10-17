@@ -23,27 +23,32 @@ TMO_COLS = "models/training_columns_tmo.json"
 TARGET_CALLS = "recibidos_nacional"
 TARGET_TMO = "tmo_general"
 
-# ventana reciente (opcional, mantiene tus lags/MA estables)
 HIST_WINDOW_DAYS = 90
-
 
 def _load_cols(path: str):
     with open(path, "r") as f:
         return json.load(f)
 
+def _is_holiday(ts, holidays_set: set) -> int:
+    """ts es Timestamp con tz; devuelve 1 si su fecha está en el set de feriados."""
+    if holidays_set is None:
+        return 0
+    try:
+        d = ts.tz_convert(TIMEZONE).date()
+    except Exception:
+        d = ts.date()
+    return 1 if d in holidays_set else 0
 
-def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120):
+def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays_set: set | None = None):
     """
-    Comportamiento alineado al repo funcional:
-    - Parser robusto (features.ensure_ts).
-    - Filtro: dropna(subset=[TARGET_CALLS]) antes de sacar last_ts (SIN cap a hoy).
+    - Parser robusto.
+    - Filtro dropna(subset=[TARGET_CALLS]) (sin cap a hoy).
     - Horizonte = 1h después de last_ts.
-    - Planner iterativo → calls.
-    - TMO horario.
-    - Erlang C → agentes.
-    - Salidas JSON: horaria y diaria.
+    - Planner iterativo usando 'feriados' también en FUTURO.
+    - TMO horario usando 'feriados' futuro.
+    - Erlang C y salidas JSON.
     """
-    # === Cargar artefactos ===
+    # === Artefactos ===
     m_pl = tf.keras.models.load_model(PLANNER_MODEL, compile=False)
     sc_pl = joblib.load(PLANNER_SCALER)
     cols_pl = _load_cols(PLANNER_COLS)
@@ -58,26 +63,23 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120):
     if TARGET_CALLS not in df.columns:
         raise ValueError(f"Falta columna {TARGET_CALLS} en historical_data.csv")
 
-    # Igual que el repo bueno: solo dropna (no exigimos >0)
     df = df[[TARGET_CALLS, TARGET_TMO] if TARGET_TMO in df.columns else [TARGET_CALLS]].copy()
     df = df.dropna(subset=[TARGET_CALLS])
 
-    # forward-fill de auxiliares si existieran en el set
+    # forward-fill de auxiliares comunes (por si existen)
     for aux in ["feriados", "es_dia_de_pago", "tmo_comercial", "tmo_tecnico",
                 "proporcion_comercial", "proporcion_tecnica"]:
         if aux in df.columns:
             df[aux] = df[aux].ffill()
 
-    # Último timestamp válido del histórico (SIN cap a hoy)
     last_ts = df.index.max()
 
-    # (opcional) usar una ventana reciente para lags/MA, sin cambiar last_ts
     start_hist = last_ts - pd.Timedelta(days=HIST_WINDOW_DAYS)
     df_recent = df.loc[df.index >= start_hist].copy()
     if df_recent.empty:
         df_recent = df.copy()
 
-    # Horizonte futuro: arranca 1 hora después de last_ts (como tu repo)
+    # ===== Horizonte futuro =====
     future_ts = pd.date_range(
         last_ts + pd.Timedelta(hours=1),
         periods=horizon_days * 24,
@@ -85,7 +87,8 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120):
         tz=TIMEZONE
     )
 
-    # === Planner iterativo ===
+    # ===== Planner iterativo (con 'feriados' futuro) =====
+    # base dfp con histórico (si tenía 'feriados', lo mantenemos)
     if "feriados" in df_recent.columns:
         dfp = df_recent[[TARGET_CALLS, "feriados"]].copy()
     else:
@@ -95,16 +98,27 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120):
 
     for ts in future_ts:
         tmp = pd.concat([dfp, pd.DataFrame(index=[ts])])
+        # forward fill calls para construir lags/MA
         tmp[TARGET_CALLS] = tmp[TARGET_CALLS].ffill()
+
+        # marcar feriado futuro
+        if "feriados" in tmp.columns:
+            tmp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
+
         tmp = add_lags_mas(tmp, TARGET_CALLS)
         tmp = add_time_parts(tmp)
+
         X = dummies_and_reindex(tmp.tail(1), cols_pl)
         yhat = float(m_pl.predict(sc_pl.transform(X), verbose=0).flatten()[0])
         dfp.loc[ts, TARGET_CALLS] = max(0.0, yhat)
 
+        # persistir bandera (para el siguiente paso si existía en histórico)
+        if "feriados" in dfp.columns:
+            dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
+
     pred_calls = dfp.loc[future_ts, TARGET_CALLS]
 
-    # === TMO por hora ===
+    # ===== TMO por hora (incluye 'feriados' futuro si aplica) =====
     base_tmo = pd.DataFrame(index=future_ts)
     base_tmo[TARGET_CALLS] = pred_calls.values
 
@@ -117,15 +131,16 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120):
     for c in ["proporcion_comercial","proporcion_tecnica","tmo_comercial","tmo_tecnico"]:
         base_tmo[c] = float(last_vals[c].iloc[0]) if c in last_vals.columns else 0.0
 
+    # bandera de feriado hacia el futuro (si el training la usó)
     if "feriados" in df.columns:
-        base_tmo["feriados"] = 0  # futuro
+        base_tmo["feriados"] = [ _is_holiday(ts, holidays_set) for ts in base_tmo.index ]
 
     base_tmo = add_time_parts(base_tmo)
     Xt = dummies_and_reindex(base_tmo, cols_tmo)
     y_tmo = m_tmo.predict(sc_tmo.transform(Xt), verbose=0).flatten()
     y_tmo = np.maximum(0, y_tmo)
 
-    # === Erlang por hora ===
+    # ===== Erlang por hora =====
     df_hourly = pd.DataFrame(index=future_ts)
     df_hourly["calls"] = np.round(pred_calls).astype(int)
     df_hourly["tmo_s"] = np.round(y_tmo).astype(int)
@@ -137,7 +152,7 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120):
 
     df_hourly["agents_sched"] = df_hourly["agents_prod"].apply(schedule_agents)
 
-    # === Salidas JSON ===
+    # ===== Salidas =====
     write_hourly_json(f"{PUBLIC_DIR}/prediccion_horaria.json",
                       df_hourly, "calls", "tmo_s", "agents_sched")
     write_daily_json(f"{PUBLIC_DIR}/prediccion_diaria.json",
