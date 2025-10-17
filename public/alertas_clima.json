@@ -1,16 +1,5 @@
 [
   {
-    "comuna": "Calbuco",
-    "rango_alertas": [
-      {
-        "fecha": "2025-10-20",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
     "comuna": "Hualaihue",
     "rango_alertas": [
       {
@@ -22,18 +11,7 @@
     ]
   },
   {
-    "comuna": "Puerto Montt",
-    "rango_alertas": [
-      {
-        "fecha": "2025-10-20",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Puerto Varas",
+    "comuna": "Ohiggins",
     "rango_alertas": [
       {
         "fecha": "2025-10-20",
@@ -69,6 +47,10 @@
   },
   {
     "comuna": "Cabrero",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Calbuco",
     "rango_alertas": []
   },
   {
@@ -296,10 +278,6 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Ohiggins",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Osorno",
     "rango_alertas": []
   },
@@ -344,7 +322,15 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Puerto Montt",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Puerto Octay",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Puerto Varas",
     "rango_alertas": []
   },
   {
