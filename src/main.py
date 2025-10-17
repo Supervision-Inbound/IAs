@@ -15,7 +15,7 @@ TARGET_TMO_NEW = "tmo_general"
 
 # ---- helpers robustos (alineados con la inferencia original) ----
 def smart_read_historical(path: str) -> pd.DataFrame:
-    """Lee CSV con autodetección de separador (“;”, “,”) y fallback como en la inferencia original."""
+    """Lee CSV con autodetección de separador (“;”, “,”) y fallback."""
     # 1) intento default (coma)
     try:
         df = pd.read_csv(path)
@@ -77,15 +77,13 @@ def main(horizonte_dias: int):
     dfh = smart_read_historical(DATA_FILE)
     dfh.columns = dfh.columns.str.strip()
 
-    # Mapear columnas antiguas a las nuevas (como en la inferencia original)
-    # Llamadas: 'recibidos' -> 'recibidos_nacional' si corresponde
+    # Mapear columnas antiguas a las nuevas
     if TARGET_CALLS_NEW not in dfh.columns:
         for cand in ["recibidos_nacional", "recibidos", "total_llamadas", "llamadas"]:
             if cand in dfh.columns:
                 dfh = dfh.rename(columns={cand: TARGET_CALLS_NEW})
                 break
 
-    # TMO: si no existe 'tmo_general', intentar crear desde 'tmo (segundos)' u otras variantes
     if TARGET_TMO_NEW not in dfh.columns:
         tmo_source = None
         for cand in ["tmo (segundos)", "tmo_seg", "tmo", "tmo_general"]:
@@ -101,7 +99,7 @@ def main(horizonte_dias: int):
     print("Cols historical_data.csv:", list(dfh.columns))
     dfh = ensure_ts(dfh)
 
-    # 3) Derivar features calendario usados en los modelos
+    # 3) Derivar features de calendario usados en los modelos
     holidays_set = load_holidays(HOLIDAYS_FILE)
     if "feriados" not in dfh.columns:
         dfh["feriados"] = mark_holidays_index(dfh.index, holidays_set).values
@@ -109,10 +107,14 @@ def main(horizonte_dias: int):
     if "es_dia_de_pago" not in dfh.columns:
         dfh["es_dia_de_pago"] = add_es_dia_de_pago(dfh).values
 
-    # 👇 CLAVE como en la inferencia original: quedarse solo con filas con llamadas válidas
-    dfh = dfh.dropna(subset=[TARGET_CALLS_NEW])
-    # (Opcional) si hay "plantillas" futuras en 0 y quieres ignorarlas:
-    # dfh = dfh[dfh[TARGET_CALLS_NEW] > 0]
+    # 👇 CLAVE: como en el original, quedarnos SOLO con filas con llamadas válidas
+    # (aquí vamos un paso más: >0 para evitar filas “plantilla” a futuro con 0)
+    dfh[TARGET_CALLS_NEW] = pd.to_numeric(dfh[TARGET_CALLS_NEW], errors="coerce")
+    mask_valid = dfh[TARGET_CALLS_NEW].notna() & (dfh[TARGET_CALLS_NEW] > 0)
+    if not mask_valid.any():
+        # fallback al comportamiento del original (solo dropna)
+        mask_valid = dfh[TARGET_CALLS_NEW].notna()
+    dfh = dfh.loc[mask_valid]
 
     # 4) Forward-fill básico de auxiliares
     for c in [TARGET_TMO_NEW, "feriados", "es_dia_de_pago"]:
@@ -120,7 +122,8 @@ def main(horizonte_dias: int):
             dfh[c] = dfh[c].ffill()
 
     # Debug útil: última fecha real que se usará
-    print("Última fecha con llamadas válidas:", dfh.index.max())
+    last_used = dfh.index.max()
+    print("Última fecha con llamadas válidas (>0 preferente):", last_used)
     print("Últimas 5 filas del histórico usado:")
     try:
         print(dfh[[TARGET_CALLS_NEW]].tail(5))
