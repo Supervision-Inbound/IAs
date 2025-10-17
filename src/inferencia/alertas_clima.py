@@ -4,13 +4,37 @@ import numpy as np
 import pandas as pd
 import joblib, tensorflow as tf
 import requests, requests_cache
-from retry_requests import retry
+
+# Fallback de retry: usa retry-requests si está disponible; si no, urllib3 Retry
+try:
+    from retry_requests import retry  # pip install retry-requests
+    def _wrap_retry(session, retries=3, backoff_factor=1.5):
+        return retry(session, retries=retries, backoff_factor=backoff_factor)
+except Exception:
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    def _wrap_retry(session, retries=3, backoff_factor=1.5):
+        r = Retry(
+            total=retries,
+            backoff_factor=backoff_factor,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=False
+        )
+        session.mount("https://", HTTPAdapter(max_retries=r))
+        session.mount("http://", HTTPAdapter(max_retries=r))
+        return session
+
 from .features import add_time_parts
 from .utils_io import write_json
 
 TIMEZONE = "America/Santiago"
 PUBLIC_DIR = "public"
-COORDS_CSV = "data/Comunas_Coordenadas.csv"
+
+# Aceptar ambos nombres (Coordenadas vs Cordenadas)
+CANDIDATE_COORDS = [
+    "data/Comunas_Coordenadas.csv",   # nombre correcto
+    "data/Comunas_Cordenadas.csv",    # nombre en tu captura
+]
 
 # Modelos / artefactos de riesgos
 RIESGOS_MODEL = "models/modelo_riesgos.keras"
@@ -24,64 +48,110 @@ UNITS = {"temperature_unit":"celsius","precipitation_unit":"mm"}
 
 FORECAST_DAYS = 8
 ALERT_Z = 2.5            # umbral z por comuna-hora
-UPLIFT_ALPHA = 0.25      # factor de conversión prob_evento → % extra
+UPLIFT_ALPHA = 0.25      # factor de conversión proba_evento → % extra
 
-def _load_cols(path): 
-    with open(path,"r") as f: return json.load(f)
+def _load_cols(path):
+    with open(path,"r") as f:
+        return json.load(f)
 
 def _client():
     sess = requests_cache.CachedSession(".openmeteo_cache", expire_after=3600)
-    return retry(sess, retries=3, backoff_factor=1.5)
+    return _wrap_retry(sess, retries=3, backoff_factor=1.5)
 
-def _read_coords(path):
-    df = pd.read_csv(path)
-    # columnas laxas
-    def pick(cols, cand):
-        m = {c.lower().strip(): c for c in cols}
-        for k in cand:
-            if k in m: return m[k]
-        return None
-    c = pick(df.columns, ["comuna","municipio","localidad","ciudad","name","nombre"])
-    la = pick(df.columns, ["lat","latitude","latitud","y"])
-    lo = pick(df.columns, ["lon","lng","long","longitude","longitud","x"])
-    if not c or not la or not lo:
-        raise ValueError(f"CSV coords debe contener comuna/lat/lon. Tiene: {list(df.columns)}")
-    df = df.rename(columns={c:"comuna", la:"lat", lo:"lon"})
-    for k in ["lat","lon"]:
-        if df[k].dtype == object:
-            df[k] = df[k].astype(str).str.replace(",",".",regex=False)
+def _resolve_coords_path() -> str | None:
+    for p in CANDIDATE_COORDS:
+        if os.path.exists(p):
+            return p
+    return None
+
+def _read_csv_smart(path: str) -> pd.DataFrame:
+    # Intenta varios encodings y separadores, como en tu inferencia antigua
+    encodings = ("utf-8", "utf-8-sig", "latin1", "cp1252")
+    seps = [";", ",", "\t", "|"]
+    last_err = None
+    for enc in encodings:
+        try:
+            # intento auto
+            df = pd.read_csv(path, encoding=enc, engine="python")
+            if df.shape[1] > 1:
+                return df
+        except Exception as e:
+            last_err = e
+        # intentos forzando separador
+        for sep in seps:
+            try:
+                df = pd.read_csv(path, encoding=enc, sep=sep)
+                if df.shape[1] > 1:
+                    return df
+            except Exception as e2:
+                last_err = e2
+                continue
+    if last_err:
+        raise last_err
+    raise ValueError(f"No pude leer {path} con encodings/separadores estándar.")
+
+def _pick_col(cols, candidates):
+    m = {c.lower().strip(): c for c in cols}
+    for cand in candidates:
+        key = cand.lower().strip()
+        for k, orig in m.items():
+            if key == k or key in k:
+                return orig
+    return None
+
+def _read_coords() -> pd.DataFrame:
+    path = _resolve_coords_path()
+    if not path:
+        return pd.DataFrame()  # handled upstream (no romper)
+    df = _read_csv_smart(path)
+    df.columns = [c.strip() for c in df.columns]
+
+    comuna_col = _pick_col(df.columns, ["comuna","municipio","localidad","ciudad","name","nombre"])
+    lat_col    = _pick_col(df.columns, ["lat","latitude","latitud","y"])
+    lon_col    = _pick_col(df.columns, ["lon","lng","long","longitude","longitud","x"])
+
+    if not comuna_col or not lat_col or not lon_col:
+        raise ValueError(f"CSV de coordenadas debe tener comuna/lat/lon. Columnas: {list(df.columns)}")
+
+    df = df.rename(columns={comuna_col:"comuna", lat_col:"lat", lon_col:"lon"}).copy()
+    for c in ["lat","lon"]:
+        if df[c].dtype == object:
+            df[c] = df[c].astype(str).str.replace(",", ".", regex=False).str.strip()
     df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
     df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
-    df = df.dropna(subset=["lat","lon"]).drop_duplicates("comuna")
-    return df.reset_index(drop=True)
+    df = df.dropna(subset=["lat","lon"])
+    df = df[(df["lat"].between(-90, 90)) & (df["lon"].between(-180, 180))]
+    df = df.drop_duplicates(subset=["comuna"]).reset_index(drop=True)
+    return df
 
 def _fetch_forecast(sess, lat, lon):
-    params = dict(latitude=float(lat), longitude=float(lon),
-                  hourly=",".join(HOURLY_VARS),
-                  forecast_days=int(FORECAST_DAYS),
-                  timezone=TIMEZONE, **UNITS)
-    r = sess.get(OPEN_METEO_URL, params=params); r.raise_for_status()
+    params = dict(
+        latitude=float(lat), longitude=float(lon),
+        hourly=",".join(HOURLY_VARS),
+        forecast_days=int(FORECAST_DAYS),
+        timezone=TIMEZONE, **UNITS
+    )
+    r = sess.get(OPEN_METEO_URL, params=params)
+    r.raise_for_status()
     js = r.json()
     times = pd.to_datetime(js["hourly"]["time"])
     df = pd.DataFrame({"ts": times})
-    for v in HOURLY_VARS: df[v] = js["hourly"].get(v, np.nan)
+    for v in HOURLY_VARS:
+        df[v] = js["hourly"].get(v, np.nan)
     return df
 
 def _anomalias_vs_baseline(df_clima, baselines):
-    # baselines: groupby(['comuna','dow','hour']) ['temperatura','precipitacion','lluvia'] median/std
+    # baselines con columnas: metric_median, metric_std por (comuna,dow,hour)
     d = add_time_parts(df_clima.set_index("ts"))
     d = d.reset_index()
-    mcols = ["temperatura","precipitacion","lluvia"]
-    # renombrar entradas a estándar
-    rename = {"temperature_2m":"temperatura", "rain":"lluvia"}
-    d = d.rename(columns=rename)
-    for metric in mcols:
-        if metric not in d.columns: d[metric] = np.nan
-    # join a baseline
+    # normalizar nombres de clima
+    d = d.rename(columns={"temperature_2m":"temperatura", "rain":"lluvia"})
+    for metric in ["temperatura","precipitacion","lluvia"]:
+        if metric not in d.columns:
+            d[metric] = np.nan
     b = baselines.copy()
-    # columnas del baseline vienen como metric_median, metric_std
     d = d.merge(b, left_on=["comuna","dow","hour"], right_on=["comuna_","dow_","hour_"], how="left")
-    for metric in mcols:
+    for metric in ["temperatura","precipitacion","lluvia"]:
         med = f"{metric}_median"; std = f"{metric}_std"
         if med in d.columns and std in d.columns:
             d[f"z_{metric}"] = (d[metric] - d[med]) / (d[std] + 1e-6)
@@ -91,18 +161,25 @@ def _anomalias_vs_baseline(df_clima, baselines):
 
 def generar_alertas(pred_calls_hourly: pd.DataFrame) -> None:
     """
-    pred_calls_hourly: DataFrame index ts con columna 'calls' (predicción planner) para asignar uplift.
+    pred_calls_hourly: DataFrame index=ts con columna 'calls' (predicción planner) para calcular uplift adicional.
+    Si no hay CSV de coordenadas, genera alertas_clima.json vacío y sale sin error.
     """
-    # Cargar artefactos de riesgos
+    # Si no hay coords, escribe salida vacía y termina
+    coords = _read_coords()
+    if coords.empty:
+        write_json(f"{PUBLIC_DIR}/alertas_clima.json", [])
+        print("⚠️ No se encontró data/Comunas_Coordenadas.csv ni data/Comunas_Cordenadas.csv. Se generó alertas_clima.json vacío.")
+        return
+
+    # Cargar artefactos
     m = tf.keras.models.load_model(RIESGOS_MODEL, compile=False)
     sc = joblib.load(RIESGOS_SCALER)
     cols = _load_cols(RIESGOS_COLS)
     baselines = joblib.load(CLIMA_BASELINES)
 
-    coords = _read_coords(COORDS_CSV)
     sess = _client()
 
-    # 1) Descargar clima por comuna y calcular z-scores
+    # 1) Descargar clima por comuna
     registros = []
     for _, r in coords.iterrows():
         comuna, lat, lon = r["comuna"], r["lat"], r["lon"]
@@ -113,9 +190,8 @@ def generar_alertas(pred_calls_hourly: pd.DataFrame) -> None:
     clima = pd.concat(registros, ignore_index=True)
     clima["ts"] = pd.to_datetime(clima["ts"]).dt.tz_localize(TIMEZONE)
 
+    # 2) Z-scores vs baseline y agregados a nivel ts (matching training columns)
     zed = _anomalias_vs_baseline(clima, baselines)
-
-    # 2) Features agregadas (matching training_columns_riesgos)
     n_comunas = coords["comuna"].nunique()
     agg = zed.groupby("ts").agg({
         "z_temperatura":["max","sum", lambda x: (x>ALERT_Z).sum()/max(1,n_comunas)],
@@ -128,28 +204,30 @@ def generar_alertas(pred_calls_hourly: pd.DataFrame) -> None:
         "anomalia_lluvia_max","anomalia_lluvia_sum","anomalia_lluvia_pct_comunas_afectadas"
     ]
     agg = agg.reindex(columns=cols, fill_value=0.0).fillna(0.0)
+
+    # 3) Probabilidad de evento alto volumen
     proba_evento = m.predict(sc.transform(agg.values), verbose=0).flatten()
     proba = pd.Series(proba_evento, index=agg.index)
 
-    # 3) Para cada comuna, horas con alerta por z-score y uplift vs planner
+    # 4) Construir salida por comuna con uplift vs planner
     salida = []
     zed["score_comuna"] = zed[["z_temperatura","z_precipitacion","z_lluvia"]].clip(lower=0).mean(axis=1)
     for comuna, dfc in zed.groupby("comuna"):
         dfc = dfc.sort_values("ts")
         dfc["alerta"] = dfc["score_comuna"] > ALERT_Z
         dfc["proba_global"] = proba.reindex(dfc["ts"]).fillna(0.0).values
-        # uplift = proba_global * alpha * score_norm * planner_calls
+
         max_s = max(dfc["score_comuna"].max(), ALERT_Z)
         score_norm = (dfc["score_comuna"] / max_s).clip(0,1)
         planner = pred_calls_hourly.reindex(dfc["ts"]).fillna(method="ffill").fillna(0)["calls"].values
         extra = np.round(dfc["proba_global"] * UPLIFT_ALPHA * score_norm * planner).astype(int)
         dfc["extra_calls"] = extra
 
-        # agrupar en rangos por día
         d = dfc[["ts","alerta","extra_calls"]].copy()
         d["fecha"] = d["ts"].dt.date
         d["hora"] = d["ts"].dt.hour
         d = d[d["alerta"]]
+
         rangos = []
         if not d.empty:
             cur_date, h0, h1, vals = None, None, None, []
@@ -169,9 +247,10 @@ def generar_alertas(pred_calls_hourly: pd.DataFrame) -> None:
                 "fecha": str(cur_date), "hora_inicio": h0, "hora_fin": h1,
                 "impacto_llamadas_adicionales": int(max(sum(vals), 0))
             })
+
         salida.append({"comuna": comuna, "rango_alertas": rangos})
 
-    # Ordenar: con alertas primero
+    # Ordenar: comunas con alertas primero
     salida.sort(key=lambda x: (len(x["rango_alertas"]) == 0, x["comuna"]))
     write_json(f"{PUBLIC_DIR}/alertas_clima.json", salida)
 
