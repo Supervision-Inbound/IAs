@@ -6,7 +6,6 @@ import os
 
 from src.inferencia.inferencia_core import forecast_120d
 from src.inferencia.features import ensure_ts
-from datetime import date
 
 DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
@@ -14,9 +13,10 @@ HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
 TARGET_CALLS_NEW = "recibidos_nacional"
 TARGET_TMO_NEW = "tmo_general"
 
-# ---- helpers robustos (igual espíritu que tu inferencia original) ----
+# ---- helpers robustos (alineados con la inferencia original) ----
 def smart_read_historical(path: str) -> pd.DataFrame:
-    # 1) intento default
+    """Lee CSV con autodetección de separador (“;”, “,”) y fallback como en la inferencia original."""
+    # 1) intento default (coma)
     try:
         df = pd.read_csv(path)
         if df.shape[1] > 1:
@@ -24,13 +24,15 @@ def smart_read_historical(path: str) -> pd.DataFrame:
     except Exception:
         pass
     # 2) intento con ';'
-    df = pd.read_csv(path, delimiter=';')
-    return df
+    try:
+        df = pd.read_csv(path, delimiter=';')
+        return df
+    except Exception as e:
+        raise FileNotFoundError(f"No pude leer {path}: {e}")
 
 def parse_tmo_to_seconds(val):
     if pd.isna(val): return np.nan
     s = str(val).strip().replace(",", ".")
-    # si ya es número simple
     if s.replace(".", "", 1).isdigit():
         try: return float(s)
         except: return np.nan
@@ -46,11 +48,10 @@ def load_holidays(csv_path: str) -> set:
     if not os.path.exists(csv_path):
         return set()
     fer = pd.read_csv(csv_path)
-    # Columnas tolerantes
     cols_map = {c.lower().strip(): c for c in fer.columns}
     fecha_col = None
     for cand in ["fecha", "date", "dia", "día"]:
-        if cand in cols_map: 
+        if cand in cols_map:
             fecha_col = cols_map[cand]
             break
     if not fecha_col:
@@ -72,14 +73,13 @@ def add_es_dia_de_pago(df_idx: pd.DataFrame) -> pd.Series:
 def main(horizonte_dias: int):
     os.makedirs("public", exist_ok=True)
 
-    # 1) Leer histórico con autodetección de ';' y normalizar columnas
+    # 1) Leer histórico con autodetección y normalizar columnas
     dfh = smart_read_historical(DATA_FILE)
     dfh.columns = dfh.columns.str.strip()
 
-    # Mapear columnas antiguas a las nuevas
+    # Mapear columnas antiguas a las nuevas (como en la inferencia original)
     # Llamadas: 'recibidos' -> 'recibidos_nacional' si corresponde
     if TARGET_CALLS_NEW not in dfh.columns:
-        # buscar variantes comunes
         for cand in ["recibidos_nacional", "recibidos", "total_llamadas", "llamadas"]:
             if cand in dfh.columns:
                 dfh = dfh.rename(columns={cand: TARGET_CALLS_NEW})
@@ -95,33 +95,39 @@ def main(horizonte_dias: int):
         if tmo_source:
             dfh[TARGET_TMO_NEW] = dfh[tmo_source].apply(parse_tmo_to_seconds)
         else:
-            # si no hay fuente, al menos crea columna vacía (se imputará más adelante)
-            dfh[TARGET_TMO_NEW] = np.nan
+            dfh[TARGET_TMO_NEW] = np.nan  # se imputará más adelante si hace falta
 
     # 2) Asegurar índice temporal (tolerante a 'fecha'+'hora' o 'ts')
     print("Cols historical_data.csv:", list(dfh.columns))
     dfh = ensure_ts(dfh)
 
-    # 3) Añadir/derivar columnas de calendario que usan los modelos
-    # feriados (desde CSV de feriados) y es_dia_de_pago
+    # 3) Derivar features calendario usados en los modelos
     holidays_set = load_holidays(HOLIDAYS_FILE)
     if "feriados" not in dfh.columns:
         dfh["feriados"] = mark_holidays_index(dfh.index, holidays_set).values
-    # si existe 'feriados' no-numérico, normalízalo a 0/1
     dfh["feriados"] = pd.to_numeric(dfh["feriados"], errors="coerce").fillna(0).astype(int)
-
     if "es_dia_de_pago" not in dfh.columns:
         dfh["es_dia_de_pago"] = add_es_dia_de_pago(dfh).values
 
-    # 4) Validaciones mínimas
-    if TARGET_CALLS_NEW not in dfh.columns:
-        raise ValueError(f"No encuentro la columna de llamadas '{TARGET_CALLS_NEW}' en historical_data.csv")
-    # forward-fill básico (por si hay huecos en auxiliares)
+    # 👇 CLAVE como en la inferencia original: quedarse solo con filas con llamadas válidas
+    dfh = dfh.dropna(subset=[TARGET_CALLS_NEW])
+    # (Opcional) si hay "plantillas" futuras en 0 y quieres ignorarlas:
+    # dfh = dfh[dfh[TARGET_CALLS_NEW] > 0]
+
+    # 4) Forward-fill básico de auxiliares
     for c in [TARGET_TMO_NEW, "feriados", "es_dia_de_pago"]:
         if c in dfh.columns:
             dfh[c] = dfh[c].ffill()
 
-    # 5) Ejecutar orquestador
+    # Debug útil: última fecha real que se usará
+    print("Última fecha con llamadas válidas:", dfh.index.max())
+    print("Últimas 5 filas del histórico usado:")
+    try:
+        print(dfh[[TARGET_CALLS_NEW]].tail(5))
+    except Exception:
+        print(dfh.tail(5))
+
+    # 5) Ejecutar orquestador (planner + tmo + erlang) → genera JSON horario y diario
     df_hourly = forecast_120d(dfh.reset_index(), horizon_days=horizonte_dias)
 
     # 6) Generar alertas climáticas usando la curva del planner para calcular uplift
