@@ -26,6 +26,11 @@ TARGET_TMO = "tmo_general"
 # Ventana reciente para lags/MA (no afecta last_ts)
 HIST_WINDOW_DAYS = 90
 
+# ======= NUEVO: Guardrail Outliers (config) =======
+ENABLE_OUTLIER_CAP = True   # <- ponlo en False si quieres desactivarlo
+K_WEEKDAY = 6.0             # techos +K*MAD en lun-vie
+K_WEEKEND = 7.0             # techos +K*MAD en sáb-dom
+
 
 def _load_cols(path: str):
     with open(path, "r") as f:
@@ -101,7 +106,6 @@ def compute_holiday_factors(df_hist, holidays_set,
     factors_tmo_by_hour   = {h: float(np.clip(v, 0.70, 1.50)) for h, v in factors_tmo_by_hour.items()}
 
     # ---- NEW: factores del DÍA POST-FERIADO por hora ----
-    # día post-feriado = hoy no es feriado y ayer sí lo fue
     dfh = dfh.copy()
     dfh["is_post_hol"] = (~dfh["is_holiday"]) & (dfh["is_holiday"].shift(1).fillna(False))
     med_post_calls = dfh[dfh["is_post_hol"]].groupby("hour")[col_calls].median()
@@ -144,7 +148,6 @@ def apply_post_holiday_adjustment(df_future, holidays_set, post_calls_by_hour,
     Ajuste para el DÍA POST-FERIADO: si el día anterior fue feriado, aplicar factor por hora.
     """
     idx = df_future.index
-    # fecha del día anterior en TZ
     prev_idx = (idx - pd.Timedelta(days=1))
     try:
         prev_dates = prev_idx.tz_convert(TIMEZONE).date
@@ -167,6 +170,68 @@ def apply_post_holiday_adjustment(df_future, holidays_set, post_calls_by_hour,
     return out
 # ===========================================================
 
+# ========= NUEVO: Guardrail de outliers por (dow,hour) ======
+def _baseline_median_mad(df_hist, col=TARGET_CALLS):
+    """
+    Baseline robusto por (dow,hour): mediana y MAD.
+    """
+    d = add_time_parts(df_hist[[col]].copy())
+    g = d.groupby(["dow", "hour"])[col]
+    base = g.median().rename("med").to_frame()
+    mad = g.apply(lambda x: np.median(np.abs(x - np.median(x)))).rename("mad")
+    base = base.join(mad)
+    # fallback si alguna combinación no tiene MAD
+    if base["mad"].isna().all():
+        base["mad"] = 0
+    base["mad"] = base["mad"].replace(0, base["mad"].median() if not np.isnan(base["mad"].median()) else 1.0)
+    return base.reset_index()  # columnas: dow, hour, med, mad
+
+
+def apply_outlier_cap(df_future, base_median_mad, holidays_set,
+                      col_calls_future="calls",
+                      k_weekday=K_WEEKDAY, k_weekend=K_WEEKEND):
+    """
+    Capa picos: pred <= mediana + K*MAD (K diferente en finde).
+    No actúa en feriados ni post-feriados.
+    """
+    if df_future.empty:
+        return df_future
+
+    d = add_time_parts(df_future.copy())
+    # flags feriado/post-feriado
+    prev_idx = (d.index - pd.Timedelta(days=1))
+    try:
+        curr_dates = d.index.tz_convert(TIMEZONE).date
+        prev_dates = prev_idx.tz_convert(TIMEZONE).date
+    except Exception:
+        curr_dates = d.index.date
+        prev_dates = prev_idx.date
+    is_hol = pd.Series([dt in holidays_set for dt in curr_dates], index=d.index, dtype=bool) if holidays_set else pd.Series(False, index=d.index)
+    is_prev_hol = pd.Series([dt in holidays_set for dt in prev_dates], index=d.index, dtype=bool) if holidays_set else pd.Series(False, index=d.index)
+    is_post_hol = (~is_hol) & (is_prev_hol)
+
+    # merge (dow,hour) -> med, mad
+    base = base_median_mad.copy()
+    capped = d.merge(base, on=["dow","hour"], how="left")
+    capped["mad"] = capped["mad"].fillna(capped["mad"].median() if not np.isnan(capped["mad"].median()) else 1.0)
+    capped["med"] = capped["med"].fillna(capped["med"].median() if not np.isnan(capped["med"].median()) else 0.0)
+
+    # K por día de semana
+    is_weekend = capped["dow"].isin([5,6]).values
+    K = np.where(is_weekend, k_weekend, k_weekday).astype(float)
+
+    # techo
+    upper = capped["med"].values + K * capped["mad"].values
+
+    # máscara: solo cuando NO es feriado ni post-feriado
+    mask = (~is_hol.values) & (~is_post_hol.values) & (capped[col_calls_future].astype(float).values > upper)
+    capped.loc[mask, col_calls_future] = np.round(upper[mask]).astype(int)
+
+    out = df_future.copy()
+    out[col_calls_future] = capped[col_calls_future].astype(int).values
+    return out
+# ===========================================================
+
 
 def _is_holiday(ts, holidays_set: set) -> int:
     if not holidays_set:
@@ -186,6 +251,7 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
     - Planner iterativo con 'feriados' también en FUTURO.
     - TMO horario (con 'feriados' futuro si aplica).
     - Ajuste post-forecast por FERIADOS + POST-FERIADOS.
+    - (Opcional) CAP de OUTLIERS por (dow,hour) con mediana+MAD.
     - Erlang C y salidas JSON.
     """
     # === Artefactos ===
@@ -297,6 +363,15 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
             col_calls_future="calls"
         )
 
+    # ===== (OPCIONAL) CAP de OUTLIERS =====
+    if ENABLE_OUTLIER_CAP:
+        base_mad = _baseline_median_mad(df, col=TARGET_CALLS)
+        df_hourly = apply_outlier_cap(
+            df_hourly, base_mad, holidays_set,
+            col_calls_future="calls",
+            k_weekday=K_WEEKDAY, k_weekend=K_WEEKEND
+        )
+
     # ===== Erlang por hora =====
     df_hourly["agents_prod"] = 0
     for ts in df_hourly.index:
@@ -311,4 +386,5 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
                      df_hourly, "calls", "tmo_s")
 
     return df_hourly
+
 
