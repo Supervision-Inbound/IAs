@@ -68,4 +68,3 @@ def dummies_and_reindex_with_scaler_means(df_row, training_cols, scaler):
 
     d = d.reindex(columns=training_cols, fill_value=0.0)
     return d.fillna(0.0)
-
