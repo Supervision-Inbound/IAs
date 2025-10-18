@@ -154,3 +154,4 @@ def load_historico_tmo(path="data/TMO_HISTORICO.csv") -> pd.DataFrame:
 
     return out
 
+
