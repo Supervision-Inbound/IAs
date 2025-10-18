@@ -1,6 +1,5 @@
 # src/main.py
-import argparse
-import os
+import argparse, os, json
 import numpy as np
 import pandas as pd
 
@@ -10,17 +9,16 @@ from src.data.loader_tmo import load_historico_tmo
 
 DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
-TMO_HIST_FILE = "data/HISTORICO_TMO.csv"
+TMO_HIST_FILE = "data/TMO_HISTORICO.csv"   # <- FIX: este es el nombre real en tu repo
+TZ = "America/Santiago"
 
 TARGET_CALLS_NEW = "recibidos_nacional"
 TARGET_TMO_NEW = "tmo_general"
-TZ = "America/Santiago"
 
 def smart_read_historical(path: str) -> pd.DataFrame:
     try:
         df = pd.read_csv(path, low_memory=False)
-        if df.shape[1] > 1:
-            return df
+        if df.shape[1] > 1: return df
     except Exception:
         pass
     return pd.read_csv(path, delimiter=';', low_memory=False)
@@ -44,17 +42,16 @@ def load_holidays(csv_path: str) -> set:
     fer = pd.read_csv(csv_path)
     cols_map = {c.lower().strip(): c for c in fer.columns}
     fecha_col = None
-    for cand in ["fecha", "date", "dia", "día"]:
-        if cand in cols_map:
-            fecha_col = cols_map[cand]; break
+    for cand in ["fecha","date","dia","día"]:
+        if cand in cols_map: fecha_col = cols_map[cand]; break
     if not fecha_col: return set()
     fechas = pd.to_datetime(fer[fecha_col].astype(str), dayfirst=True, errors="coerce").dropna().dt.date
     return set(fechas)
 
-def mark_holidays_index(dt_index, holidays_set: set) -> pd.Series:
-    tz = getattr(dt_index, "tz", None)
-    idx_dates = dt_index.tz_convert(TZ).date if tz is not None else dt_index.date
-    return pd.Series([d in holidays_set for d in idx_dates], index=dt_index, dtype=int, name="feriados")
+def mark_holidays_index(idx, holidays_set: set) -> pd.Series:
+    tz = getattr(idx, "tz", None)
+    idx_dates = idx.tz_convert(TZ).date if tz is not None else idx.date
+    return pd.Series([d in holidays_set for d in idx_dates], index=idx, dtype=int, name="feriados")
 
 def add_es_dia_de_pago(df_idx: pd.DataFrame) -> pd.Series:
     dias = [1,2,15,16,29,30,31]
@@ -63,36 +60,47 @@ def add_es_dia_de_pago(df_idx: pd.DataFrame) -> pd.Series:
 def main(horizonte_dias: int):
     os.makedirs("public", exist_ok=True)
 
-    # 1) Leer histórico principal (llamadas + tmo_general si existe)
+    # 1) Leer histórico base
     dfh = smart_read_historical(DATA_FILE)
     dfh.columns = dfh.columns.str.strip()
 
     if TARGET_CALLS_NEW not in dfh.columns:
-        for cand in ["recibidos_nacional", "recibidos", "total_llamadas", "llamadas"]:
+        for cand in ["recibidos_nacional","recibidos","total_llamadas","llamadas"]:
             if cand in dfh.columns:
-                dfh = dfh.rename(columns={cand: TARGET_CALLS_NEW})
-                break
+                dfh = dfh.rename(columns={cand: TARGET_CALLS_NEW}); break
 
     if TARGET_TMO_NEW not in dfh.columns:
-        tmo_source = None
-        for cand in ["tmo (segundos)", "tmo_seg", "tmo", "tmo_general"]:
+        for cand in ["tmo (segundos)","tmo_seg","tmo","aht"]:
             if cand in dfh.columns:
-                tmo_source = cand; break
-        if tmo_source:
-            dfh[TARGET_TMO_NEW] = dfh[tmo_source].apply(parse_tmo_to_seconds)
+                dfh[TARGET_TMO_NEW] = dfh[cand].apply(parse_tmo_to_seconds); break
 
     dfh = ensure_ts(dfh)
 
-    # 2) Fusionar HISTORICO_TMO.csv si existe (alineado por ts)
+    # 2) Merge con TMO_HISTORICO.csv (por hora)
+    used_tmo_hist = False
     if os.path.exists(TMO_HIST_FILE):
         df_tmo = load_historico_tmo(TMO_HIST_FILE)  # index ts
-        # left-join sobre dfh (mantiene las horas que usa el planner)
+        try: df_tmo.index = df_tmo.index.tz_convert(TZ)
+        except: pass
+        pre_cols = set(dfh.columns)
         dfh = dfh.join(df_tmo, how="left")
-        # si tmo_general llegó desde TMO_HIST, úsalo como autoridad
-        if "tmo_general" in dfh.columns:
-            dfh[TARGET_TMO_NEW] = dfh["tmo_general"].combine_first(dfh[TARGET_TMO_NEW])
+        used_tmo_hist = True
+        if "tmo_general" in dfh.columns and dfh["tmo_general"].notna().any():
+            dfh["tmo_general"] = dfh["tmo_general"].ffill()
 
-    # 3) Derivar calendario para el histórico
+        # Debug dumps
+        debug = {
+            "used_tmo_hist": used_tmo_hist,
+            "tmo_hist_rows": int(df_tmo.shape[0]),
+            "dfh_rows": int(dfh.shape[0]),
+            "new_cols": sorted(list(set(dfh.columns) - pre_cols))[:50],
+            "last_non_na_tmo_general": float(dfh["tmo_general"].dropna().iloc[-1]) if "tmo_general" in dfh.columns and dfh["tmo_general"].notna().any() else None
+        }
+        with open("public/debug_tmo_merge.json","w",encoding="utf-8") as f:
+            json.dump(debug, f, ensure_ascii=False, indent=2)
+        dfh.tail(48).to_csv("public/debug_tmo_tail48.csv")
+
+    # 3) Calendario
     holidays_set = load_holidays(HOLIDAYS_FILE)
     if "feriados" not in dfh.columns:
         dfh["feriados"] = mark_holidays_index(dfh.index, holidays_set).values
@@ -100,22 +108,18 @@ def main(horizonte_dias: int):
     if "es_dia_de_pago" not in dfh.columns:
         dfh["es_dia_de_pago"] = add_es_dia_de_pago(dfh).values
 
-    # 4) ffill de columnas clave para evitar NaN en el borde
+    # 4) FFill columnas clave
     for c in [TARGET_TMO_NEW, "feriados", "es_dia_de_pago",
-              "proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
+              "proporcion_comercial","proporcion_tecnica","tmo_comercial","tmo_tecnico"]:
         if c in dfh.columns:
             dfh[c] = dfh[c].ffill()
 
-    # 5) Forecast (le pasamos feriados para marcar el horizonte)
+    # 5) Forecast
     df_hourly = forecast_120d(
         dfh.reset_index(),
         horizon_days=horizonte_dias,
         holidays_set=holidays_set
     )
-
-    # 6) Alertas clima (usa la curva del planner)
-    from src.inferencia.alertas_clima import generar_alertas
-    generar_alertas(df_hourly[["calls"]])
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
