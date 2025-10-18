@@ -1,1 +1,16 @@
-
+{
+  "used_tmo_hist": true,
+  "tmo_hist_rows": 18185,
+  "dfh_rows": 18186,
+  "new_cols": [
+    "q_llamadas_general",
+    "q_llamadas_comercial",
+    "q_llamadas_tecnico",
+    "proporcion_comercial",
+    "proporcion_tecnica",
+    "tmo_comercial",
+    "tmo_tecnico",
+    "tmo_general"
+  ],
+  "last_non_na_tmo_general": 312.0
+}
