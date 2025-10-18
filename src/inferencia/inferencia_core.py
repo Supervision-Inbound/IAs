@@ -30,7 +30,7 @@ TARGET_CALLS = "recibidos_nacional"
 TARGET_TMO = "tmo_general"
 
 HIST_WINDOW_DAYS = 90
-ENABLE_OUTLIER_CAP = False  # si lo necesitas, puedes reactivarlo
+ENABLE_OUTLIER_CAP = False  # opcional
 
 
 def _load_cols(path: str):
@@ -103,7 +103,6 @@ def compute_holiday_factors(
     else:
         factors_tmo_by_hour = {int(h): 1.0 for h in range(24)}
 
-    # LÍMITES: subimos piso de TMO para no aplastarlo si ya viene bajo
     factors_calls_by_hour = {
         h: float(np.clip(v, 0.10, 1.60)) for h, v in factors_calls_by_hour.items()
     }
@@ -111,7 +110,7 @@ def compute_holiday_factors(
         h: float(np.clip(v, 0.85, 1.50)) for h, v in factors_tmo_by_hour.items()
     }
 
-    # Efecto post-feriado (día siguiente)
+    # día post-feriado
     dfh = dfh.copy()
     dfh["is_post_hol"] = (~dfh["is_holiday"]) & (dfh["is_holiday"].shift(1).fillna(False))
     med_post_calls = dfh[dfh["is_post_hol"]].groupby("hour")[col_calls].median()
@@ -264,10 +263,10 @@ def forecast_120d(
     pred_calls = dfp.loc[future_ts, TARGET_CALLS]
 
     # =========================
-    # TMO por hora (perfiles estacionales + variación)
+    # TMO por hora (perfiles estacionales + elasticidad + variación)
     # =========================
 
-    # 1) Perfiles estacionales por (dow, hour) desde histórico reciente
+    # 1) Perfiles por (dow, hour) desde histórico reciente
     hist_tmo = df.copy()
     hist_tmo = hist_tmo[
         [
@@ -283,7 +282,6 @@ def forecast_120d(
         ]
     ].dropna(how="all")
 
-    # Ventana para estacionalidad (12 semanas)
     hist_tmo = (
         hist_tmo.loc[hist_tmo.index >= (hist_tmo.index.max() - pd.Timedelta(days=84))]
         if not hist_tmo.empty
@@ -291,7 +289,6 @@ def forecast_120d(
     )
     hist_tmo = add_time_parts(hist_tmo) if not hist_tmo.empty else hist_tmo
 
-    # Perfiles (mediana robusta)
     def _profile(col):
         if col in hist_tmo.columns and hist_tmo[col].notna().any():
             return hist_tmo.groupby(["dow", "hour"])[col].median()
@@ -301,7 +298,6 @@ def forecast_120d(
     prof_tmo_com = _profile("tmo_comercial")
     prof_tmo_tec = _profile("tmo_tecnico")
 
-    # Fallbacks si no hay histórico por tipo
     last_tmo_general = (
         float(df[TARGET_TMO].ffill().iloc[-1])
         if TARGET_TMO in df.columns and df[TARGET_TMO].notna().any()
@@ -311,16 +307,13 @@ def forecast_120d(
     default_tmo_com = last_tmo_general
     default_tmo_tec = last_tmo_general
 
-    # 2) Construimos base_tmo futuro usando perfiles por (dow,hour)
     base_tmo = pd.DataFrame(index=future_ts)
     base_tmo[TARGET_CALLS] = pred_calls.values
     if "feriados" in df.columns:
         base_tmo["feriados"] = [_is_holiday(ts, holidays_set) for ts in base_tmo.index]
 
-    # Partes de tiempo del futuro
     parts_future = add_time_parts(base_tmo.copy())
 
-    # Helpers para mapear perfiles (dow,hour) -> serie futura
     def _map_profile(profile, default_value):
         if profile is None or profile.empty:
             return pd.Series(default_value, index=future_ts)
@@ -333,11 +326,9 @@ def forecast_120d(
             vals.append(v)
         return pd.Series(vals, index=future_ts).astype(float).fillna(default_value)
 
-    # Proporciones dinámicas
     prop_com = _map_profile(prof_prop_com, default_prop).clip(0, 1)
     prop_tec = (1.0 - prop_com).clip(0, 1)
 
-    # TMO por tipo dinámico
     tmo_com = _map_profile(prof_tmo_com, default_tmo_com)
     tmo_tec = _map_profile(prof_tmo_tec, default_tmo_tec)
 
@@ -346,12 +337,56 @@ def forecast_120d(
     base_tmo["tmo_comercial"] = tmo_com.values
     base_tmo["tmo_tecnico"] = tmo_tec.values
 
-    # 3) Features y predicción con medias del scaler para columnas faltantes
     base_tmo = add_time_parts(base_tmo)
     Xt = dummies_and_reindex_with_scaler_means(base_tmo, cols_tmo, sc_tmo)
     y_tmo = m_tmo.predict(sc_tmo.transform(Xt), verbose=0).flatten()
 
-    # 4) Variación residual (suave y reproducible)
+    # === Elasticidad TMO ↔ Carga por franja (dow-hour) =======================
+    try:
+        hist_el = df.copy()
+        needed = [TARGET_CALLS, TARGET_TMO]
+        if not all(c in hist_el.columns for c in needed):
+            raise RuntimeError("No hay TMO histórico suficiente para elasticidad")
+        hist_el = hist_el[needed].dropna()
+        hist_el = add_time_parts(hist_el)
+
+        med_calls_dh = hist_el.groupby(["dow", "hour"])[TARGET_CALLS].median()
+
+        beta_dh = {}
+        for (dw, hr), grp in hist_el.groupby(["dow", "hour"]):
+            if len(grp) >= 5 and grp[TARGET_CALLS].std() > 1e-6:
+                x = grp[TARGET_CALLS].astype(float).values
+                y = grp[TARGET_TMO].astype(float).values
+                m_calls = np.maximum(np.median(x), 1.0)
+                m_tmo = np.maximum(np.median(y), 1.0)
+                slope = np.polyfit(x, y, 1)[0]  # dTMO/dCalls
+                beta = (slope * m_calls) / m_tmo  # elasticidad relativa
+                beta_dh[(int(dw), int(hr))] = float(np.clip(beta, -0.6, 0.8))
+            else:
+                beta_dh[(int(dw), int(hr))] = 0.12  # default suave
+
+        pf = add_time_parts(pd.DataFrame(index=future_ts))
+        alpha = 0.65  # intensidad global del ajuste
+
+        med_calls_future = []
+        betas_future = []
+        for dw, hr in zip(pf["dow"].values, pf["hour"].values):
+            med = med_calls_dh.get((int(dw), int(hr)), np.nan)
+            med_calls_future.append(med)
+            betas_future.append(beta_dh.get((int(dw), int(hr)), 0.12))
+
+        med_calls_future = pd.Series(med_calls_future, index=future_ts).astype(float).replace(0, np.nan)
+        delta_pct = (pred_calls - med_calls_future) / med_calls_future
+        delta_pct = delta_pct.fillna(0.0).clip(-0.8, 1.0)
+
+        betas_future = pd.Series(betas_future, index=future_ts).astype(float)
+        factor = (1.0 + alpha * betas_future * delta_pct).clip(0.7, 1.35)
+        y_tmo = y_tmo * factor.values
+    except Exception:
+        pass
+    # === Fin Elasticidad ======================================================
+
+    # 4) Variación residual suave (jitter reproducible)
     try:
         SEED = 42
         if TARGET_TMO in hist_tmo.columns and hist_tmo[TARGET_TMO].notna().any():
@@ -366,17 +401,15 @@ def forecast_120d(
                 )
                 rng = np.random.default_rng(SEED)
                 jitter = []
-                for dow, h in zip(
-                    parts_future["dow"].values, parts_future["hour"].values
-                ):
+                for dow, h in zip(parts_future["dow"].values, parts_future["hour"].values):
                     sd = float(disp.get((int(dow), int(h)), 0.0))
-                    jitter.append(rng.normal(0.0, 0.20 * sd))  # 20% de la dispersión
+                    jitter.append(rng.normal(0.0, 0.20 * sd))
                 y_tmo = y_tmo + np.array(jitter, dtype=float)
     except Exception:
         pass
 
     # 5) Pisos/techos razonables
-    y_tmo = np.maximum(y_tmo, 30.0)  # nunca menos de 30s
+    y_tmo = np.maximum(y_tmo, 30.0)
 
     # 6) Curva resultado base
     df_hourly = pd.DataFrame(index=future_ts)
@@ -423,4 +456,3 @@ def forecast_120d(
     )
 
     return df_hourly
-
