@@ -23,36 +23,32 @@ def _normalize_hour_series(s: pd.Series) -> pd.Series:
 
 def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Devuelve un DataFrame indexado por 'ts' (DatetimeIndex con TZ=America/Santiago).
+    Devuelve un DataFrame indexado por 'ts' (DatetimeIndex).
     Casos soportados (idempotente):
-      1) Si el índice YA es DatetimeIndex -> no crea 'ts'; normaliza TZ y elimina col 'ts' si duplica.
-      2) Si hay columna 'ts' -> la usa como índice (sin duplicar), normaliza TZ.
-      3) Si hay ('fecha' + 'hora') -> construye 'ts' y la usa como índice.
+      1) Si el índice YA es DatetimeIndex -> no crea 'ts'; NO convierte TZ; si no tiene TZ, la localiza.
+      2) Si hay columna 'ts' -> la usa como índice; NO convierte TZ; si no tiene TZ, la localiza.
+      3) Si hay ('fecha' + 'hora') -> construye 'ts' y la usa como índice; localiza TZ.
     Nunca deja 'ts' como columna si también es índice.
     """
     d = df.copy()
 
-    # Caso 1: índice ya es DatetimeIndex
+    # ---- CASO 1: índice YA es DatetimeIndex ----
     if isinstance(d.index, pd.DatetimeIndex):
-        # Si además existe una columna 'ts', elimínala para evitar ambigüedad
+        # elimina col 'ts' si duplica el índice
         if "ts" in d.columns:
             d = d.drop(columns=["ts"])
-        # Normalización de TZ
+        # NO convertir TZ si ya trae; solo localizamos si está naive
         try:
             if d.index.tz is None:
                 d.index = d.index.tz_localize(TZ, ambiguous="NaT", nonexistent="NaT")
                 d = d[~d.index.isna()]
-            else:
-                # Convertimos a TZ objetivo
-                d.index = d.index.tz_convert(TZ)
+            # else: mantener tal cual, sin tz_convert
         except Exception:
-            # Si algo falla (DST raro), dejamos el índice como está para no romper
             pass
-        # Asegura nombre del índice
         d.index.name = "ts"
         return d.sort_index()
 
-    # Caso 2: hay columna 'ts'
+    # ---- CASO 2: hay columna 'ts' ----
     if "ts" in d.columns:
         ts = pd.to_datetime(d["ts"], errors="coerce", dayfirst=True)
         d = d.drop(columns=["ts"])
@@ -61,31 +57,26 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
             if d["ts"].dt.tz is None:
                 d["ts"] = d["ts"].dt.tz_localize(TZ, ambiguous="NaT", nonexistent="NaT")
                 d = d.dropna(subset=["ts"])
-            else:
-                d["ts"] = d["ts"].dt.tz_convert(TZ)
+            # else: mantener tal cual, sin tz_convert
         except Exception:
             pass
         d = d.set_index("ts")
         d.index.name = "ts"
         return d
 
-    # Caso 3: construir desde ('fecha' + 'hora')
+    # ---- CASO 3: construir desde ('fecha' + 'hora') ----
     c_fecha = _pick_col(d.columns, ["fecha", "date", "dia", "día"])
     c_hora  = _pick_col(d.columns, ["hora", "hour", "hh"])
 
     if c_fecha is None or c_hora is None:
-        # Último intento: si hubiese columnas con nombres muy raros, fallback a error claro
         raise ValueError("Se requiere 'ts' o ('fecha' + 'hora'). No se encontró combinación válida.")
 
     h = _normalize_hour_series(d[c_hora])
     ts = pd.to_datetime(d[c_fecha].astype(str) + " " + h, dayfirst=True, errors="coerce")
     d = d.assign(ts=ts).dropna(subset=["ts"]).sort_values("ts")
     try:
-        if d["ts"].dt.tz is None:
-            d["ts"] = d["ts"].dt.tz_localize(TZ, ambiguous="NaT", nonexistent="NaT")
-            d = d.dropna(subset=["ts"])
-        else:
-            d["ts"] = d["ts"].dt.tz_convert(TZ)
+        d["ts"] = d["ts"].dt.tz_localize(TZ, ambiguous="NaT", nonexistent="NaT")
+        d = d.dropna(subset=["ts"])
     except Exception:
         pass
     d = d.set_index("ts")
@@ -126,7 +117,6 @@ def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     """
     d = df.copy()
     if not isinstance(d.index, pd.DatetimeIndex):
-        # si viene con 'ts' columna, establecemos index temporal temporalmente
         if "ts" in d.columns:
             d = d.set_index(pd.to_datetime(d["ts"], errors="coerce"))
         else:
@@ -152,7 +142,6 @@ def dummies_and_reindex(df: pd.DataFrame, training_columns: List[str]) -> pd.Dat
     Si faltan columnas, las rellena con 0.
     """
     d = df.copy()
-    # Aseguramos partes de tiempo
     if not all(c in d.columns for c in ["dow", "month", "hour"]):
         d = add_time_parts(d)
 
@@ -160,7 +149,6 @@ def dummies_and_reindex(df: pd.DataFrame, training_columns: List[str]) -> pd.Dat
     cat = pd.get_dummies(d[["dow", "month", "hour"]], drop_first=False, dtype=int)
     X = pd.concat([d[base_cols], cat], axis=1)
 
-    # Reindex a orden de entrenamiento
     for c in training_columns:
         if c not in X.columns:
             X[c] = 0
@@ -176,7 +164,6 @@ def dummies_and_reindex_with_scaler_means(df: pd.DataFrame, training_columns: Li
     if not all(c in d.columns for c in ["dow", "month", "hour"]):
         d = add_time_parts(d)
 
-    # intentamos recuperar medias del scaler (StandardScaler)
     scaler_means = None
     try:
         scaler_means = getattr(scaler, "mean_", None)
@@ -204,3 +191,4 @@ def dummies_and_reindex_with_scaler_means(df: pd.DataFrame, training_columns: Li
 
     X = X[training_columns].infer_objects(copy=False).fillna(0)
     return X
+
