@@ -7,19 +7,35 @@ TIMEZONE = "America/Santiago"
 def ensure_ts(df):
     d = df.copy()
     d.columns = [c.strip() for c in d.columns]
-    # si viene ts, úsalo
+
+    # 1) Construimos/normalizamos 'ts'
     if "ts" in d.columns:
         ts = pd.to_datetime(d["ts"], errors="coerce")
     else:
-        # busca 'fecha' y 'hora'
         c_fecha = next((c for c in d.columns if c.lower().strip() in ("fecha","date","dia","día")), None)
         c_hora  = next((c for c in d.columns if "hora" in c.lower()), None)
         if not c_fecha or not c_hora:
             raise ValueError("Se requiere 'ts' o ('fecha' + 'hora').")
         h = d[c_hora].astype(str).str.slice(0,5)
         ts = pd.to_datetime(d[c_fecha].astype(str) + " " + h, dayfirst=True, errors="coerce")
+
     d = d.assign(ts=ts).dropna(subset=["ts"]).sort_values("ts")
-    d["ts"] = d["ts"].dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT")
+
+    # 2) Localizar/convertir TZ de forma segura
+    #    - si es tz-naive -> tz_localize
+    #    - si ya es tz-aware -> tz_convert
+    try:
+        # Series.dt.tz is None si es naive
+        is_naive = (d["ts"].dt.tz is None)
+    except Exception:
+        # Si por algún motivo falla el acceso, asumimos naive
+        is_naive = True
+
+    if is_naive:
+        d["ts"] = d["ts"].dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT")
+    else:
+        d["ts"] = d["ts"].dt.tz_convert(TIMEZONE)
+
     d = d.dropna(subset=["ts"])
     return d.set_index("ts")
 
@@ -68,3 +84,4 @@ def dummies_and_reindex_with_scaler_means(df_row, training_cols, scaler):
 
     d = d.reindex(columns=training_cols, fill_value=0.0)
     return d.fillna(0.0)
+
