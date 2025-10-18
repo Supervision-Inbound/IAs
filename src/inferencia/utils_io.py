@@ -3,10 +3,12 @@ import json
 import pandas as pd
 import numpy as np
 
+TZ = "America/Santiago"
+
 def _to_date_index(idx):
     """Devuelve serie de fecha (date) respetando tz si existe."""
     try:
-        return idx.tz_convert("America/Santiago").date
+        return idx.tz_convert(TZ).date
     except Exception:
         return idx.date
 
@@ -25,30 +27,33 @@ def write_hourly_json(path, df_hourly, calls_col, tmo_col, staff_col=None):
 
 def write_daily_json(path, df_hourly, calls_col, tmo_col):
     """
-    Agrupa por día:
+    Agrega por día con TMO ponderado (call-center real):
       - llamadas_diarias = SUM(calls)
-      - tmo_diario_s     = SUM(calls * tmo_s) / MAX(SUM(calls), 1)
-    IMPORTANTE: TMO ponderado por volumen, no promedio simple.
+      - tmo_diario_s     = SUM(calls * tmo_s) / SUM(calls)
     """
+    # Garantizar tipos numéricos
     df = df_hourly[[calls_col, tmo_col]].copy()
+    df[calls_col] = pd.to_numeric(df[calls_col], errors="coerce").fillna(0.0)
+    df[tmo_col]   = pd.to_numeric(df[tmo_col],   errors="coerce").fillna(0.0)
+
+    # Clave diaria
     df["date"] = _to_date_index(df.index)
-    # Totales por día
-    g = df.groupby("date", as_index=False).agg(
-        llamadas_diarias=(calls_col, "sum"),
-        _wsum=("dummy", "size")  # placeholder para que agg no quede vacío
-    )
-    g = g.drop(columns=["_wsum"])
 
-    # Ponderación por volumen
-    df["wx"] = df[calls_col].astype(float) * df[tmo_col].astype(float)
-    w = df.groupby("date", as_index=False).agg(
-        wsum=("wx", "sum"),
-        csum=(calls_col, "sum")
+    # Sumas por día
+    g_calls = df.groupby("date", as_index=False)[calls_col].sum().rename(
+        columns={calls_col: "llamadas_diarias"}
     )
-    daily = g.merge(w, on="date", how="left")
-    daily["tmo_diario_s"] = (daily["wsum"] / daily["csum"].replace(0, np.nan)).fillna(0).round().astype(int)
 
-    # Redondeos/formatos finales
+    # Ponderación por volumen: SUM(calls * tmo) / SUM(calls)
+    df["wx"] = df[calls_col] * df[tmo_col]
+    g_w = df.groupby("date", as_index=False).agg(wsum=("wx", "sum"), csum=(calls_col, "sum"))
+    daily = g_calls.merge(g_w, on="date", how="left")
+
+    # Evitar división por cero
+    denom = daily["csum"].replace(0, np.nan)
+    daily["tmo_diario_s"] = (daily["wsum"] / denom).fillna(0).round().astype(int)
+
+    # Formato final
     daily["llamadas_diarias"] = daily["llamadas_diarias"].round().astype(int)
     daily = daily[["date", "llamadas_diarias", "tmo_diario_s"]].sort_values("date")
     daily["date"] = pd.to_datetime(daily["date"]).dt.strftime("%Y-%m-%d")
