@@ -1,607 +1,607 @@
 [
   {
     "date": "2025-07-27",
-    "llamadas_diarias": 49,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 32,
+    "tmo_diario_s": 240
   },
   {
     "date": "2025-07-28",
-    "llamadas_diarias": 3318,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 790,
+    "tmo_diario_s": 256
   },
   {
     "date": "2025-07-29",
-    "llamadas_diarias": 3422,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 505,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-07-30",
-    "llamadas_diarias": 3505,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 468,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-07-31",
-    "llamadas_diarias": 3314,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 378,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-08-01",
-    "llamadas_diarias": 2715,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 297,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-08-02",
-    "llamadas_diarias": 1819,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 285,
+    "tmo_diario_s": 236
   },
   {
     "date": "2025-08-03",
-    "llamadas_diarias": 1205,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 327,
+    "tmo_diario_s": 228
   },
   {
     "date": "2025-08-04",
-    "llamadas_diarias": 2429,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 413,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-08-05",
-    "llamadas_diarias": 2567,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 503,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-08-06",
-    "llamadas_diarias": 2566,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 540,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-08-07",
-    "llamadas_diarias": 2582,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 475,
+    "tmo_diario_s": 254
   },
   {
     "date": "2025-08-08",
-    "llamadas_diarias": 2411,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 379,
+    "tmo_diario_s": 252
   },
   {
     "date": "2025-08-09",
-    "llamadas_diarias": 1748,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 343,
+    "tmo_diario_s": 237
   },
   {
     "date": "2025-08-10",
-    "llamadas_diarias": 1198,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 366,
+    "tmo_diario_s": 229
   },
   {
     "date": "2025-08-11",
-    "llamadas_diarias": 2440,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 418,
+    "tmo_diario_s": 256
   },
   {
     "date": "2025-08-12",
-    "llamadas_diarias": 2588,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 502,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-08-13",
-    "llamadas_diarias": 2592,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 536,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-08-14",
-    "llamadas_diarias": 2602,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 470,
+    "tmo_diario_s": 254
   },
   {
     "date": "2025-08-15",
-    "llamadas_diarias": 1321,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 210,
+    "tmo_diario_s": 252
   },
   {
     "date": "2025-08-16",
-    "llamadas_diarias": 1836,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 357,
+    "tmo_diario_s": 237
   },
   {
     "date": "2025-08-17",
-    "llamadas_diarias": 1199,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 364,
+    "tmo_diario_s": 229
   },
   {
     "date": "2025-08-18",
-    "llamadas_diarias": 2439,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 418,
+    "tmo_diario_s": 256
   },
   {
     "date": "2025-08-19",
-    "llamadas_diarias": 2588,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 502,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-08-20",
-    "llamadas_diarias": 2592,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 537,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-08-21",
-    "llamadas_diarias": 2602,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 470,
+    "tmo_diario_s": 254
   },
   {
     "date": "2025-08-22",
-    "llamadas_diarias": 2423,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 378,
+    "tmo_diario_s": 252
   },
   {
     "date": "2025-08-23",
-    "llamadas_diarias": 1750,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 341,
+    "tmo_diario_s": 237
   },
   {
     "date": "2025-08-24",
-    "llamadas_diarias": 1199,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 364,
+    "tmo_diario_s": 229
   },
   {
     "date": "2025-08-25",
-    "llamadas_diarias": 2439,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 418,
+    "tmo_diario_s": 256
   },
   {
     "date": "2025-08-26",
-    "llamadas_diarias": 2588,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 502,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-08-27",
-    "llamadas_diarias": 2592,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 537,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-08-28",
-    "llamadas_diarias": 2602,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 470,
+    "tmo_diario_s": 254
   },
   {
     "date": "2025-08-29",
-    "llamadas_diarias": 2423,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 378,
+    "tmo_diario_s": 252
   },
   {
     "date": "2025-08-30",
-    "llamadas_diarias": 1750,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 341,
+    "tmo_diario_s": 237
   },
   {
     "date": "2025-08-31",
-    "llamadas_diarias": 1199,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 364,
+    "tmo_diario_s": 229
   },
   {
     "date": "2025-09-01",
-    "llamadas_diarias": 2330,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 418,
+    "tmo_diario_s": 256
   },
   {
     "date": "2025-09-02",
-    "llamadas_diarias": 2508,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 502,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-09-03",
-    "llamadas_diarias": 2564,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 537,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-09-04",
-    "llamadas_diarias": 2592,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 470,
+    "tmo_diario_s": 254
   },
   {
     "date": "2025-09-05",
-    "llamadas_diarias": 2608,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 378,
+    "tmo_diario_s": 252
   },
   {
     "date": "2025-09-06",
-    "llamadas_diarias": 1734,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 341,
+    "tmo_diario_s": 237
   },
   {
     "date": "2025-09-07",
-    "llamadas_diarias": 1345,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 354,
+    "tmo_diario_s": 231
   },
   {
     "date": "2025-09-08",
-    "llamadas_diarias": 2414,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 418,
+    "tmo_diario_s": 256
   },
   {
     "date": "2025-09-09",
-    "llamadas_diarias": 2545,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 502,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-09-10",
-    "llamadas_diarias": 2575,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 536,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-09-11",
-    "llamadas_diarias": 2590,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 471,
+    "tmo_diario_s": 254
   },
   {
     "date": "2025-09-12",
-    "llamadas_diarias": 2604,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 377,
+    "tmo_diario_s": 252
   },
   {
     "date": "2025-09-13",
-    "llamadas_diarias": 1730,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 341,
+    "tmo_diario_s": 237
   },
   {
     "date": "2025-09-14",
-    "llamadas_diarias": 1301,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 364,
+    "tmo_diario_s": 229
   },
   {
     "date": "2025-09-15",
-    "llamadas_diarias": 2386,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 418,
+    "tmo_diario_s": 256
   },
   {
     "date": "2025-09-16",
-    "llamadas_diarias": 2536,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 502,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-09-17",
-    "llamadas_diarias": 2571,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 537,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-09-18",
-    "llamadas_diarias": 1426,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 259,
+    "tmo_diario_s": 253
   },
   {
     "date": "2025-09-19",
-    "llamadas_diarias": 1431,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 210,
+    "tmo_diario_s": 252
   },
   {
     "date": "2025-09-20",
-    "llamadas_diarias": 1820,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 357,
+    "tmo_diario_s": 237
   },
   {
     "date": "2025-09-21",
-    "llamadas_diarias": 1301,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 364,
+    "tmo_diario_s": 229
   },
   {
     "date": "2025-09-22",
-    "llamadas_diarias": 2386,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 418,
+    "tmo_diario_s": 256
   },
   {
     "date": "2025-09-23",
-    "llamadas_diarias": 2536,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 502,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-09-24",
-    "llamadas_diarias": 2571,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 537,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-09-25",
-    "llamadas_diarias": 2591,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 470,
+    "tmo_diario_s": 254
   },
   {
     "date": "2025-09-26",
-    "llamadas_diarias": 2608,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 378,
+    "tmo_diario_s": 252
   },
   {
     "date": "2025-09-27",
-    "llamadas_diarias": 1732,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 341,
+    "tmo_diario_s": 237
   },
   {
     "date": "2025-09-28",
-    "llamadas_diarias": 1301,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 364,
+    "tmo_diario_s": 229
   },
   {
     "date": "2025-09-29",
-    "llamadas_diarias": 2386,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 418,
+    "tmo_diario_s": 256
   },
   {
     "date": "2025-09-30",
-    "llamadas_diarias": 2536,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 502,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-10-01",
-    "llamadas_diarias": 2414,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 537,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-10-02",
-    "llamadas_diarias": 2245,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 470,
+    "tmo_diario_s": 254
   },
   {
     "date": "2025-10-03",
-    "llamadas_diarias": 2316,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 378,
+    "tmo_diario_s": 252
   },
   {
     "date": "2025-10-04",
-    "llamadas_diarias": 1692,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 341,
+    "tmo_diario_s": 237
   },
   {
     "date": "2025-10-05",
-    "llamadas_diarias": 1009,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 364,
+    "tmo_diario_s": 229
   },
   {
     "date": "2025-10-06",
-    "llamadas_diarias": 2337,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 418,
+    "tmo_diario_s": 256
   },
   {
     "date": "2025-10-07",
-    "llamadas_diarias": 2379,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 502,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-10-08",
-    "llamadas_diarias": 2354,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 537,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-10-09",
-    "llamadas_diarias": 2231,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 470,
+    "tmo_diario_s": 254
   },
   {
     "date": "2025-10-10",
-    "llamadas_diarias": 2318,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 378,
+    "tmo_diario_s": 252
   },
   {
     "date": "2025-10-11",
-    "llamadas_diarias": 1693,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 341,
+    "tmo_diario_s": 237
   },
   {
     "date": "2025-10-12",
-    "llamadas_diarias": 1012,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 364,
+    "tmo_diario_s": 229
   },
   {
     "date": "2025-10-13",
-    "llamadas_diarias": 2337,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 418,
+    "tmo_diario_s": 256
   },
   {
     "date": "2025-10-14",
-    "llamadas_diarias": 2380,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 502,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-10-15",
-    "llamadas_diarias": 2355,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 537,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-10-16",
-    "llamadas_diarias": 2231,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 470,
+    "tmo_diario_s": 254
   },
   {
     "date": "2025-10-17",
-    "llamadas_diarias": 2318,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 378,
+    "tmo_diario_s": 252
   },
   {
     "date": "2025-10-18",
-    "llamadas_diarias": 1693,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 341,
+    "tmo_diario_s": 237
   },
   {
     "date": "2025-10-19",
-    "llamadas_diarias": 1012,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 364,
+    "tmo_diario_s": 229
   },
   {
     "date": "2025-10-20",
-    "llamadas_diarias": 2337,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 418,
+    "tmo_diario_s": 256
   },
   {
     "date": "2025-10-21",
-    "llamadas_diarias": 2380,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 502,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-10-22",
-    "llamadas_diarias": 2355,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 537,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-10-23",
-    "llamadas_diarias": 2231,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 470,
+    "tmo_diario_s": 254
   },
   {
     "date": "2025-10-24",
-    "llamadas_diarias": 2318,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 378,
+    "tmo_diario_s": 252
   },
   {
     "date": "2025-10-25",
-    "llamadas_diarias": 1693,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 341,
+    "tmo_diario_s": 237
   },
   {
     "date": "2025-10-26",
-    "llamadas_diarias": 1012,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 364,
+    "tmo_diario_s": 229
   },
   {
     "date": "2025-10-27",
-    "llamadas_diarias": 2337,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 418,
+    "tmo_diario_s": 256
   },
   {
     "date": "2025-10-28",
-    "llamadas_diarias": 2380,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 502,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-10-29",
-    "llamadas_diarias": 2355,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 537,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-10-30",
-    "llamadas_diarias": 2231,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 470,
+    "tmo_diario_s": 254
   },
   {
     "date": "2025-10-31",
-    "llamadas_diarias": 2318,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 378,
+    "tmo_diario_s": 252
   },
   {
     "date": "2025-11-01",
-    "llamadas_diarias": 1668,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 341,
+    "tmo_diario_s": 237
   },
   {
     "date": "2025-11-02",
-    "llamadas_diarias": 1171,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 364,
+    "tmo_diario_s": 229
   },
   {
     "date": "2025-11-03",
-    "llamadas_diarias": 2466,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 418,
+    "tmo_diario_s": 256
   },
   {
     "date": "2025-11-04",
-    "llamadas_diarias": 2547,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 502,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-11-05",
-    "llamadas_diarias": 2414,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 537,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-11-06",
-    "llamadas_diarias": 2287,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 470,
+    "tmo_diario_s": 254
   },
   {
     "date": "2025-11-07",
-    "llamadas_diarias": 2379,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 378,
+    "tmo_diario_s": 252
   },
   {
     "date": "2025-11-08",
-    "llamadas_diarias": 1696,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 341,
+    "tmo_diario_s": 237
   },
   {
     "date": "2025-11-09",
-    "llamadas_diarias": 1178,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 364,
+    "tmo_diario_s": 229
   },
   {
     "date": "2025-11-10",
-    "llamadas_diarias": 2474,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 418,
+    "tmo_diario_s": 256
   },
   {
     "date": "2025-11-11",
-    "llamadas_diarias": 2547,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 502,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-11-12",
-    "llamadas_diarias": 2414,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 537,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-11-13",
-    "llamadas_diarias": 2286,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 470,
+    "tmo_diario_s": 254
   },
   {
     "date": "2025-11-14",
-    "llamadas_diarias": 2378,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 378,
+    "tmo_diario_s": 252
   },
   {
     "date": "2025-11-15",
-    "llamadas_diarias": 1696,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 341,
+    "tmo_diario_s": 237
   },
   {
     "date": "2025-11-16",
-    "llamadas_diarias": 1178,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 364,
+    "tmo_diario_s": 229
   },
   {
     "date": "2025-11-17",
-    "llamadas_diarias": 2474,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 418,
+    "tmo_diario_s": 256
   },
   {
     "date": "2025-11-18",
-    "llamadas_diarias": 2547,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 502,
+    "tmo_diario_s": 251
   },
   {
     "date": "2025-11-19",
-    "llamadas_diarias": 2414,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 537,
+    "tmo_diario_s": 255
   },
   {
     "date": "2025-11-20",
-    "llamadas_diarias": 2286,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 470,
+    "tmo_diario_s": 254
   },
   {
     "date": "2025-11-21",
-    "llamadas_diarias": 2378,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 378,
+    "tmo_diario_s": 252
   },
   {
     "date": "2025-11-22",
-    "llamadas_diarias": 1696,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 341,
+    "tmo_diario_s": 237
   },
   {
     "date": "2025-11-23",
-    "llamadas_diarias": 1178,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 364,
+    "tmo_diario_s": 229
   },
   {
     "date": "2025-11-24",
-    "llamadas_diarias": 2474,
-    "tmo_diario_s": 312
+    "llamadas_diarias": 418,
+    "tmo_diario_s": 256
   }
 ]
