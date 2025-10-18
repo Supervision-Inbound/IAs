@@ -5,11 +5,11 @@ import pandas as pd
 
 from src.inferencia.inferencia_core import forecast_120d
 from src.inferencia.features import ensure_ts
-from src.data.loader_tmo import load_historico_tmo
+from src.data.loader_tmo import load_historico_tmo  # ← usa tu loader real de TMO
 
 DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
-TMO_HIST_FILE = "data/TMO_HISTORICO.csv"   # <- nombre real en tu repo
+TMO_HIST_FILE = "data/TMO_HISTORICO.csv"   # ← nombre real en tu repo
 TZ = "America/Santiago"
 
 TARGET_CALLS_NEW = "recibidos_nacional"
@@ -64,7 +64,7 @@ def add_es_dia_de_pago(df_idx: pd.DataFrame) -> pd.Series:
 def main(horizonte_dias: int):
     os.makedirs("public", exist_ok=True)
 
-    # 1) Leer histórico base
+    # 1) Leer histórico de llamadas (NO mezclar TMO aquí)
     dfh = smart_read_historical(DATA_FILE)
     dfh.columns = dfh.columns.str.strip()
 
@@ -73,6 +73,7 @@ def main(horizonte_dias: int):
             if cand in dfh.columns:
                 dfh = dfh.rename(columns={cand: TARGET_CALLS_NEW}); break
 
+    # Si viene algún TMO de “historical_data”, lo dejamos como referencia, pero no lo forzamos
     if TARGET_TMO_NEW not in dfh.columns:
         for cand in ["tmo (segundos)","tmo_seg","tmo","aht"]:
             if cand in dfh.columns:
@@ -80,46 +81,27 @@ def main(horizonte_dias: int):
 
     dfh = ensure_ts(dfh)
 
-    # 2) Merge con TMO_HISTORICO.csv (por hora) sin colisión de columnas
-    used_tmo_hist = False
+    # 2) Cargar TMO_HISTORICO por separado (base del TMO)
+    df_tmo = None
     if os.path.exists(TMO_HIST_FILE):
-        df_tmo = load_historico_tmo(TMO_HIST_FILE)  # index ts
+        df_tmo = load_historico_tmo(TMO_HIST_FILE)  # ← devuelve index ts y columnas TMO/mezcla
+        # (no lo mezclamos a dfh: se pasa aparte a forecast_120d)
+        # Dump de debug mínimo
         try:
-            df_tmo.index = df_tmo.index.tz_convert(TZ)
+            with open("public/debug_tmo_hist.json","w",encoding="utf-8") as f:
+                json.dump({
+                    "rows": int(df_tmo.shape[0]),
+                    "cols": list(df_tmo.columns),
+                    "first_ts": str(df_tmo.index.min()) if df_tmo.shape[0] else None,
+                    "last_ts": str(df_tmo.index.max()) if df_tmo.shape[0] else None
+                }, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+    else:
+        # Fallback: dataframe vacío para que forecast use perfiles neutros
+        df_tmo = pd.DataFrame(index=dfh.index.unique().sort_values())
 
-        # columnas posibles que trae el loader
-        tmo_cols = [
-            "q_llamadas_general","q_llamadas_comercial","q_llamadas_tecnico",
-            "proporcion_comercial","proporcion_tecnica",
-            "tmo_comercial","tmo_tecnico","tmo_general"
-        ]
-
-        # asignación columna a columna para evitar "columns overlap" en join
-        for c in tmo_cols:
-            if c in df_tmo.columns:
-                if c in dfh.columns:
-                    # preferimos lo que ya trae dfh y completamos huecos con df_tmo
-                    dfh[c] = dfh[c].combine_first(df_tmo[c])
-                else:
-                    dfh[c] = df_tmo[c]
-
-        used_tmo_hist = True
-
-        # Debug dumps
-        debug = {
-            "used_tmo_hist": used_tmo_hist,
-            "tmo_hist_rows": int(df_tmo.shape[0]),
-            "dfh_rows": int(dfh.shape[0]),
-            "new_cols": [c for c in tmo_cols if c in dfh.columns],
-            "last_non_na_tmo_general": float(dfh["tmo_general"].dropna().iloc[-1]) if "tmo_general" in dfh.columns and dfh["tmo_general"].notna().any() else None
-        }
-        with open("public/debug_tmo_merge.json","w",encoding="utf-8") as f:
-            json.dump(debug, f, ensure_ascii=False, indent=2)
-        dfh.tail(48).to_csv("public/debug_tmo_tail48.csv")
-
-    # 3) Calendario
+    # 3) Calendario (feriados y día de pago SOLO en llamadas)
     holidays_set = load_holidays(HOLIDAYS_FILE)
     if "feriados" not in dfh.columns:
         dfh["feriados"] = mark_holidays_index(dfh.index, holidays_set).values
@@ -127,15 +109,15 @@ def main(horizonte_dias: int):
     if "es_dia_de_pago" not in dfh.columns:
         dfh["es_dia_de_pago"] = add_es_dia_de_pago(dfh).values
 
-    # 4) FFill columnas clave
-    for c in [TARGET_TMO_NEW, "feriados", "es_dia_de_pago",
-              "proporcion_comercial","proporcion_tecnica","tmo_comercial","tmo_tecnico"]:
+    # FFill columnas clave en llamadas
+    for c in [TARGET_TMO_NEW, "feriados", "es_dia_de_pago"]:
         if c in dfh.columns:
             dfh[c] = dfh[c].ffill()
 
-    # 5) Forecast
+    # 4) Forecast: PASAR AMBOS DATAFRAMES, sin merge de TMO dentro de dfh
     df_hourly = forecast_120d(
-        dfh.reset_index(),
+        df_hist_calls=dfh,
+        df_tmo_hist=df_tmo,
         horizon_days=horizonte_dias,
         holidays_set=holidays_set
     )
