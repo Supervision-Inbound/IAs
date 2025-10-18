@@ -55,27 +55,14 @@ def _series_is_holiday(idx, holidays_set):
 
 
 def compute_holiday_factors(
-    df_hist, holidays_set, col_calls=TARGET_CALLS, col_tmo=TARGET_TMO
+    df_hist_calls, holidays_set, col_calls=TARGET_CALLS
 ):
-    cols = [col_calls]
-    if col_tmo in df_hist.columns:
-        cols.append(col_tmo)
-
-    dfh = add_time_parts(df_hist[cols].copy())
+    # Solo factores de llamadas por feriado/post-feriado (el TMO se maneja por su propio histórico)
+    dfh = add_time_parts(df_hist_calls[[col_calls]].copy())
     dfh["is_holiday"] = _series_is_holiday(dfh.index, holidays_set)
 
     med_hol_calls = dfh[dfh["is_holiday"]].groupby("hour")[col_calls].median()
     med_nor_calls = dfh[~dfh["is_holiday"]].groupby("hour")[col_calls].median()
-
-    if col_tmo in dfh.columns:
-        med_hol_tmo = dfh[dfh["is_holiday"]].groupby("hour")[col_tmo].median()
-        med_nor_tmo = dfh[~dfh["is_holiday"]].groupby("hour")[col_tmo].median()
-        g_hol_tmo = dfh[dfh["is_holiday"]][col_tmo].median()
-        g_nor_tmo = dfh[~dfh["is_holiday"]][col_tmo].median()
-        global_tmo_factor = _safe_ratio(g_hol_tmo, g_nor_tmo, fallback=1.00)
-    else:
-        med_hol_tmo = med_nor_tmo = None
-        global_tmo_factor = 1.00
 
     g_hol_calls = dfh[dfh["is_holiday"]][col_calls].median()
     g_nor_calls = dfh[~dfh["is_holiday"]][col_calls].median()
@@ -89,24 +76,9 @@ def compute_holiday_factors(
         )
         for h in range(24)
     }
-
-    if med_hol_tmo is not None:
-        factors_tmo_by_hour = {
-            int(h): _safe_ratio(
-                med_hol_tmo.get(h, np.nan),
-                med_nor_tmo.get(h, np.nan),
-                fallback=global_tmo_factor,
-            )
-            for h in range(24)
-        }
-    else:
-        factors_tmo_by_hour = {int(h): 1.0 for h in range(24)}
-
-    # límites
     factors_calls_by_hour = {h: float(np.clip(v, 0.10, 1.60)) for h, v in factors_calls_by_hour.items()}
-    factors_tmo_by_hour   = {h: float(np.clip(v, 0.85, 1.50)) for h, v in factors_tmo_by_hour.items()}
 
-    # efecto post-feriado (día siguiente)
+    # post-feriado
     dfh = dfh.copy()
     dfh["is_post_hol"] = (~dfh["is_holiday"]) & (dfh["is_holiday"].shift(1).fillna(False))
     med_post_calls = dfh[dfh["is_post_hol"]].groupby("hour")[col_calls].median()
@@ -115,42 +87,26 @@ def compute_holiday_factors(
         for h in range(24)
     }
     post_calls_by_hour = {h: float(np.clip(v, 0.90, 1.80)) for h, v in post_calls_by_hour.items()}
-
-    return (
-        factors_calls_by_hour,
-        factors_tmo_by_hour,
-        global_calls_factor,
-        global_tmo_factor,
-        post_calls_by_hour,
-    )
+    return factors_calls_by_hour, post_calls_by_hour
 
 
-def apply_holiday_adjustment(
-    df_future,
-    holidays_set,
-    factors_calls_by_hour,
-    factors_tmo_by_hour,
-    col_calls_future="calls",
-    col_tmo_future="tmo_s",
+def apply_holiday_adjustment_calls(
+    df_future, holidays_set, factors_calls_by_hour, col_calls_future="calls"
 ):
     d = add_time_parts(df_future.copy())
     is_hol = _series_is_holiday(d.index, holidays_set)
     hours = d["hour"].astype(int).values
     call_f = np.array([factors_calls_by_hour.get(int(h), 1.0) for h in hours])
-    tmo_f  = np.array([factors_tmo_by_hour.get(int(h), 1.0) for h in hours])
 
     out = df_future.copy()
     mask = is_hol.values
     out.loc[mask, col_calls_future] = (
         np.round(out.loc[mask, col_calls_future].astype(float) * call_f[mask]).astype(int)
     )
-    out.loc[mask, col_tmo_future] = (
-        np.round(out.loc[mask, col_tmo_future].astype(float) * tmo_f[mask]).astype(int)
-    )
     return out
 
 
-def apply_post_holiday_adjustment(
+def apply_post_holiday_adjustment_calls(
     df_future, holidays_set, post_calls_by_hour, col_calls_future="calls"
 ):
     idx = df_future.index
@@ -189,9 +145,12 @@ def _is_holiday(ts, holidays_set: set) -> int:
 
 
 def forecast_120d(
-    df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays_set: set | None = None
+    df_hist_calls: pd.DataFrame,
+    df_tmo_hist: pd.DataFrame,
+    horizon_days: int = 120,
+    holidays_set: set | None = None,
 ):
-    # Artefactos
+    # ========= Modelos =========
     m_pl = tf.keras.models.load_model(PLANNER_MODEL, compile=False)
     sc_pl = joblib.load(PLANNER_SCALER)
     cols_pl = _load_cols(PLANNER_COLS)
@@ -200,31 +159,19 @@ def forecast_120d(
     sc_tmo = joblib.load(TMO_SCALER)
     cols_tmo = _load_cols(TMO_COLS)
 
-    # Histórico base
-    df = ensure_ts(df_hist_calls)
-    if TARGET_CALLS not in df.columns:
+    # ========= Llamadas (historical_data) =========
+    df_calls = ensure_ts(df_hist_calls)
+    if TARGET_CALLS not in df_calls.columns:
         raise ValueError(f"Falta columna {TARGET_CALLS} en historical_data.csv")
-    df = df[[TARGET_CALLS, TARGET_TMO] if TARGET_TMO in df.columns else [TARGET_CALLS]].copy()
-    df = df.dropna(subset=[TARGET_CALLS])
+    df_calls = df_calls[[TARGET_CALLS] + (["feriados"] if "feriados" in df_calls.columns else [])].copy()
+    df_calls = df_calls.dropna(subset=[TARGET_CALLS])
 
-    for c in [
-        "feriados",
-        "es_dia_de_pago",
-        "tmo_comercial",
-        "tmo_tecnico",
-        "proporcion_comercial",
-        "proporcion_tecnica",
-    ]:
-        if c in df.columns:
-            df[c] = df[c].ffill()
-
-    last_ts = df.index.max()
+    last_ts = df_calls.index.max()
     start_hist = last_ts - pd.Timedelta(days=HIST_WINDOW_DAYS)
-    df_recent = df.loc[df.index >= start_hist].copy() if not df.empty else df.copy()
+    df_recent = df_calls.loc[df_calls.index >= start_hist].copy()
     if df_recent.empty:
-        df_recent = df.copy()
+        df_recent = df_calls.copy()
 
-    # Horizonte
     future_ts = pd.date_range(
         last_ts + pd.Timedelta(hours=1),
         periods=horizon_days * 24,
@@ -232,7 +179,7 @@ def forecast_120d(
         tz=TIMEZONE,
     )
 
-    # Planner iterativo (con feriados futuro)
+    # Planner iterativo (con feriados futuro si los tienes)
     if "feriados" in df_recent.columns:
         dfp = df_recent[[TARGET_CALLS, "feriados"]].copy()
     else:
@@ -254,110 +201,97 @@ def forecast_120d(
 
     pred_calls = dfp.loc[future_ts, TARGET_CALLS]
 
-    # ===== TMO por hora: perfiles + (opcional) elasticidad suave =====
-    hist_tmo = df.copy()
-    hist_tmo = hist_tmo[
-        [
-            c
-            for c in [
-                TARGET_TMO,
-                "tmo_comercial",
-                "tmo_tecnico",
-                "proporcion_comercial",
-                "proporcion_tecnica",
-            ]
-            if c in hist_tmo.columns
-        ]
+    # Ajustes de llamadas por feriado/post-feriado (solo llamadas)
+    if holidays_set and len(holidays_set) > 0:
+        f_calls_by_hour, post_calls_by_hour = compute_holiday_factors(df_calls, holidays_set)
+    else:
+        f_calls_by_hour, post_calls_by_hour = None, None
+
+    # ========= TMO (HISTORICO_TMO) =========
+    # Perfiles y proporciones se calculan EXCLUSIVAMENTE de df_tmo_hist
+    df_tmo = df_tmo_hist.copy()
+    df_tmo = df_tmo[
+        [c for c in [
+            "q_llamadas_comercial",
+            "q_llamadas_tecnico",
+            "proporcion_comercial",
+            "proporcion_tecnica",
+            "tmo_comercial",
+            "tmo_tecnico",
+            "tmo_general",
+        ] if c in df_tmo.columns]
     ].dropna(how="all")
-    hist_tmo = (
-        hist_tmo.loc[hist_tmo.index >= (hist_tmo.index.max() - pd.Timedelta(days=84))]
-        if not hist_tmo.empty
-        else hist_tmo
-    )
-    hist_tmo = add_time_parts(hist_tmo) if not hist_tmo.empty else hist_tmo
 
-    def _profile(col):
-        if col in hist_tmo.columns and hist_tmo[col].notna().any():
-            return hist_tmo.groupby(["dow", "hour"])[col].median()
-        return None
+    # ventana (84d) para estacionalidad de TMO
+    if not df_tmo.empty:
+        df_tmo = df_tmo.loc[df_tmo.index >= (df_tmo.index.max() - pd.Timedelta(days=84))]
+        df_tmo = add_time_parts(df_tmo)
+    else:
+        # fallback vacío con valores neutros
+        df_tmo = pd.DataFrame(index=future_ts)
+        df_tmo["proporcion_comercial"] = 0.5
+        df_tmo["proporcion_tecnica"] = 0.5
+        df_tmo["tmo_comercial"] = 180.0
+        df_tmo["tmo_tecnico"] = 180.0
+        df_tmo = add_time_parts(df_tmo)
 
-    prof_prop_com = _profile("proporcion_comercial")
-    prof_tmo_com  = _profile("tmo_comercial")
-    prof_tmo_tec  = _profile("tmo_tecnico")
+    def _profile(df_source, col, default_val):
+        if col in df_source.columns and df_source[col].notna().any():
+            return df_source.groupby(["dow","hour"])[col].median()
+        # serie constante por si acaso
+        return pd.Series(default_val, index=pd.MultiIndex.from_product([range(7), range(24)]))
 
-    last_tmo_general = (
-        float(df[TARGET_TMO].ffill().iloc[-1])
-        if TARGET_TMO in df.columns and df[TARGET_TMO].notna().any()
-        else 180.0
-    )
-    default_prop = 0.5
-    default_tmo_com = last_tmo_general
-    default_tmo_tec = last_tmo_general
+    prof_prop_com = _profile(df_tmo, "proporcion_comercial", 0.5).clip(0,1)
+    prof_prop_tec = (1.0 - prof_prop_com).clip(0,1)
+    prof_tmo_com  = _profile(df_tmo, "tmo_comercial", 180.0)
+    prof_tmo_tec  = _profile(df_tmo, "tmo_tecnico",   180.0)
 
+    # Construimos base futura de TMO a partir de perfiles (dow,hour)
     base_tmo = pd.DataFrame(index=future_ts)
-    base_tmo[TARGET_CALLS] = pred_calls.values
-    if "feriados" in df.columns:
-        base_tmo["feriados"] = [_is_holiday(ts, holidays_set) for ts in base_tmo.index]
+    parts_future = add_time_parts(pd.DataFrame(index=future_ts))
 
-    parts_future = add_time_parts(base_tmo.copy())
-
-    def _map_profile(profile, default_value):
-        if profile is None or profile.empty:
-            return pd.Series(default_value, index=future_ts)
+    def _map_profile(profile, default_value=0.0):
         vals = []
-        for dow, h in zip(parts_future["dow"].values, parts_future["hour"].values):
+        for dw, hr in zip(parts_future["dow"].values, parts_future["hour"].values):
             try:
-                v = profile.loc[(int(dow), int(h))]
+                v = profile.loc[(int(dw), int(hr))]
             except KeyError:
-                v = np.nan
+                v = default_value
             vals.append(v)
-        return pd.Series(vals, index=future_ts).astype(float).fillna(default_value)
+        return pd.Series(vals, index=future_ts).astype(float)
 
-    # proporciones y TMO por tipo dinámicos
-    prop_com = _map_profile(prof_prop_com, default_prop).clip(0, 1)
-    prop_tec = (1.0 - prop_com).clip(0, 1)
-    tmo_com  = _map_profile(prof_tmo_com, default_tmo_com)
-    tmo_tec  = _map_profile(prof_tmo_tec, default_tmo_tec)
+    prop_com = _map_profile(prof_prop_com, 0.5).clip(0,1)
+    prop_tec = _map_profile(prof_prop_tec, 0.5).clip(0,1)
+    tmo_com  = _map_profile(prof_tmo_com, 180.0)
+    tmo_tec  = _map_profile(prof_tmo_tec, 180.0)
 
     base_tmo["proporcion_comercial"] = prop_com.values
     base_tmo["proporcion_tecnica"]   = prop_tec.values
     base_tmo["tmo_comercial"]        = tmo_com.values
     base_tmo["tmo_tecnico"]          = tmo_tec.values
 
+    # Features para el modelo de TMO (con medias del scaler en faltantes)
+    base_tmo["calls"] = pred_calls.values  # si tu modelo TMO usa calls, queda disponible
     base_tmo = add_time_parts(base_tmo)
     Xt = dummies_and_reindex_with_scaler_means(base_tmo, cols_tmo, sc_tmo)
     y_tmo = m_tmo.predict(sc_tmo.transform(Xt), verbose=0).flatten()
     y_tmo = np.maximum(y_tmo, 30.0)
 
-    # ===== Resultado horario (incluye mezcla por categoría) =====
+    # ========= Resultado horario =========
     df_hourly = pd.DataFrame(index=future_ts)
     df_hourly["calls"] = np.round(pred_calls).astype(int)
     df_hourly["tmo_s"] = np.round(y_tmo).astype(int)
-    # exportamos también la mezcla y TMO por tipo para el cálculo diario ponderado por categoría
     df_hourly["proporcion_comercial"] = prop_com.values
     df_hourly["proporcion_tecnica"]   = prop_tec.values
     df_hourly["tmo_comercial"]        = np.round(tmo_com.values).astype(int)
     df_hourly["tmo_tecnico"]          = np.round(tmo_tec.values).astype(int)
 
-    # Ajustes de feriado/post-feriado
-    if holidays_set and len(holidays_set) > 0:
-        (
-            f_calls_by_hour,
-            f_tmo_by_hour,
-            _g_calls,
-            _g_tmo,
-            post_calls_by_hour,
-        ) = compute_holiday_factors(df, holidays_set)
-
-        df_hourly = apply_holiday_adjustment(
-            df_hourly,
-            holidays_set,
-            f_calls_by_hour,
-            f_tmo_by_hour,
-            col_calls_future="calls",
-            col_tmo_future="tmo_s",
+    # Ajustes por feriados SOLO a llamadas (si están activados)
+    if holidays_set and len(holidays_set) > 0 and f_calls_by_hour is not None:
+        df_hourly = apply_holiday_adjustment_calls(
+            df_hourly, holidays_set, f_calls_by_hour, col_calls_future="calls"
         )
-        df_hourly = apply_post_holiday_adjustment(
+        df_hourly = apply_post_holiday_adjustment_calls(
             df_hourly, holidays_set, post_calls_by_hour, col_calls_future="calls"
         )
 
