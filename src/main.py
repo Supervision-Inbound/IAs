@@ -9,16 +9,18 @@ from src.data.loader_tmo import load_historico_tmo
 
 DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
-TMO_HIST_FILE = "data/TMO_HISTORICO.csv"   # <- FIX: este es el nombre real en tu repo
+TMO_HIST_FILE = "data/TMO_HISTORICO.csv"   # <- nombre real en tu repo
 TZ = "America/Santiago"
 
 TARGET_CALLS_NEW = "recibidos_nacional"
 TARGET_TMO_NEW = "tmo_general"
 
+# ---------------- utilidades de lectura ----------------
 def smart_read_historical(path: str) -> pd.DataFrame:
     try:
         df = pd.read_csv(path, low_memory=False)
-        if df.shape[1] > 1: return df
+        if df.shape[1] > 1:
+            return df
     except Exception:
         pass
     return pd.read_csv(path, delimiter=';', low_memory=False)
@@ -43,7 +45,8 @@ def load_holidays(csv_path: str) -> set:
     cols_map = {c.lower().strip(): c for c in fer.columns}
     fecha_col = None
     for cand in ["fecha","date","dia","día"]:
-        if cand in cols_map: fecha_col = cols_map[cand]; break
+        if cand in cols_map:
+            fecha_col = cols_map[cand]; break
     if not fecha_col: return set()
     fechas = pd.to_datetime(fer[fecha_col].astype(str), dayfirst=True, errors="coerce").dropna().dt.date
     return set(fechas)
@@ -57,6 +60,7 @@ def add_es_dia_de_pago(df_idx: pd.DataFrame) -> pd.Series:
     dias = [1,2,15,16,29,30,31]
     return pd.Series(df_idx.index.day.isin(dias).astype(int), index=df_idx.index, name="es_dia_de_pago")
 
+# ---------------- entrypoint ----------------
 def main(horizonte_dias: int):
     os.makedirs("public", exist_ok=True)
 
@@ -76,24 +80,39 @@ def main(horizonte_dias: int):
 
     dfh = ensure_ts(dfh)
 
-    # 2) Merge con TMO_HISTORICO.csv (por hora)
+    # 2) Merge con TMO_HISTORICO.csv (por hora) sin colisión de columnas
     used_tmo_hist = False
     if os.path.exists(TMO_HIST_FILE):
         df_tmo = load_historico_tmo(TMO_HIST_FILE)  # index ts
-        try: df_tmo.index = df_tmo.index.tz_convert(TZ)
-        except: pass
-        pre_cols = set(dfh.columns)
-        dfh = dfh.join(df_tmo, how="left")
+        try:
+            df_tmo.index = df_tmo.index.tz_convert(TZ)
+        except Exception:
+            pass
+
+        # columnas posibles que trae el loader
+        tmo_cols = [
+            "q_llamadas_general","q_llamadas_comercial","q_llamadas_tecnico",
+            "proporcion_comercial","proporcion_tecnica",
+            "tmo_comercial","tmo_tecnico","tmo_general"
+        ]
+
+        # asignación columna a columna para evitar "columns overlap" en join
+        for c in tmo_cols:
+            if c in df_tmo.columns:
+                if c in dfh.columns:
+                    # preferimos lo que ya trae dfh y completamos huecos con df_tmo
+                    dfh[c] = dfh[c].combine_first(df_tmo[c])
+                else:
+                    dfh[c] = df_tmo[c]
+
         used_tmo_hist = True
-        if "tmo_general" in dfh.columns and dfh["tmo_general"].notna().any():
-            dfh["tmo_general"] = dfh["tmo_general"].ffill()
 
         # Debug dumps
         debug = {
             "used_tmo_hist": used_tmo_hist,
             "tmo_hist_rows": int(df_tmo.shape[0]),
             "dfh_rows": int(dfh.shape[0]),
-            "new_cols": sorted(list(set(dfh.columns) - pre_cols))[:50],
+            "new_cols": [c for c in tmo_cols if c in dfh.columns],
             "last_non_na_tmo_general": float(dfh["tmo_general"].dropna().iloc[-1]) if "tmo_general" in dfh.columns and dfh["tmo_general"].notna().any() else None
         }
         with open("public/debug_tmo_merge.json","w",encoding="utf-8") as f:
