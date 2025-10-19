@@ -7,13 +7,12 @@ import pandas as pd
 import tensorflow as tf
 import joblib
 
-from typing import Tuple, List, Optional
+from typing import List, Optional
 
 from src.inferencia.features import (
     ensure_ts,
     add_time_parts,
     add_lags_mas,
-    dummies_and_reindex,
     dummies_and_reindex_with_scaler_means,
 )
 from src.inferencia.utils_io import write_daily_json, write_json
@@ -28,7 +27,7 @@ TZ           = "America/Santiago"
 TARGET_CALLS = "recibidos_nacional"  # estandarizado desde main
 COL_TMO_GEN  = "tmo_general"
 
-# Nombres de artefactos
+# Artefactos
 PLANNER_MODEL_PATH   = os.path.join(MODELS_DIR, "modelo_planner.keras")
 PLANNER_SCALER_PATH  = os.path.join(MODELS_DIR, "scaler_planner.pkl")
 PLANNER_COLS_PATH    = os.path.join(MODELS_DIR, "training_columns_planner.json")
@@ -37,8 +36,9 @@ TMO_MODEL_PATH       = os.path.join(MODELS_DIR, "modelo_tmo.keras")
 TMO_SCALER_PATH      = os.path.join(MODELS_DIR, "scaler_tmo.pkl")
 TMO_COLS_PATH        = os.path.join(MODELS_DIR, "training_columns_tmo.json")
 
+
 # ---------------------------------------------------------------------
-# Helpers de carga de artefactos
+# Helpers de artefactos
 # ---------------------------------------------------------------------
 def _load_artifacts(model_path: str, scaler_path: str, cols_path: str):
     if not os.path.exists(model_path):
@@ -54,6 +54,7 @@ def _load_artifacts(model_path: str, scaler_path: str, cols_path: str):
         cols = json.load(f)
     return model, scaler, cols
 
+
 # ---------------------------------------------------------------------
 # Índice futuro
 # ---------------------------------------------------------------------
@@ -61,11 +62,47 @@ def _make_future_index(last_ts: pd.Timestamp, horizon_days: int) -> pd.DatetimeI
     hours = horizon_days * 24
     tz = last_ts.tz if getattr(last_ts, "tz", None) is not None else TZ
     start = last_ts + pd.Timedelta(hours=1)
-    # usar 'h' para evitar FutureWarning
     return pd.date_range(start=start, periods=hours, freq="h", tz=tz)
 
+
 # ---------------------------------------------------------------------
-# Predicción iterativa de llamadas (inyectando calendario en cada paso)
+# Normalización horaria continua + imputación estable de llamadas
+# ---------------------------------------------------------------------
+def _ensure_hourly_continuous_calls(df_calls: pd.DataFrame) -> pd.DataFrame:
+    """
+    Garantiza índice horario continuo.
+    - 'feriados' y 'es_dia_de_pago': forward-fill (no inventa feriados).
+    - TARGET_CALLS: si hay huecos o NaN, imputa con MA(24) (mantiene escala).
+    """
+    d = df_calls.copy().sort_index()
+    if not isinstance(d.index, pd.DatetimeIndex):
+        raise ValueError("Se esperaba DatetimeIndex en _ensure_hourly_continuous_calls")
+
+    # construir índice horario completo
+    full_idx = pd.date_range(d.index.min(), d.index.max(), freq="h", tz=d.index.tz)
+    d = d.reindex(full_idx)
+
+    # calendario
+    if "feriados" in d.columns:
+        d["feriados"] = d["feriados"].ffill().fillna(0).astype(int)
+    if "es_dia_de_pago" in d.columns:
+        d["es_dia_de_pago"] = d["es_dia_de_pago"].ffill().fillna(0).astype(int)
+
+    # llamadas: imputación con MA(24)
+    if TARGET_CALLS in d.columns:
+        # primero mantener valores válidos
+        ma24 = pd.Series(d[TARGET_CALLS]).rolling(24, min_periods=1).mean()
+        d[TARGET_CALLS] = d[TARGET_CALLS].fillna(ma24)
+        # si quedara algo, usar última observación válida
+        d[TARGET_CALLS] = d[TARGET_CALLS].ffill()
+        # y si aún quedara algo (todo vacío al inicio), usa 0
+        d[TARGET_CALLS] = d[TARGET_CALLS].fillna(0)
+
+    return d
+
+
+# ---------------------------------------------------------------------
+# Predicción iterativa de llamadas (inyecta calendario en cada paso)
 # ---------------------------------------------------------------------
 def _predict_calls_iterative(
     df_calls_ts: pd.DataFrame,
@@ -77,21 +114,18 @@ def _predict_calls_iterative(
 ) -> pd.Series:
     """
     Predicción iterativa 1-step-ahead sobre el horizonte (horas).
-    Inyecta 'feriados' y 'es_dia_de_pago' en cada paso, además de time-parts y lags/MA,
-    para replicar el entorno de entrenamiento del planner.
+    Inyecta 'feriados' y 'es_dia_de_pago' en cada paso y usa MA/lags como en train.
     """
-    df_hist = df_calls_ts.copy().sort_index()
+    # Asegurar continuidad horaria y escala previa al iterativo
+    df_hist = _ensure_hourly_continuous_calls(df_calls_ts).sort_index()
 
-    # índice futuro con misma TZ que el histórico
+    # índice futuro
     last_ts = df_hist.index.max()
     tz = last_ts.tz if getattr(last_ts, "tz", None) is not None else TZ
     fut_idx = pd.date_range(start=last_ts + pd.Timedelta(hours=1), periods=horizon_hours, freq="h", tz=tz)
 
-    # columnas disponibles en el histórico (por si no están ambas)
     have_fer = "feriados" in df_hist.columns
     have_pay = "es_dia_de_pago" in df_hist.columns
-
-    # base mínima
     use_cols = [TARGET_CALLS] + ([ "feriados"] if have_fer else []) + ([ "es_dia_de_pago"] if have_pay else [])
     current = df_hist[use_cols].copy()
 
@@ -99,29 +133,26 @@ def _predict_calls_iterative(
     out_vals = []
 
     for ts in fut_idx:
-        # 1) placeholder de fila futura con calendario
+        # 1) placeholder con calendario
         row = {}
         if have_fer:
             d = ts.tz_convert(TZ).date if ts.tz is not None else ts.date()
             row["feriados"] = int(d in holidays_set) if holidays_set is not None else 0
         if have_pay:
             row["es_dia_de_pago"] = int(ts.day in dias_pago)
-
-        # anexar fila
         for k, v in row.items():
             current.loc[ts, k] = v
-        # target placeholder
         current.loc[ts, TARGET_CALLS] = np.nan
 
-        # 2) features de tiempo + lags/MA
+        # 2) features de tiempo y lags/MA
         tmp = add_time_parts(current)
         tmp = add_lags_mas(tmp, TARGET_CALLS)
 
-        # 3) X conforme a entrenamiento (relleno robusto con medias del scaler si aplica)
+        # 3) matriz X conforme al entrenamiento
         X_step = dummies_and_reindex_with_scaler_means(tmp.tail(1), train_cols, scaler)
         Xs = scaler.transform(X_step)
 
-        # 4) predecir y “cerrar” el paso
+        # 4) predecir
         pred = float(model.predict(Xs, verbose=0).flatten()[0])
         pred = max(0.0, pred)
         out_vals.append(pred)
@@ -129,14 +160,14 @@ def _predict_calls_iterative(
 
     return pd.Series(out_vals, index=fut_idx, name=TARGET_CALLS)
 
+
 # ---------------------------------------------------------------------
 # Perfiles TMO desde histórico por tipo
 # ---------------------------------------------------------------------
 def _build_tmo_profiles(df_tmo_hist: pd.DataFrame) -> pd.DataFrame:
     """
-    Devuelve un DataFrame por (dow,hour) con perfiles medianos:
+    Devuelve perfiles medianos por (dow,hour):
       proporcion_comercial, proporcion_tecnica, tmo_comercial, tmo_tecnico, tmo_general
-    Si faltan columnas, usa valores neutros/ffill/bfill.
     """
     if df_tmo_hist is None or df_tmo_hist.empty:
         idx = pd.MultiIndex.from_product([range(7), range(24)], names=["dow","hour"])
@@ -159,7 +190,7 @@ def _build_tmo_profiles(df_tmo_hist: pd.DataFrame) -> pd.DataFrame:
         if c not in d.columns:
             if c.startswith("proporcion_"):
                 d[c] = 0.5
-            elif c.startswith("tmo_"):
+            else:
                 d[c] = 300.0
 
     grp = (d.groupby(["dow","hour"])[cols_need]
@@ -168,10 +199,8 @@ def _build_tmo_profiles(df_tmo_hist: pd.DataFrame) -> pd.DataFrame:
              .bfill())
     return grp
 
+
 def _project_profiles_to_future(future_idx: pd.DatetimeIndex, profiles: pd.DataFrame) -> pd.DataFrame:
-    """
-    Expande perfiles (dow,hour) al índice futuro horario.
-    """
     fut = pd.DataFrame(index=future_idx)
     fut["dow"] = fut.index.dayofweek
     fut["hour"] = fut.index.hour
@@ -182,8 +211,9 @@ def _project_profiles_to_future(future_idx: pd.DatetimeIndex, profiles: pd.DataF
         fut[c] = fut[c].ffill().bfill().fillna(300.0)
     return fut.drop(columns=["dow","hour"])
 
+
 # ---------------------------------------------------------------------
-# Clip conservador del TMO horario (evita “suelo”/“techo” absurdos)
+# Clip conservador del TMO horario (evita “suelo/techo” absurdos)
 # ---------------------------------------------------------------------
 def _clip_tmo_from_hist(y_tmo_raw: np.ndarray, df_tmo_hist: pd.DataFrame) -> np.ndarray:
     try:
@@ -196,6 +226,7 @@ def _clip_tmo_from_hist(y_tmo_raw: np.ndarray, df_tmo_hist: pd.DataFrame) -> np.
         tmo_floor, tmo_cap = 60.0, 900.0
     return np.clip(y_tmo_raw, tmo_floor, tmo_cap)
 
+
 # ---------------------------------------------------------------------
 # Forecast principal
 # ---------------------------------------------------------------------
@@ -207,23 +238,19 @@ def forecast_120d(
 ) -> pd.DataFrame:
     """
     Entradas:
-      - df_hist_calls: histórico horario de llamadas (con TARGET_CALLS y opcionalmente feriados/es_dia_de_pago)
-      - df_tmo_hist:   histórico horario de TMO desagregado por tipo (para perfiles)
-      - horizon_days:  días a predecir
-      - holidays_set:  set de fechas feriado (para inyectar feriados 0/1 si no vienen)
-
+      - df_hist_calls: histórico horario (TARGET_CALLS, opcional feriados/es_dia_de_pago)
+      - df_tmo_hist:   histórico TMO desagregado (para perfiles)
     Salidas:
-      - Escribe:
-          public/prediccion_horaria.json
-          public/prediccion_diaria.json
-      - Retorna DataFrame horario con columnas: calls, tmo_s, y (si hay) tmo_* y proporciones
+      - public/prediccion_horaria.json
+      - public/prediccion_diaria.json
+      - Retorna DataFrame horario con: calls, tmo_s, y si hay: tmo_*, proporciones
     """
     os.makedirs(PUBLIC_DIR, exist_ok=True)
 
-    # 0) Normalizar índices (ensure_ts no convierte TZ si ya existe)
+    # 0) Normalizar índices; no forzamos tz_convert (lo maneja ensure_ts)
     df_calls = ensure_ts(df_hist_calls).sort_index()
 
-    # Si faltan columnas calendario, crearlas a partir de holidays_set
+    # calendario base si falta
     if "feriados" not in df_calls.columns:
         if holidays_set:
             idx_dates = (df_calls.index.date if df_calls.index.tz is None
@@ -236,7 +263,7 @@ def forecast_120d(
         dias = [1,2,15,16,29,30,31]
         df_calls["es_dia_de_pago"] = (df_calls.index.day.isin(dias)).astype(int)
 
-    # 1) Cargar artefactos
+    # 1) Artefactos
     m_planner, sc_planner, cols_planner = _load_artifacts(
         PLANNER_MODEL_PATH, PLANNER_SCALER_PATH, PLANNER_COLS_PATH
     )
@@ -244,7 +271,7 @@ def forecast_120d(
         TMO_MODEL_PATH, TMO_SCALER_PATH, TMO_COLS_PATH
     )
 
-    # 2) Predicción iterativa de llamadas (inyectando calendario)
+    # 2) Predicción iterativa de llamadas (inyectando calendario) + continuidad horaria
     horizon_hours = horizon_days * 24
     base_for_iter = (df_calls[[TARGET_CALLS, "feriados", "es_dia_de_pago"]]
                      if all(c in df_calls.columns for c in ["feriados","es_dia_de_pago"])
@@ -259,12 +286,12 @@ def forecast_120d(
     )
     future_idx = pred_calls.index
 
-    # 3) Perfiles TMO desde histórico por tipo (dow,hour) -> proyectados al futuro
+    # 3) Perfiles TMO -> futuro
     df_tmo_hist_ts = ensure_ts(df_tmo_hist) if df_tmo_hist is not None and not df_tmo_hist.empty else df_tmo_hist
     profiles = _build_tmo_profiles(df_tmo_hist_ts)
     fut_prof = _project_profiles_to_future(future_idx, profiles)
 
-    # 4) Construcción de features para el modelo TMO
+    # 4) Features TMO
     X_tmo_base = pd.DataFrame(index=future_idx)
     X_tmo_base["calls"] = pred_calls.values
     X_tmo_base["feriados"] = 0
@@ -278,7 +305,7 @@ def forecast_120d(
     Xt = add_time_parts(Xt)
     Xt_ready = dummies_and_reindex_with_scaler_means(Xt, cols_tmo, sc_tmo)
 
-    # 5) Predicción TMO horario + clip conservador
+    # 5) Predicción TMO horario + clip
     y_tmo_raw = m_tmo.predict(sc_tmo.transform(Xt_ready), verbose=0).flatten()
     y_tmo = _clip_tmo_from_hist(y_tmo_raw, df_tmo_hist_ts if df_tmo_hist_ts is not None else pd.DataFrame())
 
@@ -294,7 +321,7 @@ def forecast_120d(
         df_hourly["proporcion_comercial"] = np.round(fut_prof["proporcion_comercial"].values, 4)
         df_hourly["proporcion_tecnica"]   = np.round(fut_prof["proporcion_tecnica"].values, 4)
 
-    # 7) Escribir salidas
+    # 7) Salidas
     hourly_out = (df_hourly.reset_index()
                   .rename(columns={"index":"ts"})
                   .assign(ts=lambda d: d["ts"].dt.strftime("%Y-%m-%d %H:%M:%S"))
@@ -308,6 +335,17 @@ def forecast_120d(
         col_tmo="tmo_s"
     )
 
+    # 8) QA de nivel (útil para ver si volvimos a ~2.5k/día)
+    try:
+        hist_2w = df_calls[TARGET_CALLS].tail(24*14)
+        stats = {
+            "hist_last_ts": str(df_calls.index.max()),
+            "hist_hourly_mean_last_2w": float(hist_2w.mean()) if len(hist_2w) else None,
+            "pred_hourly_mean": float(np.mean(pred_calls.values)),
+            "pred_daily_mean": float(pred_calls.values.reshape(-1,24).sum(axis=1).mean()) if (len(pred_calls) % 24 == 0) else None
+        }
+        write_json(os.path.join(PUBLIC_DIR, "debug_calls_stats.json"), stats)
+    except Exception:
+        pass
+
     return df_hourly
-
-
