@@ -1,147 +1,155 @@
 # src/data/loader_tmo.py
 import os
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 TZ = "America/Santiago"
 
-# Aceptamos estos nombres si nos pasan un directorio en vez de archivo
-CANDIDATE_FILENAMES = [
-    "HISTORICO_TMO.csv",
-    "TMO_HISTORICO.csv",
-    "tmo_historico.csv",
-    "historico_tmo.csv",
-]
+# ----------------- utilidades -----------------
+def _smart_read_csv(path: str) -> pd.DataFrame:
+    # Tu archivo suele venir con ';'
+    try:
+        df = pd.read_csv(path, sep=';', low_memory=False)
+        if df.shape[1] > 1:
+            return df
+    except Exception:
+        pass
+    # Fallback: coma
+    return pd.read_csv(path, low_memory=False)
 
-def _read_csv_robust(path: str) -> pd.DataFrame:
-    """Intenta leer un CSV probando separadores comunes."""
-    seps = [",", ";", "|", "\t"]
-    last_err = None
-    for sep in seps:
-        try:
-            df = pd.read_csv(path, sep=sep)
-            if df.shape[1] >= 3:
-                return df
-        except Exception as e:
-            last_err = e
-            continue
-    if last_err:
-        raise last_err
-    raise ValueError(f"No pude leer {path} con separadores estándar.")
-
-def _pick_col(cols, candidates):
-    """Devuelve el nombre de columna real (respetando mayúsculas/minúsculas) que coincida con alguna candidata."""
+def _pick(cols, candidates):
     m = {c.lower().strip(): c for c in cols}
-    for c in candidates:
-        key = c.lower().strip()
+    for cand in candidates:
+        key = cand.lower().strip()
         if key in m:
             return m[key]
     return None
 
-def _ensure_ts(df, fecha_cands=("fecha","date"), hora_cands=("hora","hour")):
-    """Crea índice 'ts' con tz si es posible."""
-    c_fecha = _pick_col(df.columns, fecha_cands)
-    c_hora  = _pick_col(df.columns, hora_cands)
-    if c_fecha is None or c_hora is None:
-        raise ValueError("HISTORICO_TMO: faltan columnas de fecha/hora.")
-    # normalizar hora a HH:MM
-    h = df[c_hora].astype(str).str.slice(0,5)
-    ts = pd.to_datetime(df[c_fecha].astype(str) + " " + h, dayfirst=True, errors="coerce")
-    df = df.assign(ts=ts).dropna(subset=["ts"]).sort_values("ts")
+def _to_num(x):
+    if pd.isna(x): return np.nan
+    s = str(x).strip().replace(",", ".")
     try:
-        df["ts"] = df["ts"].dt.tz_localize(TZ, ambiguous="NaT", nonexistent="NaT")
-        df = df.dropna(subset=["ts"])
+        return float(s)
     except Exception:
-        # ya traía tz o hubo DST raro; seguimos sin tz explícita
-        pass
+        return np.nan
+
+def _parse_tmo(val):
+    """Acepta 'mm:ss', 'hh:mm:ss' o número en seg."""
+    if pd.isna(val): return np.nan
+    s = str(val).strip().replace(",", ".")
+    parts = s.split(":")
+    try:
+        if len(parts) == 3:
+            return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+        if len(parts) == 2:
+            return float(parts[0]) * 60 + float(parts[1])
+        return float(s)
+    except Exception:
+        return np.nan
+
+def _ensure_ts(df, col_fecha, col_hora):
+    # Hora -> HH:MM (si venía 0:00:00)
+    h = df[col_hora].astype(str).str.slice(0, 5)
+    # Parse flexible: dayfirst SÍ, sin format estricto
+    ts = pd.to_datetime(
+        df[col_fecha].astype(str) + " " + h,
+        dayfirst=True, errors="coerce"
+    )
+    df = df.assign(ts=ts).dropna(subset=["ts"])
+    # Alinear a la hora en punto y localizar TZ
+    df["ts"] = df["ts"].dt.floor("h").dt.tz_localize(TZ, ambiguous="NaT", nonexistent="NaT")
+    df = df.dropna(subset=["ts"]).sort_values("ts")
     return df.set_index("ts")
 
-def _find_file(path_or_dir: str) -> str:
-    """Si es archivo, lo devuelve; si es carpeta, busca candidatos."""
-    if os.path.isfile(path_or_dir):
-        return path_or_dir
-    if os.path.isdir(path_or_dir):
-        for f in os.listdir(path_or_dir):
-            for cand in CANDIDATE_FILENAMES:
-                if f.lower() == cand.lower():
-                    return os.path.join(path_or_dir, f)
-    raise FileNotFoundError(
-        f"No encontré archivo TMO histórico en {path_or_dir}. "
-        f"Busca alguno de: {', '.join(CANDIDATE_FILENAMES)}"
-    )
-
-def load_historico_tmo(path_or_dir: str = "data") -> pd.DataFrame:
+# ----------------- lector principal -----------------
+def load_historico_tmo(path="data/TMO_HISTORICO.csv") -> pd.DataFrame:
     """
-    Carga el histórico de TMO (archivo o carpeta) y retorna un DataFrame indexado por ts con columnas:
-      - q_llamadas_comercial
-      - q_llamadas_tecnico
-      - proporcion_comercial
-      - proporcion_tecnica
-      - tmo_comercial
-      - tmo_tecnico
-      - tmo_general  (si falta, se calcula ponderado por tipo)
+    Devuelve DF horario (index ts) con columnas:
+      q_llamadas_general, q_llamadas_comercial, q_llamadas_tecnico,
+      proporcion_comercial, proporcion_tecnica,
+      tmo_comercial, tmo_tecnico, tmo_general (seg)
     """
-    tmo_file = _find_file(path_or_dir)
-    df_raw = _read_csv_robust(tmo_file)
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
 
-    # normalizar nombres
-    df_raw.columns = [c.strip() for c in df_raw.columns]
-    cols = df_raw.columns
+    df0 = _smart_read_csv(path)
+    df0.columns = [c.strip() for c in df0.columns]
 
-    # mapeos flexibles
-    col_q_com  = _pick_col(cols, ["q_llamadas_comercial","llamadas_comercial","q_comercial","q_com","q_llamadas_com"])
-    col_q_tec  = _pick_col(cols, ["q_llamadas_tecnico","llamadas_tecnico","q_tecnico","q_tec","q_llamadas_tec"])
-    col_tmo_com = _pick_col(cols, ["tmo_comercial","tmo_com","aht_comercial","aht_com","tmo_com_seg"])
-    col_tmo_tec = _pick_col(cols, ["tmo_tecnico","tmo_tec","aht_tecnico","aht_tec","tmo_tec_seg"])
-    col_tmo_gen = _pick_col(cols, ["tmo_general","tmo","aht","tmo_seg","tmo (segundos)"])
+    # columnas de fecha/hora
+    c_fecha = _pick(df0.columns, ["fecha", "date", "dia", "día"])
+    c_hora  = _pick(df0.columns, ["hora", "time", "hh", "h"])
+    if not c_fecha or not c_hora:
+        raise ValueError("TMO_HISTORICO.csv debe tener columnas de fecha y hora.")
 
-    if col_q_com is None or col_q_tec is None:
-        raise ValueError("HISTORICO_TMO: faltan cantidades por tipo (comercial/técnico).")
+    # cantidades por tipo y total
+    c_q_gen = _pick(df0.columns, ["q_llamadas_general", "llamadas_general", "recibidos_nacional", "llamadas", "total_llamadas"])
+    c_q_com = _pick(df0.columns, ["q_llamadas_comercial", "llamadas_comercial", "comercial"])
+    c_q_tec = _pick(df0.columns, ["q_llamadas_tecnico", "llamadas_tecnico", "tecnico", "técnico"])
 
-    df = df_raw.copy()
+    # tmos por tipo y general
+    c_tmo_com = _pick(df0.columns, ["tmo_comercial", "aht_comercial", "tmo_com", "aht_com"])
+    c_tmo_tec = _pick(df0.columns, ["tmo_tecnico", "aht_tecnico", "tmo_tec", "aht_tec"])
+    c_tmo_gen = _pick(df0.columns, ["tmo_general", "tmo (segundos)", "tmo_seg", "aht"])
 
-    # a numéricos (manejo de comas)
-    to_numeric_cols = [c for c in [col_q_com, col_q_tec, col_tmo_com, col_tmo_tec, col_tmo_gen] if c]
-    for c in to_numeric_cols:
-        df[c] = pd.to_numeric(df[c].astype(str).str.replace(",", "."), errors="coerce")
+    df = _ensure_ts(df0, c_fecha, c_hora)
 
-    # timestamp
-    df = _ensure_ts(df)
+    # Numeric clean
+    for c in [c_q_gen, c_q_com, c_q_tec]:
+        if c and c in df.columns: df[c] = df[c].apply(_to_num)
+    for c in [c_tmo_com, c_tmo_tec, c_tmo_gen]:
+        if c and c in df.columns: df[c] = df[c].apply(_parse_tmo)
 
-    # renombrar estándar
-    rename_map = {col_q_com: "q_llamadas_comercial", col_q_tec: "q_llamadas_tecnico"}
-    if col_tmo_com: rename_map[col_tmo_com] = "tmo_comercial"
-    if col_tmo_tec: rename_map[col_tmo_tec] = "tmo_tecnico"
-    if col_tmo_gen: rename_map[col_tmo_gen] = "tmo_general"
-    df = df.rename(columns=rename_map)
+    # Agregar por hora (si hay múltiples filas en la misma hora)
+    agg = {}
+    if c_q_gen: agg[c_q_gen] = "sum"
+    if c_q_com: agg[c_q_com] = "sum"
+    if c_q_tec: agg[c_q_tec] = "sum"
+    if c_tmo_com: agg[c_tmo_com] = "mean"
+    if c_tmo_tec: agg[c_tmo_tec] = "mean"
+    if c_tmo_gen: agg[c_tmo_gen] = "mean"
+    if agg:
+        df = df.groupby("ts").agg(agg)
 
-    # calcular tmo_general si falta y tenemos por tipo
-    if "tmo_general" not in df.columns:
-        if "tmo_comercial" in df.columns and "tmo_tecnico" in df.columns:
-            calls_tot = (df["q_llamadas_comercial"].fillna(0) + df["q_llamadas_tecnico"].fillna(0)).replace(0, np.nan)
-            wsum = (df["q_llamadas_comercial"].fillna(0) * df["tmo_comercial"].fillna(0)) + \
-                   (df["q_llamadas_tecnico"].fillna(0)   * df["tmo_tecnico"].fillna(0))
-            df["tmo_general"] = (wsum / calls_tot).replace([np.inf, -np.inf], np.nan).fillna(method="ffill").fillna(method="bfill")
+    # Completar totales y desgloses
+    if not c_q_gen:
+        if c_q_com and c_q_tec:
+            df["q_llamadas_general"] = df[c_q_com].fillna(0) + df[c_q_tec].fillna(0)
+            c_q_gen = "q_llamadas_general"
         else:
-            df["tmo_general"] = 180.0
+            raise ValueError("No encuentro total de llamadas ni desgloses en TMO_HISTORICO.csv")
+    if not c_q_com:
+        df["q_llamadas_comercial"] = df[c_q_gen] * 0.5; c_q_com = "q_llamadas_comercial"
+    if not c_q_tec:
+        df["q_llamadas_tecnico"]   = df[c_q_gen] * 0.5; c_q_tec = "q_llamadas_tecnico"
 
-    # proporciones
-    total = (df["q_llamadas_comercial"].fillna(0) + df["q_llamadas_tecnico"].fillna(0)).replace(0, np.nan)
-    df["proporcion_comercial"] = (df["q_llamadas_comercial"] / total).fillna(0.5).clip(0,1)
-    df["proporcion_tecnica"]   = (df["q_llamadas_tecnico"]   / total).fillna(0.5).clip(0,1)
+    # Proporciones
+    den = df[c_q_gen].replace(0, np.nan)
+    df["proporcion_comercial"] = (df[c_q_com] / den).clip(0, 1).fillna(0.5)
+    df["proporcion_tecnica"]   = (df[c_q_tec] / den).clip(0, 1).fillna(0.5)
 
-    # salida ordenada
-    keep = [
-        "q_llamadas_comercial",
-        "q_llamadas_tecnico",
-        "proporcion_comercial",
-        "proporcion_tecnica",
-        "tmo_comercial",
-        "tmo_tecnico",
-        "tmo_general",
-    ]
-    keep = [c for c in keep if c in df.columns]
-    return df[keep].sort_index()
+    # TMO por tipo y general
+    if not c_tmo_com and c_tmo_gen:
+        df["tmo_comercial"] = df[c_tmo_gen]; c_tmo_com = "tmo_comercial"
+    if not c_tmo_tec and c_tmo_gen:
+        df["tmo_tecnico"]   = df[c_tmo_gen]; c_tmo_tec = "tmo_tecnico"
 
-# Alias para compatibilidad con nombre anterior
-load_tmo_historico = load_historico_tmo
+    if c_tmo_gen:
+        df["tmo_general"] = df[c_tmo_gen]
+    else:
+        num = df[c_q_com].fillna(0)*df[c_tmo_com].fillna(0) + df[c_q_tec].fillna(0)*df[c_tmo_tec].fillna(0)
+        den = df[c_q_com].fillna(0) + df[c_q_tec].fillna(0)
+        df["tmo_general"] = (num / den.replace(0, np.nan)).fillna(0)
+
+    out = df.rename(columns={
+        c_q_gen: "q_llamadas_general",
+        c_q_com: "q_llamadas_comercial",
+        c_q_tec: "q_llamadas_tecnico",
+        c_tmo_com if c_tmo_com else "tmo_comercial": "tmo_comercial",
+        c_tmo_tec if c_tmo_tec else "tmo_tecnico":   "tmo_tecnico",
+    })[[
+        "q_llamadas_general","q_llamadas_comercial","q_llamadas_tecnico",
+        "proporcion_comercial","proporcion_tecnica",
+        "tmo_comercial","tmo_tecnico","tmo_general"
+    ]]
+
+    return out
