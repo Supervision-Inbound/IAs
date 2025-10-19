@@ -1,14 +1,15 @@
 # src/inferencia/features.py
 from __future__ import annotations
-import unicodedata
+import os, unicodedata, json
 import numpy as np
 import pandas as pd
 from typing import List
 
 TZ = "America/Santiago"
+DEBUG_PATH = "public/ensure_ts_debug.json"
 
 # -----------------------------
-# Normalización de columnas
+# utilidades
 # -----------------------------
 def _strip_accents(s: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
@@ -20,26 +21,51 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         c = "_".join(c.split())
         return c
     d = df.copy()
-    d.columns = [ _norm(c) for c in d.columns ]
+    d.columns = [_norm(c) for c in d.columns]
     return d
 
+def _write_debug(payload: dict):
+    try:
+        os.makedirs("public", exist_ok=True)
+        with open(DEBUG_PATH, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+    except Exception:
+        pass
+
 # -----------------------------
-# ensure_ts robusto
+# ensure_ts robusto + diagnóstico
 # -----------------------------
 def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Acepta:
-      - Una columna de fecha-hora: ts | timestamp | datatime | datetime
-      - Dos columnas: fecha + hora (hora|hora_numero|hora_num|h|time)
-        * 'hora' puede venir como 0..23, 'HH', 'HH:MM', 'HH:MM:SS'
-    Devuelve DataFrame indexado por 'ts' (DatetimeIndex tz-aware).
+    Reglas:
+      1) Si hay índice DatetimeIndex, se usa (ajustando TZ).
+      2) Intento A: columna única tipo timestamp en {'ts','timestamp','datatime','datetime','fechahora','fecha_hora'}.
+         Si parsea < 10 filas válidas, se considera fallo y se intenta B.
+      3) Intento B: pareja fecha + hora. 'fecha' = cualquier col que contenga 'fecha' o 'date'.
+         'hora' = cualquier col que contenga 'hora' o 'hour'.
+         Normaliza horas numéricas y cadenas a 'HH:MM:SS'.
+    Devuelve DF indexado por ts (tz=America/Santiago).
     """
     if df is None or df.empty:
         raise ValueError("DataFrame vacío en ensure_ts.")
 
+    raw_cols = list(df.columns)
     d = normalize_columns(df)
+    ncols = list(d.columns)
 
-    # 1) Si ya viene con índice DatetimeIndex, solo asegurar tz
+    debug = {
+        "raw_columns": raw_cols,
+        "normalized_columns": ncols,
+        "path_chosen": None,
+        "single_col_candidate": None,
+        "single_valid_rows": None,
+        "pair_date_candidates": [],
+        "pair_hour_candidates": [],
+        "pair_chosen": None,
+        "pair_valid_rows": None,
+    }
+
+    # 0) Si ya viene con índice datetime
     if isinstance(d.index, pd.DatetimeIndex):
         idx = d.index
         try:
@@ -48,42 +74,67 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
             else:
                 d.index = idx.tz_convert(TZ)
         except Exception:
-            # si hay NaT por DST, caer al parse en columna
-            d = d.reset_index()
+            d = d.reset_index()  # volvemos a columnas para reprocesar
+        else:
+            debug["path_chosen"] = "index_already_datetime"
+            _write_debug(debug)
+            return d
 
-    # 2) Candidatos de columna única
-    single_ts_candidates = ["ts", "timestamp", "datatime", "datetime", "fecha_hora", "fechahora"]
+    # 1) Intento A: columna única timestamp
+    single_ts_candidates = ["ts", "timestamp", "datatime", "datetime", "fechahora", "fecha_hora"]
     col_single = next((c for c in single_ts_candidates if c in d.columns), None)
+    debug["single_col_candidate"] = col_single
 
     if col_single is not None:
-        ts = pd.to_datetime(d[col_single].astype(str), dayfirst=True, errors="coerce")
-        d = d.assign(ts=ts).dropna(subset=["ts"])
-    else:
-        # 3) Candidatos por parejas fecha + hora
-        fecha_candidates = ["fecha", "date", "dia", "día"]
-        hora_candidates  = ["hora", "hora_numero", "hora_num", "h", "time"]
+        tsA = pd.to_datetime(d[col_single].astype(str), dayfirst=True, errors="coerce")
+        dA = d.assign(ts=tsA).dropna(subset=["ts"]).copy()
+        validA = int(dA.shape[0])
+        debug["single_valid_rows"] = validA
+        if validA >= 10:  # umbral mínimo razonable para aceptar esta ruta
+            dA = dA.sort_values("ts")
+            try:
+                if getattr(dA["ts"].dt, "tz", None) is None:
+                    dA["ts"] = dA["ts"].dt.tz_localize(TZ, ambiguous="NaT", nonexistent="NaT")
+                else:
+                    dA["ts"] = dA["ts"].dt.tz_convert(TZ)
+            except Exception:
+                dA = dA.dropna(subset=["ts"])
+            dA = dA.set_index("ts")
+            debug["path_chosen"] = "single_column"
+            _write_debug(debug)
+            return dA
+        # si no cumple filas válidas, seguimos al intento B
 
-        c_fecha = next((c for c in fecha_candidates if c in d.columns), None)
-        c_hora  = next((c for c in hora_candidates  if c in d.columns), None)
+    # 2) Intento B: pareja fecha + hora
+    # candidatos amplios (cualquier col que contenga 'fecha' o 'date', y 'hora' o 'hour')
+    date_cands = [c for c in d.columns if ("fecha" in c) or (c.startswith("date")) or (c == "date")]
+    hour_cands = [c for c in d.columns if ("hora" in c) or (c == "hour") or (c.startswith("hour"))]
+    debug["pair_date_candidates"] = date_cands
+    debug["pair_hour_candidates"] = hour_cands
 
-        if c_fecha is None or c_hora is None:
-            # último intento: algunos históricos traen 'datatime' con otro nombre
-            # o 'datetime' separado raro; si no hay forma, error claro:
-            raise ValueError("Se requiere 'ts' o ('fecha' + 'hora'). No se encontró combinación válida.")
+    if date_cands and hour_cands:
+        # heurística: preferir 'fecha' exacta y 'hora_numero' si existen
+        c_fecha = "fecha" if "fecha" in date_cands else date_cands[0]
+        if "hora_numero" in hour_cands:
+            c_hora = "hora_numero"
+        elif "hora" in hour_cands:
+            c_hora = "hora"
+        else:
+            c_hora = hour_cands[0]
 
-        # normalizar 'hora' a string HH:MM:SS
+        debug["pair_chosen"] = {"fecha": c_fecha, "hora": c_hora}
+
         h = d[c_hora]
+        # normalizar horas a "HH:MM:SS"
         if np.issubdtype(h.dtype, np.number):
-            # 0..23 -> "HH:00:00"
             hh = h.astype("Int64").astype(object).where(h.notna(), None)
             h_str = hh.apply(lambda x: f"{int(x):02d}:00:00" if x is not None and pd.notna(x) else None)
         else:
             h_str = h.astype(str).str.strip()
-            # "7" -> "07:00:00", "7:3" -> "07:03:00", "7:30"->"07:30:00"
             def _fmt_hour(s: str) -> str:
                 s0 = s.replace(",", ".")
                 if s0.isdigit():
-                    return f"{int(s0):02d}:00:00"
+                    return f"{int(float(s0)):02d}:00:00"
                 parts = s0.split(":")
                 try:
                     if len(parts) == 1:
@@ -94,36 +145,59 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
                         return f"{int(parts[0]):02d}:{int(parts[1]):02d}:{int(float(parts[2])):02d}"
                 except Exception:
                     pass
-                # fallback: dejar como viene y que to_datetime resuelva
                 return s
             h_str = h_str.apply(_fmt_hour)
 
-        ts = pd.to_datetime(
+        tsB = pd.to_datetime(
             d[c_fecha].astype(str).str.strip() + " " + h_str.astype(str),
             dayfirst=True, errors="coerce"
         )
-        d = d.assign(ts=ts).dropna(subset=["ts"])
+        dB = d.assign(ts=tsB).dropna(subset=["ts"]).copy()
+        validB = int(dB.shape[0])
+        debug["pair_valid_rows"] = validB
 
-    # ordenar por ts y fijar índice con TZ
-    d = d.sort_values("ts")
-    try:
-        if getattr(d["ts"].dt, "tz", None) is None:
-            d["ts"] = d["ts"].dt.tz_localize(TZ, ambiguous="NaT", nonexistent="NaT")
-        else:
-            d["ts"] = d["ts"].dt.tz_convert(TZ)
-    except Exception:
-        # si alguna fila cae en NaT por DST, eliminarla
-        d = d.dropna(subset=["ts"])
+        if validB == 0 and col_single is not None:
+            # fallback: si la columna única tenía algo, úsala aunque sea corta
+            tsA = pd.to_datetime(d[col_single].astype(str), dayfirst=True, errors="coerce")
+            dA = d.assign(ts=tsA).dropna(subset=["ts"]).copy()
+            validA = int(dA.shape[0])
+            if validA > 0:
+                dA = dA.sort_values("ts")
+                try:
+                    if getattr(dA["ts"].dt, "tz", None) is None:
+                        dA["ts"] = dA["ts"].dt.tz_localize(TZ, ambiguous="NaT", nonexistent="NaT")
+                    else:
+                        dA["ts"] = dA["ts"].dt.tz_convert(TZ)
+                except Exception:
+                    dA = dA.dropna(subset=["ts"])
+                dA = dA.set_index("ts")
+                debug["path_chosen"] = "single_column_fallback"
+                _write_debug(debug)
+                return dA
 
-    d = d.set_index("ts")
-    return d
+        if validB > 0:
+            dB = dB.sort_values("ts")
+            try:
+                if getattr(dB["ts"].dt, "tz", None) is None:
+                    dB["ts"] = dB["ts"].dt.tz_localize(TZ, ambiguous="NaT", nonexistent="NaT")
+                else:
+                    dB["ts"] = dB["ts"].dt.tz_convert(TZ)
+            except Exception:
+                dB = dB.dropna(subset=["ts"])
+            dB = dB.set_index("ts")
+            debug["path_chosen"] = "pair_fecha_hora"
+            _write_debug(debug)
+            return dB
+
+    debug["path_chosen"] = "error"
+    _write_debug(debug)
+    raise ValueError("Se requiere 'ts' o ('fecha' + 'hora'). No se encontró combinación válida.")
 
 # -----------------------------
 # Partes de tiempo
 # -----------------------------
 def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     d = df.copy()
-    # Usar índice si existe; si no, buscar 'ts'
     idx = d.index if isinstance(d.index, pd.DatetimeIndex) else pd.to_datetime(d["ts"], errors="coerce")
     d["dow"]   = idx.dayofweek
     d["month"] = idx.month
@@ -141,7 +215,6 @@ def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
 # -----------------------------
 def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     d = df.copy()
-    # lags típicos del entrenamiento (ajusta si tu train usó otros):
     for lag in [24, 48, 72, 168]:
         d[f"lag_{lag}"] = d[target_col].shift(lag)
     for win in [24, 72, 168]:
@@ -152,11 +225,6 @@ def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
 # Reindex a columnas de entrenamiento
 # -----------------------------
 def dummies_and_reindex_with_scaler_means(df: pd.DataFrame, training_cols: List[str], scaler) -> pd.DataFrame:
-    """
-    - One-hot de dow, month, hour si existen
-    - Reindex a training_cols; las faltantes se rellenan con la media aprendida por el scaler (si se puede),
-      y si no, con 0.0 como fallback seguro.
-    """
     d = df.copy()
     cat_cols = [c for c in ["dow", "month", "hour"] if c in d.columns]
     if cat_cols:
@@ -164,7 +232,6 @@ def dummies_and_reindex_with_scaler_means(df: pd.DataFrame, training_cols: List[
 
     X = d.reindex(columns=training_cols, fill_value=np.nan)
 
-    # Rellenar NaN con medias del scaler si están disponibles
     try:
         means = None
         if hasattr(scaler, "mean_"):
@@ -172,7 +239,6 @@ def dummies_and_reindex_with_scaler_means(df: pd.DataFrame, training_cols: List[
         elif hasattr(scaler, "mean"):
             means = scaler.mean
         if means is not None and len(means) == X.shape[1]:
-            # usar medias columna a columna
             for i, col in enumerate(X.columns):
                 X[col] = X[col].fillna(float(means[i]))
         else:
@@ -181,3 +247,4 @@ def dummies_and_reindex_with_scaler_means(df: pd.DataFrame, training_cols: List[
         X = X.fillna(0.0)
 
     return X.astype(float)
+
