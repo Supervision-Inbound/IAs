@@ -1,7 +1,7 @@
 [
   {
     "ts": "2025-07-27 23:00:00",
-    "calls": 18,
+    "calls": 8,
     "tmo_s": 195,
     "tmo_comercial": 243,
     "tmo_tecnico": 268,
@@ -10,7 +10,7 @@
   },
   {
     "ts": "2025-07-28 00:00:00",
-    "calls": 18,
+    "calls": 12,
     "tmo_s": 195,
     "tmo_comercial": 243,
     "tmo_tecnico": 268,
@@ -19,7 +19,7 @@
   },
   {
     "ts": "2025-07-28 01:00:00",
-    "calls": 11,
+    "calls": 9,
     "tmo_s": 195,
     "tmo_comercial": 243,
     "tmo_tecnico": 268,
@@ -55,7 +55,7 @@
   },
   {
     "ts": "2025-07-28 05:00:00",
-    "calls": 3,
+    "calls": 7,
     "tmo_s": 195,
     "tmo_comercial": 243,
     "tmo_tecnico": 268,
@@ -64,7 +64,7 @@
   },
   {
     "ts": "2025-07-28 06:00:00",
-    "calls": 5,
+    "calls": 8,
     "tmo_s": 195,
     "tmo_comercial": 243,
     "tmo_tecnico": 268,
@@ -73,7 +73,7 @@
   },
   {
     "ts": "2025-07-28 07:00:00",
-    "calls": 9,
+    "calls": 10,
     "tmo_s": 195,
     "tmo_comercial": 243,
     "tmo_tecnico": 268,
@@ -82,7 +82,7 @@
   },
   {
     "ts": "2025-07-28 08:00:00",
-    "calls": 14,
+    "calls": 16,
     "tmo_s": 195,
     "tmo_comercial": 243,
     "tmo_tecnico": 268,
@@ -100,7 +100,7 @@
   },
   {
     "ts": "2025-07-28 10:00:00",
-    "calls": 22,
+    "calls": 24,
     "tmo_s": 195,
     "tmo_comercial": 316,
     "tmo_tecnico": 308,
@@ -127,7 +127,7 @@
   },
   {
     "ts": "2025-07-28 13:00:00",
-    "calls": 24,
+    "calls": 21,
     "tmo_s": 195,
     "tmo_comercial": 314,
     "tmo_tecnico": 298,
@@ -136,7 +136,7 @@
   },
   {
     "ts": "2025-07-28 14:00:00",
-    "calls": 22,
+    "calls": 20,
     "tmo_s": 195,
     "tmo_comercial": 315,
     "tmo_tecnico": 296,
@@ -163,7 +163,7 @@
   },
   {
     "ts": "2025-07-28 17:00:00",
-    "calls": 19,
+    "calls": 20,
     "tmo_s": 195,
     "tmo_comercial": 311,
     "tmo_tecnico": 296,
@@ -172,7 +172,7 @@
   },
   {
     "ts": "2025-07-28 18:00:00",
-    "calls": 17,
+    "calls": 18,
     "tmo_s": 195,
     "tmo_comercial": 316,
     "tmo_tecnico": 286,
@@ -181,7 +181,7 @@
   },
   {
     "ts": "2025-07-28 19:00:00",
-    "calls": 15,
+    "calls": 14,
     "tmo_s": 195,
     "tmo_comercial": 305,
     "tmo_tecnico": 279,
@@ -190,7 +190,7 @@
   },
   {
     "ts": "2025-07-28 20:00:00",
-    "calls": 14,
+    "calls": 12,
     "tmo_s": 195,
     "tmo_comercial": 296,
     "tmo_tecnico": 266,
@@ -199,7 +199,7 @@
   },
   {
     "ts": "2025-07-28 21:00:00",
-    "calls": 12,
+    "calls": 11,
     "tmo_s": 195,
     "tmo_comercial": 288,
     "tmo_tecnico": 267,
@@ -208,7 +208,7 @@
   },
   {
     "ts": "2025-07-28 22:00:00",
-    "calls": 12,
+    "calls": 11,
     "tmo_s": 195,
     "tmo_comercial": 280,
     "tmo_tecnico": 276,
@@ -217,7 +217,7 @@
   },
   {
     "ts": "2025-07-28 23:00:00",
-    "calls": 11,
+    "calls": 6,
     "tmo_s": 195,
     "tmo_comercial": 264,
     "tmo_tecnico": 272,
@@ -226,7 +226,7 @@
   },
   {
     "ts": "2025-07-29 00:00:00",
-    "calls": 9,
+    "calls": 7,
     "tmo_s": 195,
     "tmo_comercial": 264,
     "tmo_tecnico": 272,
@@ -253,7 +253,7 @@
   },
   {
     "ts": "2025-07-29 03:00:00",
-    "calls": 4,
+    "calls": 5,
     "tmo_s": 195,
     "tmo_comercial": 264,
     "tmo_tecnico": 272,
@@ -271,7 +271,7 @@
   },
   {
     "ts": "2025-07-29 05:00:00",
-    "calls": 3,
+    "calls": 6,
     "tmo_s": 195,
     "tmo_comercial": 264,
     "tmo_tecnico": 272,
@@ -280,7 +280,7 @@
   },
   {
     "ts": "2025-07-29 06:00:00",
-    "calls": 6,
+    "calls": 7,
     "tmo_s": 195,
     "tmo_comercial": 264,
     "tmo_tecnico": 272,
@@ -298,7 +298,7 @@
   },
   {
     "ts": "2025-07-29 08:00:00",
-    "calls": 9,
+    "calls": 10,
     "tmo_s": 195,
     "tmo_comercial": 264,
     "tmo_tecnico": 272,
@@ -307,7 +307,7 @@
   },
   {
     "ts": "2025-07-29 09:00:00",
-    "calls": 10,
+    "calls": 11,
     "tmo_s": 195,
     "tmo_comercial": 264,
     "tmo_tecnico": 272,
@@ -325,7 +325,7 @@
   },
   {
     "ts": "2025-07-29 11:00:00",
-    "calls": 16,
+    "calls": 15,
     "tmo_s": 195,
     "tmo_comercial": 319,
     "tmo_tecnico": 308,
@@ -352,7 +352,7 @@
   },
   {
     "ts": "2025-07-29 14:00:00",
-    "calls": 18,
+    "calls": 17,
     "tmo_s": 195,
     "tmo_comercial": 317,
     "tmo_tecnico": 305,
@@ -361,7 +361,7 @@
   },
   {
     "ts": "2025-07-29 15:00:00",
-    "calls": 17,
+    "calls": 16,
     "tmo_s": 195,
     "tmo_comercial": 316,
     "tmo_tecnico": 308,
@@ -370,7 +370,7 @@
   },
   {
     "ts": "2025-07-29 16:00:00",
-    "calls": 17,
+    "calls": 16,
     "tmo_s": 195,
     "tmo_comercial": 320,
     "tmo_tecnico": 299,
@@ -379,7 +379,7 @@
   },
   {
     "ts": "2025-07-29 17:00:00",
-    "calls": 17,
+    "calls": 15,
     "tmo_s": 195,
     "tmo_comercial": 321,
     "tmo_tecnico": 294,
@@ -388,7 +388,7 @@
   },
   {
     "ts": "2025-07-29 18:00:00",
-    "calls": 15,
+    "calls": 14,
     "tmo_s": 195,
     "tmo_comercial": 310,
     "tmo_tecnico": 288,
@@ -415,7 +415,7 @@
   },
   {
     "ts": "2025-07-29 21:00:00",
-    "calls": 11,
+    "calls": 10,
     "tmo_s": 195,
     "tmo_comercial": 288,
     "tmo_tecnico": 266,
@@ -433,7 +433,7 @@
   },
   {
     "ts": "2025-07-29 23:00:00",
-    "calls": 9,
+    "calls": 7,
     "tmo_s": 195,
     "tmo_comercial": 268,
     "tmo_tecnico": 283,
@@ -451,7 +451,7 @@
   },
   {
     "ts": "2025-07-30 01:00:00",
-    "calls": 6,
+    "calls": 5,
     "tmo_s": 195,
     "tmo_comercial": 268,
     "tmo_tecnico": 283,
@@ -460,7 +460,7 @@
   },
   {
     "ts": "2025-07-30 02:00:00",
-    "calls": 5,
+    "calls": 4,
     "tmo_s": 195,
     "tmo_comercial": 268,
     "tmo_tecnico": 283,
@@ -478,7 +478,7 @@
   },
   {
     "ts": "2025-07-30 04:00:00",
-    "calls": 5,
+    "calls": 4,
     "tmo_s": 195,
     "tmo_comercial": 268,
     "tmo_tecnico": 283,
@@ -505,7 +505,7 @@
   },
   {
     "ts": "2025-07-30 07:00:00",
-    "calls": 9,
+    "calls": 8,
     "tmo_s": 195,
     "tmo_comercial": 268,
     "tmo_tecnico": 283,
@@ -523,7 +523,7 @@
   },
   {
     "ts": "2025-07-30 09:00:00",
-    "calls": 10,
+    "calls": 11,
     "tmo_s": 195,
     "tmo_comercial": 268,
     "tmo_tecnico": 283,
@@ -586,7 +586,7 @@
   },
   {
     "ts": "2025-07-30 16:00:00",
-    "calls": 15,
+    "calls": 14,
     "tmo_s": 195,
     "tmo_comercial": 328,
     "tmo_tecnico": 302,
@@ -604,7 +604,7 @@
   },
   {
     "ts": "2025-07-30 18:00:00",
-    "calls": 14,
+    "calls": 13,
     "tmo_s": 195,
     "tmo_comercial": 315,
     "tmo_tecnico": 291,
@@ -703,7 +703,7 @@
   },
   {
     "ts": "2025-07-31 05:00:00",
-    "calls": 7,
+    "calls": 4,
     "tmo_s": 195,
     "tmo_comercial": 270,
     "tmo_tecnico": 274,
@@ -712,7 +712,7 @@
   },
   {
     "ts": "2025-07-31 06:00:00",
-    "calls": 7,
+    "calls": 6,
     "tmo_s": 195,
     "tmo_comercial": 270,
     "tmo_tecnico": 274,
@@ -748,7 +748,7 @@
   },
   {
     "ts": "2025-07-31 10:00:00",
-    "calls": 11,
+    "calls": 10,
     "tmo_s": 195,
     "tmo_comercial": 324,
     "tmo_tecnico": 302,
@@ -757,7 +757,7 @@
   },
   {
     "ts": "2025-07-31 11:00:00",
-    "calls": 12,
+    "calls": 11,
     "tmo_s": 195,
     "tmo_comercial": 324,
     "tmo_tecnico": 304,
@@ -811,7 +811,7 @@
   },
   {
     "ts": "2025-07-31 17:00:00",
-    "calls": 13,
+    "calls": 12,
     "tmo_s": 195,
     "tmo_comercial": 318,
     "tmo_tecnico": 302,
@@ -847,7 +847,7 @@
   },
   {
     "ts": "2025-07-31 21:00:00",
-    "calls": 10,
+    "calls": 11,
     "tmo_s": 195,
     "tmo_comercial": 287,
     "tmo_tecnico": 276,
@@ -883,7 +883,7 @@
   },
   {
     "ts": "2025-08-01 01:00:00",
-    "calls": 4,
+    "calls": 5,
     "tmo_s": 195,
     "tmo_comercial": 280,
     "tmo_tecnico": 290,
@@ -901,7 +901,7 @@
   },
   {
     "ts": "2025-08-01 03:00:00",
-    "calls": 4,
+    "calls": 3,
     "tmo_s": 195,
     "tmo_comercial": 280,
     "tmo_tecnico": 290,
@@ -910,7 +910,7 @@
   },
   {
     "ts": "2025-08-01 04:00:00",
-    "calls": 4,
+    "calls": 3,
     "tmo_s": 195,
     "tmo_comercial": 280,
     "tmo_tecnico": 290,
@@ -973,7 +973,7 @@
   },
   {
     "ts": "2025-08-01 11:00:00",
-    "calls": 9,
+    "calls": 10,
     "tmo_s": 195,
     "tmo_comercial": 324,
     "tmo_tecnico": 308,
@@ -1009,7 +1009,7 @@
   },
   {
     "ts": "2025-08-01 15:00:00",
-    "calls": 12,
+    "calls": 11,
     "tmo_s": 195,
     "tmo_comercial": 320,
     "tmo_tecnico": 306,
@@ -1054,7 +1054,7 @@
   },
   {
     "ts": "2025-08-01 20:00:00",
-    "calls": 10,
+    "calls": 11,
     "tmo_s": 195,
     "tmo_comercial": 294,
     "tmo_tecnico": 272,
@@ -1108,7 +1108,7 @@
   },
   {
     "ts": "2025-08-02 02:00:00",
-    "calls": 4,
+    "calls": 5,
     "tmo_s": 195,
     "tmo_comercial": 273,
     "tmo_tecnico": 285,
@@ -1117,7 +1117,7 @@
   },
   {
     "ts": "2025-08-02 03:00:00",
-    "calls": 3,
+    "calls": 4,
     "tmo_s": 195,
     "tmo_comercial": 273,
     "tmo_tecnico": 285,
@@ -1126,7 +1126,7 @@
   },
   {
     "ts": "2025-08-02 04:00:00",
-    "calls": 3,
+    "calls": 4,
     "tmo_s": 195,
     "tmo_comercial": 273,
     "tmo_tecnico": 285,
@@ -1135,7 +1135,7 @@
   },
   {
     "ts": "2025-08-02 05:00:00",
-    "calls": 4,
+    "calls": 5,
     "tmo_s": 195,
     "tmo_comercial": 273,
     "tmo_tecnico": 285,
@@ -1171,7 +1171,7 @@
   },
   {
     "ts": "2025-08-02 09:00:00",
-    "calls": 8,
+    "calls": 7,
     "tmo_s": 195,
     "tmo_comercial": 273,
     "tmo_tecnico": 285,
@@ -1180,7 +1180,7 @@
   },
   {
     "ts": "2025-08-02 10:00:00",
-    "calls": 9,
+    "calls": 8,
     "tmo_s": 195,
     "tmo_comercial": 289,
     "tmo_tecnico": 279,
@@ -1234,7 +1234,7 @@
   },
   {
     "ts": "2025-08-02 16:00:00",
-    "calls": 12,
+    "calls": 11,
     "tmo_s": 195,
     "tmo_comercial": 283,
     "tmo_tecnico": 276,
@@ -1243,7 +1243,7 @@
   },
   {
     "ts": "2025-08-02 17:00:00",
-    "calls": 12,
+    "calls": 11,
     "tmo_s": 195,
     "tmo_comercial": 283,
     "tmo_tecnico": 276,
@@ -1252,7 +1252,7 @@
   },
   {
     "ts": "2025-08-02 18:00:00",
-    "calls": 12,
+    "calls": 11,
     "tmo_s": 195,
     "tmo_comercial": 284,
     "tmo_tecnico": 268,
@@ -1261,7 +1261,7 @@
   },
   {
     "ts": "2025-08-02 19:00:00",
-    "calls": 12,
+    "calls": 11,
     "tmo_s": 195,
     "tmo_comercial": 286,
     "tmo_tecnico": 266,
@@ -1288,7 +1288,7 @@
   },
   {
     "ts": "2025-08-02 22:00:00",
-    "calls": 9,
+    "calls": 10,
     "tmo_s": 195,
     "tmo_comercial": 268,
     "tmo_tecnico": 272,

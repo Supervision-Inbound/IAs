@@ -1,27 +1,27 @@
 [
   {
     "fecha": "2025-07-27",
-    "total_llamadas": 18,
+    "total_llamadas": 8,
     "tmo_general": 262
   },
   {
     "fecha": "2025-07-28",
-    "total_llamadas": 349,
+    "total_llamadas": 340,
     "tmo_general": 288
   },
   {
     "fecha": "2025-07-29",
-    "total_llamadas": 267,
-    "tmo_general": 294
+    "total_llamadas": 262,
+    "tmo_general": 293
   },
   {
     "fecha": "2025-07-30",
-    "total_llamadas": 249,
+    "total_llamadas": 244,
     "tmo_general": 296
   },
   {
     "fecha": "2025-07-31",
-    "total_llamadas": 222,
+    "total_llamadas": 216,
     "tmo_general": 295
   },
   {
@@ -31,7 +31,7 @@
   },
   {
     "fecha": "2025-08-02",
-    "total_llamadas": 202,
+    "total_llamadas": 201,
     "tmo_general": 276
   },
   {
