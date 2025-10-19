@@ -37,4 +37,3 @@ jobs:
           git add public/*.json || true
           git commit -m "Inferencias diarias $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "No changes"
           git push || true
-
