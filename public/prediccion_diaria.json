@@ -1,607 +1,607 @@
 [
   {
     "fecha": "2025-07-27",
-    "total_llamadas": 17,
+    "total_llamadas": 18,
     "tmo_general": 262
   },
   {
     "fecha": "2025-07-28",
-    "total_llamadas": 312,
+    "total_llamadas": 349,
     "tmo_general": 288
   },
   {
     "fecha": "2025-07-29",
-    "total_llamadas": 244,
-    "tmo_general": 292
+    "total_llamadas": 267,
+    "tmo_general": 294
   },
   {
     "fecha": "2025-07-30",
-    "total_llamadas": 245,
-    "tmo_general": 295
-  },
-  {
-    "fecha": "2025-07-31",
-    "total_llamadas": 229,
-    "tmo_general": 293
-  },
-  {
-    "fecha": "2025-08-01",
-    "total_llamadas": 215,
+    "total_llamadas": 249,
     "tmo_general": 296
   },
   {
+    "fecha": "2025-07-31",
+    "total_llamadas": 222,
+    "tmo_general": 295
+  },
+  {
+    "fecha": "2025-08-01",
+    "total_llamadas": 195,
+    "tmo_general": 297
+  },
+  {
     "fecha": "2025-08-02",
-    "total_llamadas": 220,
+    "total_llamadas": 202,
     "tmo_general": 276
   },
   {
     "fecha": "2025-08-03",
-    "total_llamadas": 251,
+    "total_llamadas": 268,
     "tmo_general": 263
   },
   {
     "fecha": "2025-08-04",
-    "total_llamadas": 290,
+    "total_llamadas": 308,
     "tmo_general": 284
   },
   {
     "fecha": "2025-08-05",
-    "total_llamadas": 315,
+    "total_llamadas": 335,
     "tmo_general": 290
   },
   {
     "fecha": "2025-08-06",
-    "total_llamadas": 324,
+    "total_llamadas": 343,
     "tmo_general": 294
   },
   {
     "fecha": "2025-08-07",
-    "total_llamadas": 287,
+    "total_llamadas": 311,
     "tmo_general": 292
   },
   {
     "fecha": "2025-08-08",
-    "total_llamadas": 249,
+    "total_llamadas": 267,
     "tmo_general": 296
   },
   {
     "fecha": "2025-08-09",
-    "total_llamadas": 247,
+    "total_llamadas": 262,
     "tmo_general": 276
   },
   {
     "fecha": "2025-08-10",
-    "total_llamadas": 266,
+    "total_llamadas": 281,
     "tmo_general": 263
   },
   {
     "fecha": "2025-08-11",
-    "total_llamadas": 290,
+    "total_llamadas": 308,
     "tmo_general": 284
   },
   {
     "fecha": "2025-08-12",
-    "total_llamadas": 315,
-    "tmo_general": 290
+    "total_llamadas": 332,
+    "tmo_general": 289
   },
   {
     "fecha": "2025-08-13",
-    "total_llamadas": 323,
+    "total_llamadas": 341,
     "tmo_general": 294
   },
   {
     "fecha": "2025-08-14",
-    "total_llamadas": 287,
+    "total_llamadas": 308,
     "tmo_general": 292
   },
   {
     "fecha": "2025-08-15",
-    "total_llamadas": 249,
+    "total_llamadas": 229,
     "tmo_general": 296
   },
   {
     "fecha": "2025-08-16",
-    "total_llamadas": 247,
+    "total_llamadas": 220,
     "tmo_general": 276
   },
   {
     "fecha": "2025-08-17",
-    "total_llamadas": 266,
+    "total_llamadas": 282,
     "tmo_general": 263
   },
   {
     "fecha": "2025-08-18",
-    "total_llamadas": 290,
+    "total_llamadas": 309,
     "tmo_general": 284
   },
   {
     "fecha": "2025-08-19",
-    "total_llamadas": 315,
-    "tmo_general": 290
+    "total_llamadas": 332,
+    "tmo_general": 289
   },
   {
     "fecha": "2025-08-20",
-    "total_llamadas": 323,
+    "total_llamadas": 341,
     "tmo_general": 294
   },
   {
     "fecha": "2025-08-21",
-    "total_llamadas": 287,
+    "total_llamadas": 310,
     "tmo_general": 292
   },
   {
     "fecha": "2025-08-22",
-    "total_llamadas": 249,
+    "total_llamadas": 267,
     "tmo_general": 296
   },
   {
     "fecha": "2025-08-23",
-    "total_llamadas": 247,
+    "total_llamadas": 261,
     "tmo_general": 276
   },
   {
     "fecha": "2025-08-24",
-    "total_llamadas": 266,
+    "total_llamadas": 281,
     "tmo_general": 263
   },
   {
     "fecha": "2025-08-25",
-    "total_llamadas": 290,
+    "total_llamadas": 308,
     "tmo_general": 284
   },
   {
     "fecha": "2025-08-26",
-    "total_llamadas": 315,
-    "tmo_general": 290
+    "total_llamadas": 332,
+    "tmo_general": 289
   },
   {
     "fecha": "2025-08-27",
-    "total_llamadas": 323,
+    "total_llamadas": 341,
     "tmo_general": 294
   },
   {
     "fecha": "2025-08-28",
-    "total_llamadas": 287,
+    "total_llamadas": 308,
     "tmo_general": 292
   },
   {
     "fecha": "2025-08-29",
-    "total_llamadas": 249,
+    "total_llamadas": 229,
     "tmo_general": 296
   },
   {
     "fecha": "2025-08-30",
-    "total_llamadas": 247,
+    "total_llamadas": 220,
     "tmo_general": 276
   },
   {
     "fecha": "2025-08-31",
-    "total_llamadas": 266,
-    "tmo_general": 263
+    "total_llamadas": 241,
+    "tmo_general": 264
   },
   {
     "fecha": "2025-09-01",
-    "total_llamadas": 290,
-    "tmo_general": 284
+    "total_llamadas": 270,
+    "tmo_general": 287
   },
   {
     "fecha": "2025-09-02",
-    "total_llamadas": 315,
-    "tmo_general": 290
+    "total_llamadas": 300,
+    "tmo_general": 291
   },
   {
     "fecha": "2025-09-03",
-    "total_llamadas": 323,
+    "total_llamadas": 342,
     "tmo_general": 294
   },
   {
     "fecha": "2025-09-04",
-    "total_llamadas": 287,
+    "total_llamadas": 311,
     "tmo_general": 292
   },
   {
     "fecha": "2025-09-05",
-    "total_llamadas": 249,
+    "total_llamadas": 267,
     "tmo_general": 296
   },
   {
     "fecha": "2025-09-06",
-    "total_llamadas": 247,
+    "total_llamadas": 262,
     "tmo_general": 276
   },
   {
     "fecha": "2025-09-07",
-    "total_llamadas": 255,
+    "total_llamadas": 270,
     "tmo_general": 263
   },
   {
     "fecha": "2025-09-08",
-    "total_llamadas": 290,
+    "total_llamadas": 308,
     "tmo_general": 284
   },
   {
     "fecha": "2025-09-09",
-    "total_llamadas": 315,
-    "tmo_general": 290
+    "total_llamadas": 332,
+    "tmo_general": 289
   },
   {
     "fecha": "2025-09-10",
-    "total_llamadas": 323,
+    "total_llamadas": 341,
     "tmo_general": 294
   },
   {
     "fecha": "2025-09-11",
-    "total_llamadas": 287,
+    "total_llamadas": 308,
     "tmo_general": 292
   },
   {
     "fecha": "2025-09-12",
-    "total_llamadas": 249,
+    "total_llamadas": 267,
     "tmo_general": 296
   },
   {
     "fecha": "2025-09-13",
-    "total_llamadas": 247,
+    "total_llamadas": 261,
     "tmo_general": 276
   },
   {
     "fecha": "2025-09-14",
-    "total_llamadas": 266,
+    "total_llamadas": 281,
     "tmo_general": 263
   },
   {
     "fecha": "2025-09-15",
-    "total_llamadas": 290,
-    "tmo_general": 284
+    "total_llamadas": 270,
+    "tmo_general": 287
   },
   {
     "fecha": "2025-09-16",
-    "total_llamadas": 315,
-    "tmo_general": 290
+    "total_llamadas": 300,
+    "tmo_general": 291
   },
   {
     "fecha": "2025-09-17",
-    "total_llamadas": 323,
+    "total_llamadas": 342,
     "tmo_general": 294
   },
   {
     "fecha": "2025-09-18",
-    "total_llamadas": 287,
+    "total_llamadas": 310,
     "tmo_general": 292
   },
   {
     "fecha": "2025-09-19",
-    "total_llamadas": 249,
+    "total_llamadas": 267,
     "tmo_general": 296
   },
   {
     "fecha": "2025-09-20",
-    "total_llamadas": 247,
+    "total_llamadas": 262,
     "tmo_general": 276
   },
   {
     "fecha": "2025-09-21",
-    "total_llamadas": 266,
+    "total_llamadas": 281,
     "tmo_general": 263
   },
   {
     "fecha": "2025-09-22",
-    "total_llamadas": 290,
+    "total_llamadas": 308,
     "tmo_general": 284
   },
   {
     "fecha": "2025-09-23",
-    "total_llamadas": 315,
-    "tmo_general": 290
+    "total_llamadas": 332,
+    "tmo_general": 289
   },
   {
     "fecha": "2025-09-24",
-    "total_llamadas": 323,
+    "total_llamadas": 341,
     "tmo_general": 294
   },
   {
     "fecha": "2025-09-25",
-    "total_llamadas": 287,
+    "total_llamadas": 308,
     "tmo_general": 292
   },
   {
     "fecha": "2025-09-26",
-    "total_llamadas": 249,
+    "total_llamadas": 267,
     "tmo_general": 296
   },
   {
     "fecha": "2025-09-27",
-    "total_llamadas": 247,
+    "total_llamadas": 261,
     "tmo_general": 276
   },
   {
     "fecha": "2025-09-28",
-    "total_llamadas": 266,
+    "total_llamadas": 281,
     "tmo_general": 263
   },
   {
     "fecha": "2025-09-29",
-    "total_llamadas": 290,
-    "tmo_general": 284
+    "total_llamadas": 270,
+    "tmo_general": 287
   },
   {
     "fecha": "2025-09-30",
-    "total_llamadas": 315,
-    "tmo_general": 290
+    "total_llamadas": 300,
+    "tmo_general": 291
   },
   {
     "fecha": "2025-10-01",
-    "total_llamadas": 323,
-    "tmo_general": 294
+    "total_llamadas": 307,
+    "tmo_general": 295
   },
   {
     "fecha": "2025-10-02",
-    "total_llamadas": 287,
-    "tmo_general": 292
+    "total_llamadas": 275,
+    "tmo_general": 293
   },
   {
     "fecha": "2025-10-03",
-    "total_llamadas": 249,
+    "total_llamadas": 267,
     "tmo_general": 296
   },
   {
     "fecha": "2025-10-04",
-    "total_llamadas": 247,
+    "total_llamadas": 261,
     "tmo_general": 276
   },
   {
     "fecha": "2025-10-05",
-    "total_llamadas": 266,
+    "total_llamadas": 281,
     "tmo_general": 263
   },
   {
     "fecha": "2025-10-06",
-    "total_llamadas": 290,
+    "total_llamadas": 309,
     "tmo_general": 284
   },
   {
     "fecha": "2025-10-07",
-    "total_llamadas": 315,
-    "tmo_general": 290
+    "total_llamadas": 332,
+    "tmo_general": 289
   },
   {
     "fecha": "2025-10-08",
-    "total_llamadas": 323,
+    "total_llamadas": 341,
     "tmo_general": 294
   },
   {
     "fecha": "2025-10-09",
-    "total_llamadas": 287,
+    "total_llamadas": 310,
     "tmo_general": 292
   },
   {
     "fecha": "2025-10-10",
-    "total_llamadas": 249,
+    "total_llamadas": 267,
     "tmo_general": 296
   },
   {
     "fecha": "2025-10-11",
-    "total_llamadas": 247,
+    "total_llamadas": 261,
     "tmo_general": 276
   },
   {
     "fecha": "2025-10-12",
-    "total_llamadas": 266,
+    "total_llamadas": 281,
     "tmo_general": 263
   },
   {
     "fecha": "2025-10-13",
-    "total_llamadas": 290,
+    "total_llamadas": 308,
     "tmo_general": 284
   },
   {
     "fecha": "2025-10-14",
-    "total_llamadas": 315,
-    "tmo_general": 290
+    "total_llamadas": 332,
+    "tmo_general": 289
   },
   {
     "fecha": "2025-10-15",
-    "total_llamadas": 323,
-    "tmo_general": 294
+    "total_llamadas": 306,
+    "tmo_general": 295
   },
   {
     "fecha": "2025-10-16",
-    "total_llamadas": 287,
-    "tmo_general": 292
+    "total_llamadas": 275,
+    "tmo_general": 293
   },
   {
     "fecha": "2025-10-17",
-    "total_llamadas": 249,
+    "total_llamadas": 267,
     "tmo_general": 296
   },
   {
     "fecha": "2025-10-18",
-    "total_llamadas": 247,
+    "total_llamadas": 261,
     "tmo_general": 276
   },
   {
     "fecha": "2025-10-19",
-    "total_llamadas": 266,
+    "total_llamadas": 281,
     "tmo_general": 263
   },
   {
     "fecha": "2025-10-20",
-    "total_llamadas": 290,
+    "total_llamadas": 308,
     "tmo_general": 284
   },
   {
     "fecha": "2025-10-21",
-    "total_llamadas": 315,
-    "tmo_general": 290
+    "total_llamadas": 332,
+    "tmo_general": 289
   },
   {
     "fecha": "2025-10-22",
-    "total_llamadas": 323,
+    "total_llamadas": 341,
     "tmo_general": 294
   },
   {
     "fecha": "2025-10-23",
-    "total_llamadas": 287,
+    "total_llamadas": 310,
     "tmo_general": 292
   },
   {
     "fecha": "2025-10-24",
-    "total_llamadas": 249,
+    "total_llamadas": 267,
     "tmo_general": 296
   },
   {
     "fecha": "2025-10-25",
-    "total_llamadas": 247,
+    "total_llamadas": 261,
     "tmo_general": 276
   },
   {
     "fecha": "2025-10-26",
-    "total_llamadas": 266,
+    "total_llamadas": 281,
     "tmo_general": 263
   },
   {
     "fecha": "2025-10-27",
-    "total_llamadas": 290,
+    "total_llamadas": 308,
     "tmo_general": 284
   },
   {
     "fecha": "2025-10-28",
-    "total_llamadas": 315,
-    "tmo_general": 290
+    "total_llamadas": 332,
+    "tmo_general": 289
   },
   {
     "fecha": "2025-10-29",
-    "total_llamadas": 323,
-    "tmo_general": 294
+    "total_llamadas": 306,
+    "tmo_general": 295
   },
   {
     "fecha": "2025-10-30",
-    "total_llamadas": 287,
-    "tmo_general": 292
+    "total_llamadas": 275,
+    "tmo_general": 293
   },
   {
     "fecha": "2025-10-31",
-    "total_llamadas": 249,
+    "total_llamadas": 230,
     "tmo_general": 296
   },
   {
     "fecha": "2025-11-01",
-    "total_llamadas": 247,
+    "total_llamadas": 220,
     "tmo_general": 276
   },
   {
     "fecha": "2025-11-02",
-    "total_llamadas": 266,
-    "tmo_general": 263
+    "total_llamadas": 242,
+    "tmo_general": 264
   },
   {
     "fecha": "2025-11-03",
-    "total_llamadas": 290,
+    "total_llamadas": 309,
     "tmo_general": 284
   },
   {
     "fecha": "2025-11-04",
-    "total_llamadas": 315,
-    "tmo_general": 290
+    "total_llamadas": 332,
+    "tmo_general": 289
   },
   {
     "fecha": "2025-11-05",
-    "total_llamadas": 323,
+    "total_llamadas": 341,
     "tmo_general": 294
   },
   {
     "fecha": "2025-11-06",
-    "total_llamadas": 287,
+    "total_llamadas": 311,
     "tmo_general": 292
   },
   {
     "fecha": "2025-11-07",
-    "total_llamadas": 249,
+    "total_llamadas": 267,
     "tmo_general": 296
   },
   {
     "fecha": "2025-11-08",
-    "total_llamadas": 247,
+    "total_llamadas": 262,
     "tmo_general": 276
   },
   {
     "fecha": "2025-11-09",
-    "total_llamadas": 266,
+    "total_llamadas": 281,
     "tmo_general": 263
   },
   {
     "fecha": "2025-11-10",
-    "total_llamadas": 290,
+    "total_llamadas": 308,
     "tmo_general": 284
   },
   {
     "fecha": "2025-11-11",
-    "total_llamadas": 315,
-    "tmo_general": 290
+    "total_llamadas": 332,
+    "tmo_general": 289
   },
   {
     "fecha": "2025-11-12",
-    "total_llamadas": 323,
+    "total_llamadas": 341,
     "tmo_general": 294
   },
   {
     "fecha": "2025-11-13",
-    "total_llamadas": 287,
+    "total_llamadas": 308,
     "tmo_general": 292
   },
   {
     "fecha": "2025-11-14",
-    "total_llamadas": 249,
+    "total_llamadas": 267,
     "tmo_general": 296
   },
   {
     "fecha": "2025-11-15",
-    "total_llamadas": 247,
+    "total_llamadas": 219,
     "tmo_general": 276
   },
   {
     "fecha": "2025-11-16",
-    "total_llamadas": 266,
-    "tmo_general": 263
+    "total_llamadas": 241,
+    "tmo_general": 264
   },
   {
     "fecha": "2025-11-17",
-    "total_llamadas": 290,
+    "total_llamadas": 309,
     "tmo_general": 284
   },
   {
     "fecha": "2025-11-18",
-    "total_llamadas": 315,
-    "tmo_general": 290
+    "total_llamadas": 332,
+    "tmo_general": 289
   },
   {
     "fecha": "2025-11-19",
-    "total_llamadas": 323,
+    "total_llamadas": 341,
     "tmo_general": 294
   },
   {
     "fecha": "2025-11-20",
-    "total_llamadas": 287,
+    "total_llamadas": 310,
     "tmo_general": 292
   },
   {
     "fecha": "2025-11-21",
-    "total_llamadas": 249,
+    "total_llamadas": 267,
     "tmo_general": 296
   },
   {
     "fecha": "2025-11-22",
-    "total_llamadas": 247,
+    "total_llamadas": 262,
     "tmo_general": 276
   },
   {
     "fecha": "2025-11-23",
-    "total_llamadas": 266,
+    "total_llamadas": 281,
     "tmo_general": 263
   },
   {
     "fecha": "2025-11-24",
-    "total_llamadas": 290,
+    "total_llamadas": 308,
     "tmo_general": 284
   }
 ]
