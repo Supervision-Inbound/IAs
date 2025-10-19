@@ -1,9 +1,9 @@
 [
   {
-    "comuna": "Castro",
+    "comuna": "Chile Chico",
     "rango_alertas": [
       {
-        "fecha": "2025-10-20",
+        "fecha": "2025-10-25",
         "hora_inicio": 0,
         "hora_fin": 0,
         "impacto_llamadas_adicionales": 0
@@ -11,21 +11,10 @@
     ]
   },
   {
-    "comuna": "Chonchi",
+    "comuna": "Coyhaique",
     "rango_alertas": [
       {
-        "fecha": "2025-10-20",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Cochamo",
-    "rango_alertas": [
-      {
-        "fecha": "2025-10-20",
+        "fecha": "2025-10-25",
         "hora_inicio": 0,
         "hora_fin": 0,
         "impacto_llamadas_adicionales": 0
@@ -36,7 +25,7 @@
     "comuna": "Lago Verde",
     "rango_alertas": [
       {
-        "fecha": "2025-10-20",
+        "fecha": "2025-10-25",
         "hora_inicio": 0,
         "hora_fin": 0,
         "impacto_llamadas_adicionales": 0
@@ -44,10 +33,10 @@
     ]
   },
   {
-    "comuna": "Ohiggins",
+    "comuna": "Palena",
     "rango_alertas": [
       {
-        "fecha": "2025-10-20",
+        "fecha": "2025-10-25",
         "hora_inicio": 0,
         "hora_fin": 0,
         "impacto_llamadas_adicionales": 0
@@ -58,9 +47,64 @@
     "comuna": "Puerto Cisnes",
     "rango_alertas": [
       {
-        "fecha": "2025-10-20",
+        "fecha": "2025-10-25",
         "hora_inicio": 0,
         "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Rio Ibañez",
+    "rango_alertas": [
+      {
+        "fecha": "2025-10-25",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "San Rosendo",
+    "rango_alertas": [
+      {
+        "fecha": "2025-10-25",
+        "hora_inicio": 8,
+        "hora_fin": 9,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Tome",
+    "rango_alertas": [
+      {
+        "fecha": "2025-10-25",
+        "hora_inicio": 7,
+        "hora_fin": 7,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Valdivia",
+    "rango_alertas": [
+      {
+        "fecha": "2025-10-25",
+        "hora_inicio": 4,
+        "hora_fin": 6,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Villarrica",
+    "rango_alertas": [
+      {
+        "fecha": "2025-10-25",
+        "hora_inicio": 6,
+        "hora_fin": 6,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -102,6 +146,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Castro",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Cañete",
     "rango_alertas": []
   },
@@ -110,11 +158,15 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Chile Chico",
+    "comuna": "Cholchol",
     "rango_alertas": []
   },
   {
-    "comuna": "Cholchol",
+    "comuna": "Chonchi",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Cochamo",
     "rango_alertas": []
   },
   {
@@ -135,10 +187,6 @@
   },
   {
     "comuna": "Corral",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Coyhaique",
     "rango_alertas": []
   },
   {
@@ -310,6 +358,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Ohiggins",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Osorno",
     "rango_alertas": []
   },
@@ -319,10 +371,6 @@
   },
   {
     "comuna": "Paillaco",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Palena",
     "rango_alertas": []
   },
   {
@@ -418,10 +466,6 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Rio Ibañez",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Rio Negro",
     "rango_alertas": []
   },
@@ -439,10 +483,6 @@
   },
   {
     "comuna": "San Pablo",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "San Rosendo",
     "rango_alertas": []
   },
   {
@@ -470,10 +510,6 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Tome",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Traiguen",
     "rango_alertas": []
   },
@@ -482,19 +518,11 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Valdivia",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Victoria",
     "rango_alertas": []
   },
   {
     "comuna": "Vilcun",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Villarrica",
     "rango_alertas": []
   },
   {
