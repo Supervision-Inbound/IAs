@@ -43,4 +43,3 @@ def write_daily_json(path: str, df_hourly: pd.DataFrame, calls_col: str, tmo_col
     daily["tmo_diario"] = daily["tmo_diario"].astype(float)
 
     write_json(path, daily.to_dict(orient="records"))
-
