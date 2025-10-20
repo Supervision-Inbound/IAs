@@ -454,21 +454,26 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
         TARGET_TMO:   pred_tmo_adj.values
     }, index=future_ts)
 
-    df_erlang["aht"] = df_erlang[TARGET_TMO]  # si tu AHT=TMO; si no, ajusta aquí
-    df_erlang["sla_s"] = 22     # SLA en segundos (parametrizable)
-    df_erlang["target"] = 0.8   # 80% dentro de 22s (parametrizable)
-    df_erlang["interval"] = 3600  # 1h
+    # Si tu AHT = TMO; si no, ajusta aquí
+    df_erlang["aht"] = df_erlang[TARGET_TMO]
+
+    # Parámetros de nivel de servicio (ajustables)
+    df_erlang["asa_target_s"] = 22      # segundos para ASA objetivo
+    df_erlang["sla_target"]   = 0.80    # % dentro del ASA objetivo
+    df_erlang["interval"]     = 3600    # segundos por intervalo
 
     req_agents = []
     for ts, row in df_erlang.iterrows():
-        req = required_agents(
-            calls=float(row[TARGET_CALLS]),
-            aht=float(row["aht"]),
-            interval_seconds=int(row["interval"]),
-            sla_s=int(row["sla_s"]),
-            target=float(row["target"])
+        agents, _load = required_agents(
+            arrivals     = float(row[TARGET_CALLS]),
+            aht_s        = float(row["aht"]),
+            asa_target_s = int(row["asa_target_s"]),
+            sla_target   = float(row["sla_target"]),
+            interval_s   = int(row["interval"])
+            # max_occ usa el default definido en erlang.py
         )
-        req_agents.append(req)
+        req_agents.append(agents)
+
     df_erlang["agents_required"] = req_agents
 
     # ===== Salidas JSON =====
