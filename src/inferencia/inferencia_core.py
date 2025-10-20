@@ -470,14 +470,25 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
             asa_target_s = int(row["asa_target_s"]),
             sla_target   = float(row["sla_target"]),
             interval_s   = int(row["interval"])
-            # max_occ usa el default definido en erlang.py
         )
         req_agents.append(agents)
 
     df_erlang["agents_required"] = req_agents
 
     # ===== Salidas JSON =====
-    write_hourly_json(df_erlang[[TARGET_CALLS, TARGET_TMO, "agents_required"]], os.path.join(PUBLIC_DIR, "forecast_hourly.json"))
-    write_daily_json(df_erlang[[TARGET_CALLS, TARGET_TMO, "agents_required"]],  os.path.join(PUBLIC_DIR, "forecast_daily.json"))
+    # 🔧 FIX: pasar nombres de columnas a los writers
+    write_hourly_json(
+        os.path.join(PUBLIC_DIR, "forecast_hourly.json"),
+        df_erlang[[TARGET_CALLS, TARGET_TMO, "agents_required"]],
+        calls_col=TARGET_CALLS,
+        tmo_col=TARGET_TMO,
+        agentes_col="agents_required"
+    )
+    write_daily_json(
+        os.path.join(PUBLIC_DIR, "forecast_daily.json"),
+        df_erlang[[TARGET_CALLS, TARGET_TMO]],
+        calls_col=TARGET_CALLS,
+        tmo_col=TARGET_TMO
+    )
 
     return df_erlang
