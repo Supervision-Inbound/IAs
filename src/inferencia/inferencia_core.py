@@ -216,7 +216,7 @@ def _apply_holiday_adjustments(pred_calls, pred_tmo, df_recent_calls, df_recent_
 def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays_set: Optional[Set] = None):
     """
     - Planner de llamadas con histórico de llamadas.
-    - TMO EXCLUSIVO desde data/TMO_HISTORICO.csv (sin depender del histórico de llamadas).
+    - TMO EXCLUSIVO desde data/TMO_HISTORICO.csv con proceso ITERATIVO (igual que llamadas).
     - Ajustes por feriados y post-feriados separados (llamadas y TMO).
     - (Opcional) CAP de OUTLIERS por (dow,hour) con mediana+MAD (separado por serie).
     - Erlang C y salidas JSON.
@@ -300,7 +300,7 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
 
     pred_calls = dfp.loc[future_ts, TARGET_CALLS]
 
-    # ===== TMO EXCLUSIVO DESDE data/TMO_HISTORICO.csv =====
+    # ===== TMO EXCLUSIVO DESDE data/TMO_HISTORICO.csv (ITERATIVO) =====
     TMO_FILE = os.path.join("data", "TMO_HISTORICO.csv")
     if not os.path.exists(TMO_FILE):
         raise FileNotFoundError(f"No se encontró {TMO_FILE}. El TMO debe provenir exclusivamente de este archivo.")
@@ -323,52 +323,64 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
             pd.to_numeric(df_tmo_hist["tmo_tecnico"],   errors="coerce") * pd.to_numeric(df_tmo_hist["q_tecnico"],   errors="coerce")
         ) / (pd.to_numeric(df_tmo_hist["q_general"], errors="coerce") + 1e-6)
 
-    # proporciones si existen
+    # si tampoco se pudo construir, intentar alias comunes
+    if "tmo_general" not in df_tmo_hist.columns:
+        for alt in ["tmo", "aht", "duracion_promedio"]:
+            if alt in df_tmo_hist.columns:
+                df_tmo_hist["tmo_general"] = pd.to_numeric(df_tmo_hist[alt], errors="coerce")
+                break
+
+    # proporciones si existen (no imprescindibles para el modelo)
     if "q_llamadas_comercial" in df_tmo_hist.columns and "q_llamadas_general" in df_tmo_hist.columns:
         df_tmo_hist["proporcion_comercial"] = pd.to_numeric(df_tmo_hist["q_llamadas_comercial"], errors="coerce") / (pd.to_numeric(df_tmo_hist["q_llamadas_general"], errors="coerce") + 1e-6)
         if "q_llamadas_tecnico" in df_tmo_hist.columns:
             df_tmo_hist["proporcion_tecnica"] = pd.to_numeric(df_tmo_hist["q_llamadas_tecnico"], errors="coerce") / (pd.to_numeric(df_tmo_hist["q_llamadas_general"], errors="coerce") + 1e-6)
 
-    # última observación real disponible para semillas de proporciones/TMO
-    last_tmo = df_tmo_hist.tail(1)
+    # validar que exista TARGET_TMO en el histórico para iterar
+    if TARGET_TMO not in df_tmo_hist.columns:
+        raise ValueError(
+            f"No se encontró '{TARGET_TMO}' ni fue posible construirlo desde componentes/alias en {TMO_FILE}."
+        )
 
-    # ===== Construcción base de TMO solo desde archivo =====
-    base_tmo = pd.DataFrame(index=future_ts)
-    # Semillas/constantes desde el CSV (si no existen, 0.0)
-    for c in ["proporcion_comercial","proporcion_tecnica","tmo_comercial","tmo_tecnico"]:
-        base_tmo[c] = float(last_tmo[c].iloc[0]) if c in last_tmo.columns else 0.0
-
-    # Features para el modelo de TMO
-    df_tmo_feats = base_tmo.copy()
-    df_tmo_feats = add_time_parts(df_tmo_feats)
-    df_tmo_feats = dummies_and_reindex(df_tmo_feats, cols_tmo)
-
-    # Predicción TMO
-    y_tmo = m_tmo.predict(sc_tmo.transform(df_tmo_feats), verbose=0).flatten()
-    y_tmo = np.clip(y_tmo, 1.0, None)
-    pred_tmo = pd.Series(y_tmo, index=future_ts, name=TARGET_TMO)
-
-    # ===== Ajustes por feriados y post-feriados (separados) =====
-    # construir un df_recent_tmo desde el histórico de TMO exclusivamente
+    # Reciente de TMO
     start_hist_tmo = df_tmo_hist.index.max() - pd.Timedelta(days=HIST_WINDOW_DAYS)
     df_recent_tmo = df_tmo_hist.loc[df_tmo_hist.index >= start_hist_tmo].copy()
     if df_recent_tmo.empty:
         df_recent_tmo = df_tmo_hist.copy()
 
-    # marca de feriados (si no existe en tmo_hist, la creamos on-the-fly para el cálculo)
+    # marca de feriados (si no existe en tmo_hist, la creamos on-the-fly para el cálculo/iteración)
     if "feriados" not in df_recent_tmo.columns:
         df_recent_tmo["feriados"] = [_is_holiday(ts, holidays_set) for ts in df_recent_tmo.index]
-    # asegurar columna TARGET_TMO en histórico para factores/caps
-    if TARGET_TMO not in df_recent_tmo.columns and "tmo_general" in df_recent_tmo.columns:
-        df_recent_tmo[TARGET_TMO] = pd.to_numeric(df_recent_tmo["tmo_general"], errors="coerce")
 
-    # >>> HOTFIX 3: guard extra antes de llamar a los ajustes
-    if df_recent_tmo is None or df_recent_tmo.empty:
-        df_recent_tmo = pd.DataFrame(index=df_recent_calls.index)
-    elif TARGET_TMO not in df_recent_tmo.columns:
-        if "tmo_general" in df_recent_tmo.columns:
-            df_recent_tmo[TARGET_TMO] = pd.to_numeric(df_recent_tmo["tmo_general"], errors="coerce")
+    # ===== Planner iterativo (TMO) =====
+    if "feriados" in df_recent_tmo.columns:
+        dft = df_recent_tmo[[TARGET_TMO, "feriados"]].copy()
+    else:
+        dft = df_recent_tmo[[TARGET_TMO]].copy()
+    dft[TARGET_TMO] = pd.to_numeric(dft[TARGET_TMO], errors="coerce").ffill().fillna(1.0)
 
+    for ts in future_ts:
+        tmp_t = pd.concat([dft, pd.DataFrame(index=[ts])])
+        tmp_t[TARGET_TMO] = tmp_t[TARGET_TMO].ffill()
+
+        if "feriados" in tmp_t.columns:
+            tmp_t.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
+
+        tmp_t = add_lags_mas(tmp_t, TARGET_TMO)
+        tmp_t = add_time_parts(tmp_t)
+
+        X_t = dummies_and_reindex(tmp_t.tail(1), cols_tmo)
+        yhat_t = float(m_tmo.predict(sc_tmo.transform(X_t), verbose=0).flatten()[0])
+        dft.loc[ts, TARGET_TMO] = max(1.0, yhat_t)  # TMO mínimo 1s para estabilidad
+
+        if "feriados" in dft.columns:
+            dft.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
+
+    pred_tmo = dft.loc[future_ts, TARGET_TMO]
+    pred_tmo.name = TARGET_TMO
+
+    # ===== Ajustes por feriados y post-feriados (separados) =====
+    # (ya incluimos 'feriados' como feature en la iteración, pero mantenemos ajuste suave + caps)
     pred_calls_adj, pred_tmo_adj = _apply_holiday_adjustments(
         pred_calls, pred_tmo, df_recent_calls, df_recent_tmo, holidays_set
     )
@@ -376,7 +388,7 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
     # ===== CAP de outliers por (dow,hour) =====
     if ENABLE_OUTLIER_CAP:
         caps_calls = _build_outlier_caps(df_recent_calls, TARGET_CALLS)
-        caps_tmo   = _build_outlier_caps(df_recent_tmo,   TARGET_TMO) if (df_recent_tmo is not None and not df_recent_tmo.empty and TARGET_TMO in df_recent_tmo.columns) else {}
+        caps_tmo   = _build_outlier_caps(df_recent_tmo,   TARGET_TMO)
 
         calls_capped = []
         tmo_capped   = []
@@ -419,4 +431,3 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
     write_daily_json(df_erlang[[TARGET_CALLS, TARGET_TMO, "agents_required"]],  os.path.join(PUBLIC_DIR, "forecast_daily.json"))
 
     return df_erlang
-
