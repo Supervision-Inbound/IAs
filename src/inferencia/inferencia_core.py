@@ -210,7 +210,7 @@ def _apply_holiday_adjustments(pred_calls, pred_tmo, df_recent_calls, df_recent_
     return calls_adj, tmo_adj
 
 
-# ============ NUEVO: lector robusto del CSV de TMO ============
+# ============ Lector robusto del CSV de TMO ============
 def _read_tmo_hist_csv(path: str) -> pd.DataFrame:
     """
     Lee data/TMO_HISTORICO.csv con detección robusta de separador y normalización de columnas.
@@ -219,14 +219,28 @@ def _read_tmo_hist_csv(path: str) -> pd.DataFrame:
     - Si existen columnas fecha/hora, crea 'ts' combinando ambas.
     - Devuelve indexado por 'ts' en TIMEZONE, ordenado.
     """
-    # 1) leer robusto
+    def _read_try(sep, use_sniffer: bool):
+        # IMPORTANTE: cuando engine="python", NO pasar low_memory
+        if use_sniffer:
+            return pd.read_csv(path, sep=None, engine="python")
+        if sep is None:
+            # engine por defecto (C) con low_memory permitido
+            return pd.read_csv(path, low_memory=False)
+        # engine="python" con separador explícito (sin low_memory)
+        return pd.read_csv(path, sep=sep, engine="python")
+
+    # 1) leer robusto: sniffer -> ';' -> ',' -> default (C engine)
     try:
-        df = pd.read_csv(path, sep=None, engine="python", low_memory=False)
+        df = _read_try(sep=None, use_sniffer=True)
     except Exception:
         try:
-            df = pd.read_csv(path, sep=";", engine="python", low_memory=False)
+            df = _read_try(sep=";", use_sniffer=False)
         except Exception:
-            df = pd.read_csv(path, sep=",", engine="python", low_memory=False)
+            try:
+                df = _read_try(sep=",", use_sniffer=False)
+            except Exception:
+                # último intento con engine por defecto (C) y low_memory permitido
+                df = pd.read_csv(path, low_memory=False)
 
     # 2) normalizar columnas
     df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
