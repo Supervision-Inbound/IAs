@@ -98,9 +98,9 @@ def _weekday_mad_caps(s: pd.Series, k: float):
 def _build_outlier_caps(df_recent: pd.DataFrame, col: str) -> Dict[Tuple[int, int], float]:
     """
     Crea techos horario*dow para 'col' con K distintos en weekday/weekend.
+    Si no hay datos, devuelve infinito (sin recorte).
     """
     if df_recent is None or df_recent.empty or col not in df_recent.columns:
-        # sin datos no hay cap específico: devolvemos infinito (sin recorte)
         return {(dow, h): float("inf") for dow in range(7) for h in range(24)}
 
     tmp = df_recent.copy()
@@ -140,32 +140,26 @@ def _apply_post_holiday_adjustment(series: pd.Series, holidays_set: Optional[Set
     return pd.Series(adjusted, index=series.index, name=series.name)
 
 
-def _holiday_hour_factors(df_recent: pd.DataFrame, col: str, holidays_set: Optional[Set]):
+def _holiday_hour_factors(df_recent: pd.DataFrame, col: str, holidays_set):
     """
     Calcula factores (feriado vs normal) por hora para ajustar el forecast.
     Si la columna 'col' no existe o el DF está vacío, devuelve factores neutros (1.0).
     """
-    # Casos donde no podemos calcular: devolvemos factores neutros
     if df_recent is None or df_recent.empty or col not in df_recent.columns:
         return {int(h): 1.0 for h in range(24)}
 
-    # Copia y aseguro columna de feriados
     df_recent = df_recent.copy()
     if "feriados" not in df_recent.columns:
-        # Si no hay set de feriados, no ajustamos
         if holidays_set is None:
             return {int(h): 1.0 for h in range(24)}
-        # Si hay set, lo construimos on-the-fly
         df_recent["feriados"] = [_is_holiday(ts, holidays_set) for ts in df_recent.index]
 
-    # Factor por hora a partir de medianas feriado vs no feriado
     df_recent["hour"] = df_recent.index.hour
     df_recent[col] = pd.to_numeric(df_recent[col], errors="coerce")
 
     med_nor = df_recent.loc[df_recent["feriados"] == 0].groupby("hour")[col].median().to_dict()
     med_hol = df_recent.loc[df_recent["feriados"] == 1].groupby("hour")[col].median().to_dict()
 
-    # Si no hay datos suficientes, devolvemos neutros
     if not med_nor:
         return {int(h): 1.0 for h in range(24)}
 
@@ -177,32 +171,25 @@ def _holiday_hour_factors(df_recent: pd.DataFrame, col: str, holidays_set: Optio
     if not np.isfinite(global_factor):
         global_factor = 1.0
 
-    factors = {
+    return {
         int(h): _safe_ratio(med_hol.get(h, np.nan) if med_hol else np.nan,
                             med_nor.get(h, np.nan),
                             fallback=global_factor)
         for h in range(24)
     }
-    return factors
 
 
-def _apply_holiday_adjustments(
-    pred_calls: pd.Series,
-    pred_tmo: pd.Series,
-    df_recent_calls: pd.DataFrame,
-    df_recent_tmo: pd.DataFrame,
-    holidays_set: Optional[Set]
-):
-    # Factores por hora separados para llamadas y TMO (cada uno con su histórico)
+def _apply_holiday_adjustments(pred_calls, pred_tmo, df_recent_calls, df_recent_tmo, holidays_set):
+    # Llamadas: factores por hora desde histórico de llamadas
     factors_calls_by_hour = _holiday_hour_factors(df_recent_calls, TARGET_CALLS, holidays_set)
 
-    # Si no hay col de TMO en el histórico, factores neutros
+    # TMO: si no hay columna TARGET_TMO en histórico, factores neutros
     if df_recent_tmo is None or df_recent_tmo.empty or (TARGET_TMO not in df_recent_tmo.columns):
         factors_tmo_by_hour = {int(h): 1.0 for h in range(24)}
     else:
         factors_tmo_by_hour = _holiday_hour_factors(df_recent_tmo, TARGET_TMO, holidays_set)
 
-    # Acotar factores razonables
+    # Limitar factores
     factors_calls_by_hour = {h: float(np.clip(v, 0.10, 1.60)) for h, v in factors_calls_by_hour.items()}
     factors_tmo_by_hour   = {h: float(np.clip(v, 0.70, 1.50)) for h, v in factors_tmo_by_hour.items()}
 
@@ -216,7 +203,7 @@ def _apply_holiday_adjustments(
     calls_adj = pd.Series(calls_adj, index=pred_calls.index, name=pred_calls.name)
     tmo_adj   = pd.Series(tmo_adj,   index=pred_tmo.index,   name=pred_tmo.name)
 
-    # Post-feriados (rebote)
+    # Rebote post-feriado
     calls_adj = _apply_post_holiday_adjustment(calls_adj, holidays_set, POST_HOLIDAY_HOURS, factor_calls=1.08, factor_tmo=1.03)
     tmo_adj   = _apply_post_holiday_adjustment(tmo_adj,   holidays_set, POST_HOLIDAY_HOURS, factor_calls=1.06, factor_tmo=1.03)
 
@@ -375,12 +362,21 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
     if TARGET_TMO not in df_recent_tmo.columns and "tmo_general" in df_recent_tmo.columns:
         df_recent_tmo[TARGET_TMO] = pd.to_numeric(df_recent_tmo["tmo_general"], errors="coerce")
 
-    pred_calls_adj, pred_tmo_adj = _apply_holiday_adjustments(pred_calls, pred_tmo, df_recent_calls, df_recent_tmo, holidays_set)
+    # >>> HOTFIX 3: guard extra antes de llamar a los ajustes
+    if df_recent_tmo is None or df_recent_tmo.empty:
+        df_recent_tmo = pd.DataFrame(index=df_recent_calls.index)
+    elif TARGET_TMO not in df_recent_tmo.columns:
+        if "tmo_general" in df_recent_tmo.columns:
+            df_recent_tmo[TARGET_TMO] = pd.to_numeric(df_recent_tmo["tmo_general"], errors="coerce")
+
+    pred_calls_adj, pred_tmo_adj = _apply_holiday_adjustments(
+        pred_calls, pred_tmo, df_recent_calls, df_recent_tmo, holidays_set
+    )
 
     # ===== CAP de outliers por (dow,hour) =====
     if ENABLE_OUTLIER_CAP:
         caps_calls = _build_outlier_caps(df_recent_calls, TARGET_CALLS)
-        caps_tmo   = _build_outlier_caps(df_recent_tmo,   TARGET_TMO) if TARGET_TMO in df_recent_tmo.columns else {}
+        caps_tmo   = _build_outlier_caps(df_recent_tmo,   TARGET_TMO) if (df_recent_tmo is not None and not df_recent_tmo.empty and TARGET_TMO in df_recent_tmo.columns) else {}
 
         calls_capped = []
         tmo_capped   = []
@@ -423,3 +419,4 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
     write_daily_json(df_erlang[[TARGET_CALLS, TARGET_TMO, "agents_required"]],  os.path.join(PUBLIC_DIR, "forecast_daily.json"))
 
     return df_erlang
+
