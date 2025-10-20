@@ -210,6 +210,54 @@ def _apply_holiday_adjustments(pred_calls, pred_tmo, df_recent_calls, df_recent_
     return calls_adj, tmo_adj
 
 
+# ============ NUEVO: lector robusto del CSV de TMO ============
+def _read_tmo_hist_csv(path: str) -> pd.DataFrame:
+    """
+    Lee data/TMO_HISTORICO.csv con detección robusta de separador y normalización de columnas.
+    - Intenta detectar sep automáticamente; si falla, prueba ';' y luego ','.
+    - Normaliza nombres a minúsculas + underscores.
+    - Si existen columnas fecha/hora, crea 'ts' combinando ambas.
+    - Devuelve indexado por 'ts' en TIMEZONE, ordenado.
+    """
+    # 1) leer robusto
+    try:
+        df = pd.read_csv(path, sep=None, engine="python", low_memory=False)
+    except Exception:
+        try:
+            df = pd.read_csv(path, sep=";", engine="python", low_memory=False)
+        except Exception:
+            df = pd.read_csv(path, sep=",", engine="python", low_memory=False)
+
+    # 2) normalizar columnas
+    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+
+    # 3) construir ts si es posible (fecha + hora) ANTES de ensure_ts
+    fecha_keys = [k for k in ["fecha", "date"] if k in df.columns]
+    hora_keys  = [k for k in ["hora", "hour", "hora_numero", "hora_num"] if k in df.columns]
+
+    if "ts" not in df.columns and fecha_keys and hora_keys:
+        fecha_col = fecha_keys[0]
+        hora_col  = hora_keys[0]
+        fstr = df[fecha_col].astype(str).str.strip()
+        hstr = df[hora_col].astype(str).str.strip()
+        # reducir H:MM:SS -> H:MM
+        hstr = hstr.str.replace(r"^(\d{1,2}):(\d{2}):\d{2}$", r"\1:\2", regex=True)
+        ts = pd.to_datetime(fstr + " " + hstr, dayfirst=True, errors="coerce")
+        df["ts"] = ts
+
+    # 4) ensure_ts (usa TIMEZONE y set_index)
+    df = ensure_ts(df)
+
+    # 5) coerciones numéricas típicas
+    for c in ["tmo_general", "tmo_comercial", "tmo_tecnico",
+              "q_llamadas_general", "q_llamadas_comercial", "q_llamadas_tecnico",
+              "q_general", "q_comercial", "q_tecnico"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    return df
+
+
 # ==============================
 # Núcleo de inferencia
 # ==============================
@@ -305,23 +353,15 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
     if not os.path.exists(TMO_FILE):
         raise FileNotFoundError(f"No se encontró {TMO_FILE}. El TMO debe provenir exclusivamente de este archivo.")
 
-    df_tmo_hist = pd.read_csv(TMO_FILE, low_memory=False)
-    # asegurar timestamp
-    if "ts" not in df_tmo_hist.columns:
-        df_tmo_hist = df_tmo_hist.reset_index().rename(columns={"index": "ts"})
-    df_tmo_hist = ensure_ts(df_tmo_hist)
-    df_tmo_hist = df_tmo_hist.sort_index()
+    df_tmo_hist = _read_tmo_hist_csv(TMO_FILE)  # lector robusto
 
-    # normalizar nombres
-    df_tmo_hist.columns = [c.lower().strip().replace(" ", "_") for c in df_tmo_hist.columns]
-
-    # construir tmo_general si es posible (ponderado por cantidades)
+    # construir tmo_general si no existe, ponderando por cantidades (si están)
     if "tmo_general" not in df_tmo_hist.columns and all(c in df_tmo_hist.columns for c in
         ["tmo_comercial","q_comercial","tmo_tecnico","q_tecnico","q_general"]):
         df_tmo_hist["tmo_general"] = (
-            pd.to_numeric(df_tmo_hist["tmo_comercial"], errors="coerce") * pd.to_numeric(df_tmo_hist["q_comercial"], errors="coerce") +
-            pd.to_numeric(df_tmo_hist["tmo_tecnico"],   errors="coerce") * pd.to_numeric(df_tmo_hist["q_tecnico"],   errors="coerce")
-        ) / (pd.to_numeric(df_tmo_hist["q_general"], errors="coerce") + 1e-6)
+            df_tmo_hist["tmo_comercial"] * df_tmo_hist["q_comercial"] +
+            df_tmo_hist["tmo_tecnico"]   * df_tmo_hist["q_tecnico"]
+        ) / (df_tmo_hist["q_general"] + 1e-6)
 
     # si tampoco se pudo construir, intentar alias comunes
     if "tmo_general" not in df_tmo_hist.columns:
@@ -330,33 +370,25 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
                 df_tmo_hist["tmo_general"] = pd.to_numeric(df_tmo_hist[alt], errors="coerce")
                 break
 
-    # proporciones si existen (no imprescindibles para el modelo)
-    if "q_llamadas_comercial" in df_tmo_hist.columns and "q_llamadas_general" in df_tmo_hist.columns:
-        df_tmo_hist["proporcion_comercial"] = pd.to_numeric(df_tmo_hist["q_llamadas_comercial"], errors="coerce") / (pd.to_numeric(df_tmo_hist["q_llamadas_general"], errors="coerce") + 1e-6)
-        if "q_llamadas_tecnico" in df_tmo_hist.columns:
-            df_tmo_hist["proporcion_tecnica"] = pd.to_numeric(df_tmo_hist["q_llamadas_tecnico"], errors="coerce") / (pd.to_numeric(df_tmo_hist["q_llamadas_general"], errors="coerce") + 1e-6)
-
-    # validar que exista TARGET_TMO en el histórico para iterar
-    if TARGET_TMO not in df_tmo_hist.columns:
+    if "tmo_general" not in df_tmo_hist.columns:
         raise ValueError(
-            f"No se encontró '{TARGET_TMO}' ni fue posible construirlo desde componentes/alias en {TMO_FILE}."
+            f"No se encontró 'tmo_general' ni fue posible construirlo desde componentes/alias en {TMO_FILE}."
         )
 
-    # Reciente de TMO
+    # Reciente de TMO (para ajustes/caps) y marca de feriados
     start_hist_tmo = df_tmo_hist.index.max() - pd.Timedelta(days=HIST_WINDOW_DAYS)
     df_recent_tmo = df_tmo_hist.loc[df_tmo_hist.index >= start_hist_tmo].copy()
     if df_recent_tmo.empty:
         df_recent_tmo = df_tmo_hist.copy()
-
-    # marca de feriados (si no existe en tmo_hist, la creamos on-the-fly para el cálculo/iteración)
     if "feriados" not in df_recent_tmo.columns:
         df_recent_tmo["feriados"] = [_is_holiday(ts, holidays_set) for ts in df_recent_tmo.index]
 
     # ===== Planner iterativo (TMO) =====
     if "feriados" in df_recent_tmo.columns:
-        dft = df_recent_tmo[[TARGET_TMO, "feriados"]].copy()
+        dft = df_recent_tmo[[TARGET_TMO, "feriados"]].copy() if TARGET_TMO in df_recent_tmo.columns else df_recent_tmo[["tmo_general", "feriados"]].rename(columns={"tmo_general": TARGET_TMO})
     else:
-        dft = df_recent_tmo[[TARGET_TMO]].copy()
+        dft = df_recent_tmo[[TARGET_TMO]].copy() if TARGET_TMO in df_recent_tmo.columns else df_recent_tmo[["tmo_general"]].rename(columns={"tmo_general": TARGET_TMO})
+
     dft[TARGET_TMO] = pd.to_numeric(dft[TARGET_TMO], errors="coerce").ffill().fillna(1.0)
 
     for ts in future_ts:
@@ -380,7 +412,6 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
     pred_tmo.name = TARGET_TMO
 
     # ===== Ajustes por feriados y post-feriados (separados) =====
-    # (ya incluimos 'feriados' como feature en la iteración, pero mantenemos ajuste suave + caps)
     pred_calls_adj, pred_tmo_adj = _apply_holiday_adjustments(
         pred_calls, pred_tmo, df_recent_calls, df_recent_tmo, holidays_set
     )
