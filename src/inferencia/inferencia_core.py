@@ -475,8 +475,12 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
 
     df_erlang["agents_required"] = req_agents
 
+    # 🔁 Alias para compatibilidad con otros módulos (p.ej. main.py espera 'calls')
+    df_erlang["calls"] = df_erlang[TARGET_CALLS]
+    df_erlang["tmo"]   = df_erlang[TARGET_TMO]
+
     # ===== Salidas JSON =====
-    # 🔧 FIX: pasar nombres de columnas a los writers
+    # Writers que requieren path + df + nombres de columnas
     write_hourly_json(
         os.path.join(PUBLIC_DIR, "forecast_hourly.json"),
         df_erlang[[TARGET_CALLS, TARGET_TMO, "agents_required"]],
@@ -492,3 +496,4 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
     )
 
     return df_erlang
+
