@@ -139,7 +139,8 @@ def main(horizonte_dias: int):
         print("[TMO HIST] Diagnóstico lectura falló:", e)
 
     # Fallback si quedó 0/NaN
-    vals = np.nan_to_num(tmo_future.values, nan=0.0)
+    vals = np.asarray(tmo_future, dtype="float64")
+    vals[~np.isfinite(vals)] = 0.0
     if (vals == 0).all():
         print("[TMO] Fallback activado: perfil futuro vacío o todo 0.")
         last_ts = dfh.index.max()
@@ -174,16 +175,20 @@ def main(horizonte_dias: int):
                               hour=lambda x: x.index.hour)
                       .groupby(["dow","hour"])["tmo"].median().rename("tmo_mediana").reset_index())
             mm = pd.DataFrame({"ts": future_idx})
-            mm["dow"] = mm["ts"].dt.dayofweek   # <-- FIX: usar .dt
-            mm["hour"] = mm["ts"].dt.hour       # <-- FIX: usar .dt
+            mm["dow"] = mm["ts"].dt.dayofweek
+            mm["hour"] = mm["ts"].dt.hour
             out = mm.merge(prof, on=["dow","hour"], how="left")
             med_global = out["tmo_mediana"].median(skipna=True)
             out["tmo_mediana"] = out["tmo_mediana"].fillna(float(med_global) if np.isfinite(med_global) else 0.0)
-            tmo_future = pd.Series(out["tmo_mediana"].values, index=future_idx, name="tmo_s").fillna(0.0)
+            vals = out["tmo_mediana"].to_numpy(dtype="float64")
         else:
             print("[TMO] Fallback sin datos: usando 0.")
+            vals = np.zeros(len(future_idx), dtype="float64")
 
-    df_hourly["tmo_s"] = pd.to_numeric(tmo_future.values, errors="coerce").fillna(0.0).astype(float)
+    # --- FIX: normalización NumPy, sin fillna de pandas sobre ndarray
+    vals = np.asarray(vals, dtype="float64")
+    vals[~np.isfinite(vals)] = 0.0
+    df_hourly["tmo_s"] = vals
 
     # 7) Agentes y JSONs
     try:
