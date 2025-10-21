@@ -12,63 +12,56 @@ def ensure_ts(d: pd.DataFrame) -> pd.DataFrame:
     Devuelve DF indexado por ts (tz=America/Santiago), ordenado.
     Acepta formatos de hora heterogéneos: "8", "8:0", "08:00", "8.00", "08:00:00", etc.
     Soporta (ts) o (fecha + hora). No descarta filas por hora "imperfecta".
+    Manejo DST: no pierde filas (ambiguous='infer', nonexistent='shift_forward').
     """
     d = d.copy()
-    # Normaliza nombres para detectar columnas conocidas
     lowmap = {c.lower().strip(): c for c in d.columns}
 
-    # 1) Caso: columna ts directa
+    # 1) Columna ts directa
     for cand in ("ts", "fecha_hora", "datetime", "datatime"):
         if cand in lowmap:
             ts_col = lowmap[cand]
             ts = pd.to_datetime(d[ts_col], errors="coerce", dayfirst=True)
-
-            # Filtrar NaT
             mask_ok = ts.notna()
             d = d.loc[mask_ok].copy()
             ts = ts[mask_ok]
-
-            # ⬇️ FIX: decidir correctamente localize vs convert
             tzinfo = getattr(ts.dt, "tz", None)
             if tzinfo is None:
-                ts = ts.dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT")
+                ts = ts.dt.tz_localize(
+                    TIMEZONE, ambiguous="infer", nonexistent="shift_forward"
+                )
             else:
                 ts = ts.dt.tz_convert(TIMEZONE)
-
             d.index = ts
             return d.sort_index()
 
-    # 2) Caso: fecha + hora
+    # 2) Fecha + hora
     fcol = next((lowmap[k] for k in ("fecha", "date", "dia", "día") if k in lowmap), None)
     hcol = next((lowmap[k] for k in ("hora", "hour", "h") if k in lowmap), None)
     if fcol is None or hcol is None:
         raise ValueError("No se encontró ni 'ts' ni (fecha+hora) para construir el índice temporal.")
 
-    # Fecha
     fecha_dt = pd.to_datetime(d[fcol].astype(str), errors="coerce", dayfirst=True)
 
-    # Hora robusta
     hora_raw = d[hcol].astype(str).str.strip()
-    tmp = hora_raw.str.replace(".", ":", regex=False)        # 8.0 -> 8:0
+    tmp = hora_raw.str.replace(".", ":", regex=False)
     parts = tmp.str.extract(r'^\s*(\d{1,2})(?::\s*(\d{1,2}))?(?::\s*(\d{1,2}))?')
-    hh = pd.to_numeric(parts[0], errors='coerce').clip(lower=0, upper=23).fillna(0).astype(int)
-    mm = pd.to_numeric(parts[1], errors='coerce').clip(lower=0, upper=59).fillna(0).astype(int)
-    ss = pd.to_numeric(parts[2], errors='coerce').clip(lower=0, upper=59).fillna(0).astype(int)
+    hh = pd.to_numeric(parts[0], errors='coerce').clip(0, 23).fillna(0).astype(int)
+    mm = pd.to_numeric(parts[1], errors='coerce').clip(0, 59).fillna(0).astype(int)
+    ss = pd.to_numeric(parts[2], errors='coerce').clip(0, 59).fillna(0).astype(int)
 
     hora_str = hh.map(lambda x: f"{x:02d}") + ":" + mm.map(lambda x: f"{x:02d}") + ":" + ss.map(lambda x: f"{x:02d}")
     ts = pd.to_datetime(fecha_dt.dt.strftime("%Y-%m-%d") + " " + hora_str,
                         errors="coerce", infer_datetime_format=True)
-
-    # Filtrar NaT
     mask_ok = ts.notna()
     d = d.loc[mask_ok].copy()
     ts = ts[mask_ok]
 
-    # ⬇️ FIX: siempre tz_localize (porque lo acabamos de construir sin tz)
-    # (si llegara a venir con tz por alguna razón, convertimos)
     tzinfo = getattr(ts.dt, "tz", None)
     if tzinfo is None:
-        ts = ts.dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT")
+        ts = ts.dt.tz_localize(
+            TIMEZONE, ambiguous="infer", nonexistent="shift_forward"
+        )
     else:
         ts = ts.dt.tz_convert(TIMEZONE)
 
@@ -98,8 +91,6 @@ def add_lags_mas(df: pd.DataFrame, col: str) -> pd.DataFrame:
 def dummies_and_reindex(df: pd.DataFrame, cols_expected: list) -> pd.DataFrame:
     x = pd.get_dummies(df.copy(), columns=[c for c in ["dow","month","hour"] if c in df.columns])
     x = x.reindex(columns=cols_expected, fill_value=0)
-    # Forzar numérico
     for c in x.columns:
         x[c] = pd.to_numeric(x[c], errors="coerce").fillna(0.0)
     return x
-
