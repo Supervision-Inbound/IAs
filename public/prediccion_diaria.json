@@ -3,48 +3,48 @@
     "fecha": "2025-07-27",
     "llamadas_diarias": 37,
     "index": 0,
-    "tmo_diario": 0.0
+    "tmo_diario": 250.5
   },
   {
     "fecha": "2025-07-28",
     "llamadas_diarias": 3365,
     "index": 1,
-    "tmo_diario": 0.0
+    "tmo_diario": 284.9884101040119
   },
   {
     "fecha": "2025-07-29",
     "llamadas_diarias": 3396,
     "index": 2,
-    "tmo_diario": 0.0
+    "tmo_diario": 288.7910777385159
   },
   {
     "fecha": "2025-07-30",
     "llamadas_diarias": 3544,
     "index": 3,
-    "tmo_diario": 0.0
+    "tmo_diario": 285.9353837471783
   },
   {
     "fecha": "2025-07-31",
     "llamadas_diarias": 3314,
     "index": 4,
-    "tmo_diario": 0.0
+    "tmo_diario": 285.16339770669885
   },
   {
     "fecha": "2025-08-01",
     "llamadas_diarias": 2666,
     "index": 5,
-    "tmo_diario": 0.0
+    "tmo_diario": 282.07895723930983
   },
   {
     "fecha": "2025-08-02",
     "llamadas_diarias": 1737,
     "index": 6,
-    "tmo_diario": 0.0
+    "tmo_diario": 267.56102475532526
   },
   {
     "fecha": "2025-08-03",
     "llamadas_diarias": 1169,
     "index": 7,
-    "tmo_diario": 0.0
+    "tmo_diario": 261.2934131736527
   }
 ]
