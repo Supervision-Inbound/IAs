@@ -27,22 +27,21 @@ def write_daily_json(path: str, df_hourly: pd.DataFrame, calls_col: str, tmo_col
     Agrega por día con:
       - llamadas_diarias = suma de llamadas
       - tmo_diario = promedio ponderado por llamadas (Σ tmo_hora*llamadas_hora / Σ llamadas_hora)
-        Si Σ llamadas_hora == 0, fallback al promedio simple de ese día.
+        Si Σ llamadas_hora == 0, fallback al promedio simple del día.
     """
     tmp = (df_hourly.reset_index()
                      .rename(columns={"index": "ts"}))
 
-    # Asegurar que 'ts' es datetime (por si el índice vino como string)
+    # Asegurar que 'ts' es datetime (puede venir como string del index)
     tmp["ts"] = pd.to_datetime(tmp["ts"], errors="coerce")
     tmp = tmp.dropna(subset=["ts"])
 
     # Construir 'fecha' (string para JSON)
     tmp["fecha"] = tmp["ts"].dt.date.astype(str)
 
-    # Agrupación diaria
     grp = tmp.groupby("fecha", as_index=False)
 
-    # Suma de llamadas por día
+    # Suma de llamadas
     llamadas = grp.agg(llamadas_diarias=(calls_col, "sum"))
 
     # Promedio ponderado de TMO por día
@@ -57,7 +56,7 @@ def write_daily_json(path: str, df_hourly: pd.DataFrame, calls_col: str, tmo_col
 
     weighted = grp.apply(lambda d: pd.Series({"tmo_diario": _tmo_pond(d)})).reset_index()
 
-    # Merge y tipos seguros
+    # Merge final y tipos
     daily = llamadas.merge(weighted, on="fecha", how="left").fillna({"tmo_diario": 0})
     daily["llamadas_diarias"] = daily["llamadas_diarias"].astype(int)
     daily["tmo_diario"] = daily["tmo_diario"].astype(float)
