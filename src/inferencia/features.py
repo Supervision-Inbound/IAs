@@ -7,41 +7,29 @@ TIMEZONE = "America/Santiago"
 def _col(name: str) -> str:
     return name
 
-def _localize_ts(ts: pd.Series) -> pd.Series:
+def _localize_ts_strict(ts: pd.Series) -> pd.Series:
     """
-    Localiza/convierte a America/Santiago manejando DST:
-    - intenta ambiguous='infer' + nonexistent='shift_forward'
-    - si falla por AmbiguousTimeError -> ambiguous=False (elige hora estándar)
+    Compatibilidad con pipeline original:
+    - Si el índice es naive -> tz_localize con ambiguous='NaT' y nonexistent='shift_forward'
+    - Si ya es tz-aware -> convertir a America/Santiago
+    - Las horas ambiguas se DESCARTAN (NaT -> drop), como hacía el original.
     """
     tzinfo = getattr(ts.dt, "tz", None)
     if tzinfo is None:
-        # naive -> localize
-        try:
-            return ts.dt.tz_localize(
-                TIMEZONE,
-                ambiguous="infer",
-                nonexistent="shift_forward",
-            )
-        except Exception:
-            # AmbiguousTimeError u otro: forzar estándar
-            return ts.dt.tz_localize(
-                TIMEZONE,
-                ambiguous=False,
-                nonexistent="shift_forward",
-            )
+        ts = ts.dt.tz_localize(
+            TIMEZONE,
+            ambiguous="NaT",         # <- descarta hora ambigua
+            nonexistent="shift_forward",
+        )
     else:
-        # tz-aware -> convert
-        try:
-            return ts.dt.tz_convert(TIMEZONE)
-        except Exception:
-            # Si algo raro pasa, intenta convertir vía UTC como puente
-            return ts.dt.tz_convert("UTC").dt.tz_convert(TIMEZONE)
+        ts = ts.dt.tz_convert(TIMEZONE)
+    return ts
 
 def ensure_ts(d: pd.DataFrame) -> pd.DataFrame:
     """
     Devuelve DF indexado por ts (tz=America/Santiago), ordenado.
-    Acepta formatos de hora heterogéneos: "8", "8:0", "08:00", "8.00", "08:00:00", etc.
-    Soporta (ts) o (fecha + hora). Robustez DST sin perder filas.
+    Acepta 'ts' directo o (fecha + hora). Compatibilidad con pipeline original:
+    - En DST, horas ambiguas se eliminan (ambiguous='NaT').
     """
     d = d.copy()
     lowmap = {c.lower().strip(): c for c in d.columns}
@@ -51,11 +39,10 @@ def ensure_ts(d: pd.DataFrame) -> pd.DataFrame:
         if cand in lowmap:
             ts_col = lowmap[cand]
             ts = pd.to_datetime(d[ts_col], errors="coerce", dayfirst=True)
+            ts = _localize_ts_strict(ts)
             mask_ok = ts.notna()
             d = d.loc[mask_ok].copy()
-            ts = ts[mask_ok]
-            ts = _localize_ts(ts)
-            d.index = ts
+            d.index = ts[mask_ok]
             return d.sort_index()
 
     # 2) Fecha + hora
@@ -67,9 +54,8 @@ def ensure_ts(d: pd.DataFrame) -> pd.DataFrame:
     fecha_dt = pd.to_datetime(d[fcol].astype(str), errors="coerce", dayfirst=True)
 
     # Hora robusta: admite "8", "8:0", "8.0", "08:00", "08:00:00"
-    hora_raw = d[hcol].astype(str).str.strip()
-    tmp = hora_raw.str.replace(".", ":", regex=False)
-    parts = tmp.str.extract(r'^\s*(\d{1,2})(?::\s*(\d{1,2}))?(?::\s*(\d{1,2}))?')
+    hora_raw = d[hcol].astype(str).str.strip().str.replace(".", ":", regex=False)
+    parts = hora_raw.str.extract(r'^\s*(\d{1,2})(?::\s*(\d{1,2}))?(?::\s*(\d{1,2}))?')
     hh = pd.to_numeric(parts[0], errors='coerce').clip(0, 23).fillna(0).astype(int)
     mm = pd.to_numeric(parts[1], errors='coerce').clip(0, 59).fillna(0).astype(int)
     ss = pd.to_numeric(parts[2], errors='coerce').clip(0, 59).fillna(0).astype(int)
@@ -80,13 +66,10 @@ def ensure_ts(d: pd.DataFrame) -> pd.DataFrame:
         errors="coerce",
         infer_datetime_format=True
     )
-
+    ts = _localize_ts_strict(ts)
     mask_ok = ts.notna()
     d = d.loc[mask_ok].copy()
-    ts = ts[mask_ok]
-    ts = _localize_ts(ts)
-
-    d.index = ts
+    d.index = ts[mask_ok]
     return d.sort_index()
 
 def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
