@@ -46,7 +46,7 @@ POST_HOLIDAY_HOURS = 48  # ventana post-feriado para “rebote”
 HIST_WINDOW_DAYS = 90
 
 # ======= Guardrail Outliers (config) =======
-ENABLE_OUTLIER_CAP = True   # <- ponlo en False si quieres desactivarlo
+ENABLE_OUTLIER_CAP = True   # <- caps solo a TMO (llamadas NO)
 K_WEEKDAY = 6.0             # techos +K*MAD en lun-vie
 K_WEEKEND = 7.0             # techos +K*MAD en sáb-dom
 
@@ -180,19 +180,22 @@ def _holiday_hour_factors(df_recent: pd.DataFrame, col: str, holidays_set):
 
 
 def _apply_holiday_adjustments(pred_calls, pred_tmo, df_recent_calls, df_recent_tmo, holidays_set):
-    # Llamadas: factores por hora desde histórico de llamadas
+    # Llamadas: factores por hora (NO se usarán si decidimos no tocar llamadas)
     factors_calls_by_hour = _holiday_hour_factors(df_recent_calls, TARGET_CALLS, holidays_set)
 
-    # TMO: si no hay columna TARGET_TMO en histórico, factores neutros
+    # TMO: factores por hora
     if df_recent_tmo is None or df_recent_tmo.empty or (TARGET_TMO not in df_recent_tmo.columns):
         factors_tmo_by_hour = {int(h): 1.0 for h in range(24)}
     else:
         factors_tmo_by_hour = _holiday_hour_factors(df_recent_tmo, TARGET_TMO, holidays_set)
 
-    # Limitar factores
+    # Limitar factores:
+    # - Llamadas podrían quedar tal cual (no aplicar abajo)
     factors_calls_by_hour = {h: float(np.clip(v, 0.10, 1.60)) for h, v in factors_calls_by_hour.items()}
-    factors_tmo_by_hour   = {h: float(np.clip(v, 0.70, 1.50)) for h, v in factors_tmo_by_hour.items()}
+    # - TMO: nunca bajar por feriado (piso 1.0)
+    factors_tmo_by_hour   = {h: float(np.clip(v, 1.00, 1.50)) for h, v in factors_tmo_by_hour.items()}
 
+    # Aplicación (solo devolveremos tmo ajustado; llamadas se ignorarán afuera)
     calls_adj = []
     tmo_adj   = []
     for ts, c, t in zip(pred_calls.index, pred_calls.values, pred_tmo.values):
@@ -203,7 +206,7 @@ def _apply_holiday_adjustments(pred_calls, pred_tmo, df_recent_calls, df_recent_
     calls_adj = pd.Series(calls_adj, index=pred_calls.index, name=pred_calls.name)
     tmo_adj   = pd.Series(tmo_adj,   index=pred_tmo.index,   name=pred_tmo.name)
 
-    # Rebote post-feriado
+    # Rebote post-feriado (siempre al alza por construcción)
     calls_adj = _apply_post_holiday_adjustment(calls_adj, holidays_set, POST_HOLIDAY_HOURS, factor_calls=1.08, factor_tmo=1.03)
     tmo_adj   = _apply_post_holiday_adjustment(tmo_adj,   holidays_set, POST_HOLIDAY_HOURS, factor_calls=1.06, factor_tmo=1.03)
 
@@ -277,10 +280,8 @@ def _read_tmo_hist_csv(path: str) -> pd.DataFrame:
 # ==============================
 def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays_set: Optional[Set] = None):
     """
-    - Planner de llamadas con histórico de llamadas.
-    - TMO EXCLUSIVO desde data/TMO_HISTORICO.csv con proceso ITERATIVO (igual que llamadas).
-    - Ajustes por feriados y post-feriados separados (llamadas y TMO).
-    - (Opcional) CAP de OUTLIERS por (dow,hour) con mediana+MAD (separado por serie).
+    - Planner de llamadas con histórico de llamadas (SIN ajustes ni caps).
+    - TMO EXCLUSIVO desde data/TMO_HISTORICO.csv con proceso ITERATIVO + ajustes/caps.
     - Erlang C y salidas JSON.
     """
     # === Artefactos ===
@@ -360,7 +361,9 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
         if "feriados" in dfp.columns:
             dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
 
+    # Llamadas finales: SIN toques
     pred_calls = dfp.loc[future_ts, TARGET_CALLS]
+    pred_calls_adj = pred_calls.copy()  # explícito: se dejan intactas
 
     # ===== TMO EXCLUSIVO DESDE data/TMO_HISTORICO.csv (ITERATIVO) =====
     TMO_FILE = os.path.join("data", "TMO_HISTORICO.csv")
@@ -425,28 +428,20 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
     pred_tmo = dft.loc[future_ts, TARGET_TMO]
     pred_tmo.name = TARGET_TMO
 
-    # ===== Ajustes por feriados y post-feriados (separados) =====
-    pred_calls_adj, pred_tmo_adj = _apply_holiday_adjustments(
-        pred_calls, pred_tmo, df_recent_calls, df_recent_tmo, holidays_set
+    # ===== Ajustes por feriados/post-feriado: SOLO TMO =====
+    _, pred_tmo_adj = _apply_holiday_adjustments(
+        pred_calls_adj, pred_tmo, df_recent_calls, df_recent_tmo, holidays_set
     )
 
-    # ===== CAP de outliers por (dow,hour) =====
+    # ===== CAP de outliers por (dow,hour): SOLO TMO =====
     if ENABLE_OUTLIER_CAP:
-        caps_calls = _build_outlier_caps(df_recent_calls, TARGET_CALLS)
         caps_tmo   = _build_outlier_caps(df_recent_tmo,   TARGET_TMO)
-
-        calls_capped = []
-        tmo_capped   = []
-        for ts, c, t in zip(pred_calls_adj.index, pred_calls_adj.values, pred_tmo_adj.values):
+        tmo_capped = []
+        for ts, t in zip(pred_tmo_adj.index, pred_tmo_adj.values):
             key = (int(ts.dayofweek), int(ts.hour))
-            c_cap = caps_calls.get(key, np.inf)
             t_cap = caps_tmo.get(key,   np.inf)
-
-            calls_capped.append(min(float(c), float(c_cap)))
             tmo_capped.append(min(float(t), float(t_cap)))
-
-        pred_calls_adj = pd.Series(calls_capped, index=pred_calls_adj.index, name=pred_calls_adj.name)
-        pred_tmo_adj   = pd.Series(tmo_capped,   index=pred_tmo_adj.index,   name=pred_tmo_adj.name)
+        pred_tmo_adj = pd.Series(tmo_capped, index=pred_tmo_adj.index, name=pred_tmo_adj.name)
 
     # ===== Erlang (agentes requeridos) =====
     df_erlang = pd.DataFrame({
@@ -475,12 +470,11 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
 
     df_erlang["agents_required"] = req_agents
 
-    # 🔁 Alias para compatibilidad con otros módulos (p.ej. main.py espera 'calls')
+    # 🔁 Alias para compatibilidad (main.py espera 'calls' y algunos gráficos 'tmo')
     df_erlang["calls"] = df_erlang[TARGET_CALLS]
     df_erlang["tmo"]   = df_erlang[TARGET_TMO]
 
     # ===== Salidas JSON =====
-    # Writers que requieren path + df + nombres de columnas
     write_hourly_json(
         os.path.join(PUBLIC_DIR, "forecast_hourly.json"),
         df_erlang[[TARGET_CALLS, TARGET_TMO, "agents_required"]],
@@ -496,4 +490,3 @@ def forecast_120d(df_hist_calls: pd.DataFrame, horizon_days: int = 120, holidays
     )
 
     return df_erlang
-
