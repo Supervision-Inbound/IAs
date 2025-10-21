@@ -7,12 +7,41 @@ TIMEZONE = "America/Santiago"
 def _col(name: str) -> str:
     return name
 
+def _localize_ts(ts: pd.Series) -> pd.Series:
+    """
+    Localiza/convierte a America/Santiago manejando DST:
+    - intenta ambiguous='infer' + nonexistent='shift_forward'
+    - si falla por AmbiguousTimeError -> ambiguous=False (elige hora estándar)
+    """
+    tzinfo = getattr(ts.dt, "tz", None)
+    if tzinfo is None:
+        # naive -> localize
+        try:
+            return ts.dt.tz_localize(
+                TIMEZONE,
+                ambiguous="infer",
+                nonexistent="shift_forward",
+            )
+        except Exception:
+            # AmbiguousTimeError u otro: forzar estándar
+            return ts.dt.tz_localize(
+                TIMEZONE,
+                ambiguous=False,
+                nonexistent="shift_forward",
+            )
+    else:
+        # tz-aware -> convert
+        try:
+            return ts.dt.tz_convert(TIMEZONE)
+        except Exception:
+            # Si algo raro pasa, intenta convertir vía UTC como puente
+            return ts.dt.tz_convert("UTC").dt.tz_convert(TIMEZONE)
+
 def ensure_ts(d: pd.DataFrame) -> pd.DataFrame:
     """
     Devuelve DF indexado por ts (tz=America/Santiago), ordenado.
     Acepta formatos de hora heterogéneos: "8", "8:0", "08:00", "8.00", "08:00:00", etc.
-    Soporta (ts) o (fecha + hora). No descarta filas por hora "imperfecta".
-    Manejo DST: no pierde filas (ambiguous='infer', nonexistent='shift_forward').
+    Soporta (ts) o (fecha + hora). Robustez DST sin perder filas.
     """
     d = d.copy()
     lowmap = {c.lower().strip(): c for c in d.columns}
@@ -25,13 +54,7 @@ def ensure_ts(d: pd.DataFrame) -> pd.DataFrame:
             mask_ok = ts.notna()
             d = d.loc[mask_ok].copy()
             ts = ts[mask_ok]
-            tzinfo = getattr(ts.dt, "tz", None)
-            if tzinfo is None:
-                ts = ts.dt.tz_localize(
-                    TIMEZONE, ambiguous="infer", nonexistent="shift_forward"
-                )
-            else:
-                ts = ts.dt.tz_convert(TIMEZONE)
+            ts = _localize_ts(ts)
             d.index = ts
             return d.sort_index()
 
@@ -43,6 +66,7 @@ def ensure_ts(d: pd.DataFrame) -> pd.DataFrame:
 
     fecha_dt = pd.to_datetime(d[fcol].astype(str), errors="coerce", dayfirst=True)
 
+    # Hora robusta: admite "8", "8:0", "8.0", "08:00", "08:00:00"
     hora_raw = d[hcol].astype(str).str.strip()
     tmp = hora_raw.str.replace(".", ":", regex=False)
     parts = tmp.str.extract(r'^\s*(\d{1,2})(?::\s*(\d{1,2}))?(?::\s*(\d{1,2}))?')
@@ -51,19 +75,16 @@ def ensure_ts(d: pd.DataFrame) -> pd.DataFrame:
     ss = pd.to_numeric(parts[2], errors='coerce').clip(0, 59).fillna(0).astype(int)
 
     hora_str = hh.map(lambda x: f"{x:02d}") + ":" + mm.map(lambda x: f"{x:02d}") + ":" + ss.map(lambda x: f"{x:02d}")
-    ts = pd.to_datetime(fecha_dt.dt.strftime("%Y-%m-%d") + " " + hora_str,
-                        errors="coerce", infer_datetime_format=True)
+    ts = pd.to_datetime(
+        fecha_dt.dt.strftime("%Y-%m-%d") + " " + hora_str,
+        errors="coerce",
+        infer_datetime_format=True
+    )
+
     mask_ok = ts.notna()
     d = d.loc[mask_ok].copy()
     ts = ts[mask_ok]
-
-    tzinfo = getattr(ts.dt, "tz", None)
-    if tzinfo is None:
-        ts = ts.dt.tz_localize(
-            TIMEZONE, ambiguous="infer", nonexistent="shift_forward"
-        )
-    else:
-        ts = ts.dt.tz_convert(TIMEZONE)
+    ts = _localize_ts(ts)
 
     d.index = ts
     return d.sort_index()
