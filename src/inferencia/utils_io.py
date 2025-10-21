@@ -1,3 +1,4 @@
+# src/inferencia/utils_io.py
 import json, os
 import pandas as pd
 
@@ -26,39 +27,40 @@ def write_daily_json(path: str, df_hourly: pd.DataFrame, calls_col: str, tmo_col
     Agrega por día con:
       - llamadas_diarias = suma de llamadas
       - tmo_diario = promedio ponderado por llamadas (Σ tmo_hora*llamadas_hora / Σ llamadas_hora)
-        Si Σ llamadas_hora == 0, fallback al promedio simple de tmo_hora del día.
+        Si Σ llamadas_hora == 0, fallback al promedio simple de ese día.
     """
     tmp = (df_hourly.reset_index()
                      .rename(columns={"index": "ts"}))
 
-    # Asegurar que 'ts' es datetime (puede venir como string del index)
+    # Asegurar que 'ts' es datetime (por si el índice vino como string)
     tmp["ts"] = pd.to_datetime(tmp["ts"], errors="coerce")
     tmp = tmp.dropna(subset=["ts"])
 
-    # Construir 'fecha' como string (para JSON)
+    # Construir 'fecha' (string para JSON)
     tmp["fecha"] = tmp["ts"].dt.date.astype(str)
 
-    # Cálculos por día
+    # Agrupación diaria
     grp = tmp.groupby("fecha", as_index=False)
 
-    # Suma de llamadas
+    # Suma de llamadas por día
     llamadas = grp.agg(llamadas_diarias=(calls_col, "sum"))
 
-    # Promedio ponderado de TMO por llamadas
-    # peso = llamadas_hora; valor = tmo_hora
-    weighted = grp.apply(
-        lambda d: pd.Series({
-            "tmo_diario": (
-                (d[tmo_col].astype(float) * d[calls_col].astype(float)).sum() / d[calls_col].astype(float).sum()
-                if d[calls_col].astype(float).sum() > 0
-                else d[tmo_col].astype(float).mean()
-            )
-        })
-    ).reset_index()
+    # Promedio ponderado de TMO por día
+    def _tmo_pond(d: pd.DataFrame) -> float:
+        vv = d[tmo_col].astype(float)
+        ww = d[calls_col].astype(float)
+        wsum = ww.sum()
+        if wsum > 0:
+            return float((vv * ww).sum() / wsum)
+        # sin llamadas: fallback a promedio simple del día
+        return float(vv.mean())
 
-    # Merge final y tipos
+    weighted = grp.apply(lambda d: pd.Series({"tmo_diario": _tmo_pond(d)})).reset_index()
+
+    # Merge y tipos seguros
     daily = llamadas.merge(weighted, on="fecha", how="left").fillna({"tmo_diario": 0})
     daily["llamadas_diarias"] = daily["llamadas_diarias"].astype(int)
     daily["tmo_diario"] = daily["tmo_diario"].astype(float)
 
     write_json(path, daily.to_dict(orient="records"))
+
