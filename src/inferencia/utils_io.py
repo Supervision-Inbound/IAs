@@ -1,4 +1,3 @@
-# src/inferencia/utils_io.py
 import json, os
 import pandas as pd
 
@@ -23,6 +22,12 @@ def write_hourly_json(path: str, df_hourly: pd.DataFrame, calls_col: str, tmo_co
     write_json(path, out.to_dict(orient="records"))
 
 def write_daily_json(path: str, df_hourly: pd.DataFrame, calls_col: str, tmo_col: str):
+    """
+    Agrega por día con:
+      - llamadas_diarias = suma de llamadas
+      - tmo_diario = promedio ponderado por llamadas (Σ tmo_hora*llamadas_hora / Σ llamadas_hora)
+        Si Σ llamadas_hora == 0, fallback al promedio simple de tmo_hora del día.
+    """
     tmp = (df_hourly.reset_index()
                      .rename(columns={"index": "ts"}))
 
@@ -30,15 +35,29 @@ def write_daily_json(path: str, df_hourly: pd.DataFrame, calls_col: str, tmo_col
     tmp["ts"] = pd.to_datetime(tmp["ts"], errors="coerce")
     tmp = tmp.dropna(subset=["ts"])
 
-    # Construir 'fecha' y convertir a string para JSON
+    # Construir 'fecha' como string (para JSON)
     tmp["fecha"] = tmp["ts"].dt.date.astype(str)
 
-    # Agregar por día: suma de llamadas, promedio de TMO
-    daily = (tmp.groupby("fecha", as_index=False)
-                .agg(llamadas_diarias=(calls_col, "sum"),
-                     tmo_diario=(tmo_col, "mean")))
+    # Cálculos por día
+    grp = tmp.groupby("fecha", as_index=False)
 
-    # Asegurar tipos serializables
+    # Suma de llamadas
+    llamadas = grp.agg(llamadas_diarias=(calls_col, "sum"))
+
+    # Promedio ponderado de TMO por llamadas
+    # peso = llamadas_hora; valor = tmo_hora
+    weighted = grp.apply(
+        lambda d: pd.Series({
+            "tmo_diario": (
+                (d[tmo_col].astype(float) * d[calls_col].astype(float)).sum() / d[calls_col].astype(float).sum()
+                if d[calls_col].astype(float).sum() > 0
+                else d[tmo_col].astype(float).mean()
+            )
+        })
+    ).reset_index()
+
+    # Merge final y tipos
+    daily = llamadas.merge(weighted, on="fecha", how="left").fillna({"tmo_diario": 0})
     daily["llamadas_diarias"] = daily["llamadas_diarias"].astype(int)
     daily["tmo_diario"] = daily["tmo_diario"].astype(float)
 
