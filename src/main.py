@@ -174,8 +174,8 @@ def main(horizonte_dias: int):
                               hour=lambda x: x.index.hour)
                       .groupby(["dow","hour"])["tmo"].median().rename("tmo_mediana").reset_index())
             mm = pd.DataFrame({"ts": future_idx})
-            mm["dow"] = mm["ts"].dayofweek
-            mm["hour"] = mm["ts"].hour
+            mm["dow"] = mm["ts"].dt.dayofweek   # <-- FIX: usar .dt
+            mm["hour"] = mm["ts"].dt.hour       # <-- FIX: usar .dt
             out = mm.merge(prof, on=["dow","hour"], how="left")
             med_global = out["tmo_mediana"].median(skipna=True)
             out["tmo_mediana"] = out["tmo_mediana"].fillna(float(med_global) if np.isfinite(med_global) else 0.0)
