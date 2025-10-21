@@ -23,7 +23,7 @@ TMO_COLS = "models/training_columns_tmo.json"
 TARGET_CALLS = "recibidos_nacional"
 TARGET_TMO = "tmo_general"
 
-# Ventana reciente para lags/MA
+# Ventana de histórico para lags/MA
 HIST_WINDOW_DAYS = 90
 
 # ========= Opcional: guardrail de outliers sobre llamadas =========
@@ -50,7 +50,7 @@ def _safe_ratio(num, den, fallback=1.0):
 def _series_is_holiday(idx, holidays_set):
     tz = getattr(idx, "tz", None)
     idx_dates = idx.tz_convert(TIMEZONE).date if tz is not None else idx.date
-    return pd.Series([d in holidays_set for d in idx_dates], index=idx, dtype=bool)
+    return pd.Series([d in holidays_set for d in idx_dates], index=idx, dtype="boolean")
 
 
 def _is_holiday(ts, holidays_set):
@@ -75,23 +75,23 @@ def compute_holiday_factors(df_hist, holidays_set,
     dfh["is_holiday"] = _series_is_holiday(dfh.index, holidays_set)
 
     # Medianas por hora (feriado vs normal) — llamadas
-    med_hol_calls = dfh[dfh["is_holiday"]].groupby("hour")[col_calls].median()
-    med_nor_calls = dfh[~dfh["is_holiday"]].groupby("hour")[col_calls].median()
+    med_hol_calls = dfh[dfh["is_holiday"] == True].groupby("hour")[col_calls].median()
+    med_nor_calls = dfh[dfh["is_holiday"] != True].groupby("hour")[col_calls].median()
 
     # Medianas por hora (feriado vs normal) — TMO (si hay en histórico)
     if col_tmo in dfh.columns:
-        med_hol_tmo = dfh[dfh["is_holiday"]].groupby("hour")[col_tmo].median()
-        med_nor_tmo = dfh[~dfh["is_holiday"]].groupby("hour")[col_tmo].median()
+        med_hol_tmo = dfh[dfh["is_holiday"] == True].groupby("hour")[col_tmo].median()
+        med_nor_tmo = dfh[dfh["is_holiday"] != True].groupby("hour")[col_tmo].median()
 
-        g_hol_tmo = dfh[dfh["is_holiday"]][col_tmo].median()
-        g_nor_tmo = dfh[~dfh["is_holiday"]][col_tmo].median()
+        g_hol_tmo = dfh[dfh["is_holiday"] == True][col_tmo].median()
+        g_nor_tmo = dfh[dfh["is_holiday"] != True][col_tmo].median()
         global_tmo_factor = _safe_ratio(g_hol_tmo, g_nor_tmo, fallback=1.00)
     else:
         med_hol_tmo = med_nor_tmo = None
         global_tmo_factor = 1.00
 
-    g_hol_calls = dfh[dfh["is_holiday"]][col_calls].median()
-    g_nor_calls = dfh[~dfh["is_holiday"]][col_calls].median()
+    g_hol_calls = dfh[dfh["is_holiday"] == True][col_calls].median()
+    g_nor_calls = dfh[dfh["is_holiday"] != True][col_calls].median()
     global_calls_factor = _safe_ratio(g_hol_calls, g_nor_calls, fallback=0.75)
 
     factors_calls_by_hour = {
@@ -117,9 +117,10 @@ def compute_holiday_factors(df_hist, holidays_set,
 
     # Factores post-feriado (día siguiente)
     dfh = dfh.copy()
-    dfh["is_post_hol"] = (~dfh["is_holiday"]) & (dfh["is_holiday"].shift(1).fillna(False))
-    med_nor_calls = dfh[~dfh["is_holiday"]].groupby("hour")[col_calls].median()  # para fallback
-    med_post_calls = dfh[dfh["is_post_hol"]].groupby("hour")[col_calls].median()
+    # Evita FutureWarning: usa shift(fill_value=...)
+    dfh["is_post_hol"] = (~(dfh["is_holiday"] == True)) & (dfh["is_holiday"].shift(1, fill_value=False) == True)
+    med_nor_calls = dfh[dfh["is_holiday"] != True].groupby("hour")[col_calls].median()  # fallback
+    med_post_calls = dfh[dfh["is_post_hol"] == True].groupby("hour")[col_calls].median()
     post_calls_by_hour = {
         int(h): _safe_ratio(med_post_calls.get(h, np.nan),
                             med_nor_calls.get(h, np.nan),
@@ -148,9 +149,14 @@ def apply_holiday_adjustment(df_future, holidays_set,
     tmo_f  = np.array([factors_tmo_by_hour.get(int(h), 1.0) for h in hours])
 
     out = df_future.copy()
-    mask = is_hol.values
-    out.loc[mask, col_calls_future] = np.round(out.loc[mask, col_calls_future].astype(float) * call_f[mask]).astype(int)
-    out.loc[mask, col_tmo_future]   = np.round(out.loc[mask, col_tmo_future].astype(float)   * tmo_f[mask]).astype(int)
+    mask = (is_hol == True).values
+
+    # Asegura tipos float para multiplicar y evitar casting warnings
+    out[col_calls_future] = out[col_calls_future].astype(float)
+    out[col_tmo_future]   = out[col_tmo_future].astype(float)
+
+    out.loc[mask, col_calls_future] = np.round(out.loc[mask, col_calls_future].values * call_f[mask]).astype(float)
+    out.loc[mask, col_tmo_future]   = np.round(out.loc[mask, col_tmo_future].values   * tmo_f[mask]).astype(float)
     return out
 
 
@@ -171,9 +177,9 @@ def apply_post_holiday_adjustment(df_future, holidays_set, post_calls_by_hour,
         prev_dates = prev_idx.date
         curr_dates = idx.date
 
-    is_prev_hol = pd.Series([d in holidays_set for d in prev_dates], index=idx, dtype=bool)
-    is_today_hol = pd.Series([d in holidays_set for d in curr_dates], index=idx, dtype=bool)
-    is_post = (~is_today_hol) & (is_prev_hol)
+    is_prev_hol = pd.Series([d in holidays_set for d in prev_dates], index=idx, dtype="boolean")
+    is_today_hol = pd.Series([d in holidays_set for d in curr_dates], index=idx, dtype="boolean")
+    is_post = (is_today_hol != True) & (is_prev_hol == True)
 
     d = add_time_parts(df_future.copy())
     hours = d["hour"].astype(int).values
@@ -181,11 +187,21 @@ def apply_post_holiday_adjustment(df_future, holidays_set, post_calls_by_hour,
 
     out = df_future.copy()
     mask = is_post.values
-    out.loc[mask, col_calls_future] = np.round(out.loc[mask, col_calls_future].astype(float) * ph_f[mask]).astype(int)
+
+    out[col_calls_future] = out[col_calls_future].astype(float)
+    # mínimo seguro sin NaNs -> si alguno es NaN, conservar valor original
+    new_vals = np.minimum(out.loc[mask, col_calls_future].values.astype(float),
+                          ph_f[mask].astype(float) * out.loc[mask, col_calls_future].values.astype(float))
+    # si por algún motivo saliera NaN/inf, reponemos original
+    bad = ~np.isfinite(new_vals)
+    if bad.any():
+        orig = out.loc[mask, col_calls_future].values.astype(float)
+        new_vals[bad] = orig[bad]
+    out.loc[mask, col_calls_future] = np.round(new_vals).astype(float)
     return out
 
 
-# ===================== Guardrail de outliers =====================
+# ======================== Guardrail de outliers ========================
 
 def _baseline_median_mad(df_hist, col=TARGET_CALLS):
     """
@@ -214,7 +230,9 @@ def apply_outlier_cap(df_future, base_median_mad, holidays_set,
 
     d = add_time_parts(df_future.copy())
     d = d.merge(base_median_mad, on=["dow", "hour"], how="left")
-    limits = d["med"].fillna(0) + d["mad"].fillna(0) * np.where(d["dow"].isin([5, 6]), k_weekend, k_weekday)
+
+    limits = d["med"].astype(float).fillna(0.0) + d["mad"].astype(float).fillna(0.0) * \
+             np.where(d["dow"].isin([5, 6]), float(k_weekend), float(k_weekday))
 
     # No capear feriados ni post-feriados
     idx = df_future.index
@@ -225,16 +243,28 @@ def apply_outlier_cap(df_future, base_median_mad, holidays_set,
         curr_dates = idx.date
         prev_dates = (idx - pd.Timedelta(days=1)).date
 
-    is_hol = pd.Series([d in holidays_set for d in curr_dates], index=idx, dtype=bool)
-    is_prev_hol = pd.Series([d in holidays_set for d in prev_dates], index=idx, dtype=bool)
-    is_post = (~is_hol) & (is_prev_hol)
+    is_hol = pd.Series([d in holidays_set for d in curr_dates], index=idx, dtype="boolean")
+    is_prev_hol = pd.Series([d in holidays_set for d in prev_dates], index=idx, dtype="boolean")
+    is_post = (is_hol != True) & (is_prev_hol == True)
 
-    mask = (~is_hol) & (~is_post)
+    mask = ((is_hol != True) & (is_post != True)).values
+
     out = df_future.copy()
-    out.loc[mask.values, col_calls_future] = np.minimum(
-        out.loc[mask.values, col_calls_future].astype(float),
-        limits[mask.values].astype(float)
-    ).round().astype(int)
+    out[col_calls_future] = out[col_calls_future].astype(float)
+
+    # nuevo valor cappeado (mínimo seguro)
+    capped = np.minimum(out.loc[mask, col_calls_future].values.astype(float),
+                        limits[mask].astype(float))
+    # si hubo NaN/inf, mantener valor original
+    bad = ~np.isfinite(capped)
+    if bad.any():
+        orig = out.loc[mask, col_calls_future].values.astype(float)
+        capped[bad] = orig[bad]
+
+    out.loc[mask, col_calls_future] = capped
+
+    # asegúrate de no dejar NaNs antes de castear a int en upstream
+    out[col_calls_future] = out[col_calls_future].fillna(0.0).astype(float)
     return out
 
 
@@ -282,12 +312,15 @@ def forecast_120d(df_hist_calls: pd.DataFrame,
     df = df[keep].copy()
     df = df.dropna(subset=[TARGET_CALLS])
 
-    # forward-fill a auxiliares (si existen)
-    for aux in ["feriados", "es_dia_de_pago", "tmo_comercial", "tmo_tecnico",
-                "proporcion_comercial", "proporcion_tecnica", TARGET_TMO]:
+    # forward-fill a auxiliares (si existen) y tipos consistentes
+    for aux in ["tmo_comercial", "tmo_tecnico", "proporcion_comercial", "proporcion_tecnica", TARGET_TMO]:
         if aux in df.columns:
-            df[aux] = pd.to_numeric(df[aux], errors="coerce") if aux in ["feriados", "es_dia_de_pago"] else df[aux]
-            df[aux] = df[aux].ffill()
+            df[aux] = pd.to_numeric(df[aux], errors="coerce").ffill()
+
+    for aux in ["feriados", "es_dia_de_pago"]:
+        if aux in df.columns:
+            # mantener columnas de bandera como booleanas
+            df[aux] = df[aux].astype("boolean").ffill()
 
     last_ts = df.index.max()
 
@@ -308,6 +341,8 @@ def forecast_120d(df_hist_calls: pd.DataFrame,
     # ===== Planner iterativo (con feriados futuro si existen) =====
     if "feriados" in df_recent.columns:
         dfp = df_recent[[TARGET_CALLS, "feriados"]].copy()
+        # asegurar dtype booleano
+        dfp["feriados"] = dfp["feriados"].astype("boolean")
     else:
         dfp = df_recent[[TARGET_CALLS]].copy()
 
@@ -315,10 +350,11 @@ def forecast_120d(df_hist_calls: pd.DataFrame,
 
     for ts in future_ts:
         tmp = pd.concat([dfp, pd.DataFrame(index=[ts])])
-        tmp[TARGET_CALLS] = tmp[TARGET_CALLS].ffill()
 
+        tmp[TARGET_CALLS] = tmp[TARGET_CALLS].ffill()
         if "feriados" in tmp.columns:
-            tmp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
+            # asignación segura en booleano
+            tmp.loc[ts, "feriados"] = bool(_is_holiday(ts, holidays_set))
 
         tmp = add_lags_mas(tmp, TARGET_CALLS)
         tmp = add_time_parts(tmp)
@@ -328,7 +364,7 @@ def forecast_120d(df_hist_calls: pd.DataFrame,
         dfp.loc[ts, TARGET_CALLS] = max(0.0, yhat)
 
         if "feriados" in dfp.columns:
-            dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
+            dfp.loc[ts, "feriados"] = bool(_is_holiday(ts, holidays_set))
 
     pred_calls = dfp.loc[future_ts, TARGET_CALLS]
 
@@ -336,11 +372,9 @@ def forecast_120d(df_hist_calls: pd.DataFrame,
     base_tmo = pd.DataFrame(index=future_ts)
     base_tmo[TARGET_CALLS] = pred_calls.values
 
-    # Tomamos los ÚLTIMOS valores reales de proporciones y TMO por tipo desde df (ya ffil)
     if {"proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"}.issubset(df.columns):
         last_vals = df.ffill().iloc[[-1]][["proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]]
     else:
-        # si no están, fallback a 0 (o podrías usar defaults como 0.5 para proporciones)
         last_vals = pd.DataFrame([[0, 0, 0, 0]],
                                  columns=["proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"])
 
@@ -348,7 +382,7 @@ def forecast_120d(df_hist_calls: pd.DataFrame,
         base_tmo[c] = float(last_vals[c].iloc[0]) if c in last_vals.columns else 0.0
 
     if "feriados" in df.columns:
-        base_tmo["feriados"] = [_is_holiday(ts, holidays_set) for ts in base_tmo.index]
+        base_tmo["feriados"] = pd.Series([bool(_is_holiday(ts, holidays_set)) for ts in base_tmo.index], index=base_tmo.index, dtype="boolean")
 
     base_tmo = add_time_parts(base_tmo)
     Xt = dummies_and_reindex(base_tmo, cols_tmo)
@@ -357,8 +391,8 @@ def forecast_120d(df_hist_calls: pd.DataFrame,
 
     # ===== Curva base (sin ajuste) =====
     df_hourly = pd.DataFrame(index=future_ts)
-    df_hourly["calls"] = np.round(pred_calls).astype(int)
-    df_hourly["tmo_s"] = np.round(y_tmo).astype(int)
+    df_hourly["calls"] = np.round(pred_calls).astype(float)  # mantenemos float hasta el final por seguridad
+    df_hourly["tmo_s"] = np.round(y_tmo).astype(float)
 
     # ===== Ajustes por feriados y post-feriado =====
     if holidays_set and len(holidays_set) > 0:
@@ -385,15 +419,17 @@ def forecast_120d(df_hist_calls: pd.DataFrame,
             k_weekday=K_WEEKDAY, k_weekend=K_WEEKEND
         )
 
+    # ===== Tipos finales seguros =====
+    df_hourly["calls"] = np.round(df_hourly["calls"].astype(float)).fillna(0.0).astype(int)
+    df_hourly["tmo_s"] = np.round(df_hourly["tmo_s"].astype(float)).fillna(0.0).astype(int)
+
     # ===== Agentes requeridos (si ya usabas Erlang, mantenemos) =====
-    # Aquí asumimos un AHT = tmo_s y ASA/SL por defecto definidos dentro de required_agents/schedule_agents
     try:
         df_hourly["agentes_requeridos"] = required_agents(
             traffic_calls=df_hourly["calls"].astype(float).values,
             aht_seconds=df_hourly["tmo_s"].astype(float).values
         ).astype(int)
     except Exception:
-        # Fallback inocuo
         df_hourly["agentes_requeridos"] = (df_hourly["calls"] / 20).round().astype(int)
 
     # ===== Escritura de JSONs =====
@@ -403,3 +439,4 @@ def forecast_120d(df_hist_calls: pd.DataFrame,
                      calls_col="calls", tmo_col="tmo_s")
 
     return df_hourly
+
