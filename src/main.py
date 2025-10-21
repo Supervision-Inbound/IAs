@@ -8,6 +8,10 @@ from src.inferencia.inferencia_core import forecast_120d
 from src.inferencia.features import ensure_ts
 from src.data.loader_tmo import load_historico_tmo
 
+# ⬇️ NUEVO: importamos el generador de TMO desde el histórico
+from src.inferencia.tmo_from_historico import forecast_tmo_from_historico
+from src.inferencia.utils_io import write_hourly_json, write_daily_json
+
 DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
 TMO_HIST_FILE = "data/HISTORICO_TMO.csv"
@@ -15,6 +19,7 @@ TMO_HIST_FILE = "data/HISTORICO_TMO.csv"
 TARGET_CALLS_NEW = "recibidos_nacional"
 TARGET_TMO_NEW = "tmo_general"
 TZ = "America/Santiago"
+
 
 def smart_read_historical(path: str) -> pd.DataFrame:
     try:
@@ -24,6 +29,7 @@ def smart_read_historical(path: str) -> pd.DataFrame:
     except Exception:
         pass
     return pd.read_csv(path, delimiter=';', low_memory=False)
+
 
 def parse_tmo_to_seconds(val):
     if pd.isna(val): return np.nan
@@ -39,6 +45,7 @@ def parse_tmo_to_seconds(val):
     except:
         return np.nan
 
+
 def load_holidays(csv_path: str) -> set:
     if not os.path.exists(csv_path): return set()
     fer = pd.read_csv(csv_path)
@@ -51,14 +58,17 @@ def load_holidays(csv_path: str) -> set:
     fechas = pd.to_datetime(fer[fecha_col].astype(str), dayfirst=True, errors="coerce").dropna().dt.date
     return set(fechas)
 
+
 def mark_holidays_index(dt_index, holidays_set: set) -> pd.Series:
     tz = getattr(dt_index, "tz", None)
     idx_dates = dt_index.tz_convert(TZ).date if tz is not None else dt_index.date
     return pd.Series([d in holidays_set for d in idx_dates], index=dt_index, dtype=int, name="feriados")
 
+
 def add_es_dia_de_pago(df_idx: pd.DataFrame) -> pd.Series:
     dias = [1,2,15,16,29,30,31]
     return pd.Series(df_idx.index.day.isin(dias).astype(int), index=df_idx.index, name="es_dia_de_pago")
+
 
 def main(horizonte_dias: int):
     os.makedirs("public", exist_ok=True)
@@ -106,19 +116,48 @@ def main(horizonte_dias: int):
         if c in dfh.columns:
             dfh[c] = dfh[c].ffill()
 
-    # 5) Forecast (le pasamos feriados para marcar el horizonte)
+    # 5) Forecast (planner de llamadas + (tmo del modelo que luego vamos a sustituir))
     df_hourly = forecast_120d(
         dfh.reset_index(),
         horizon_days=horizonte_dias,
         holidays_set=holidays_set
     )
 
-    # 6) Alertas clima (usa la curva del planner)
-    from src.inferencia.alertas_clima import generar_alertas
-    generar_alertas(df_hourly[["calls"]])
+    # 6) === OVERRIDE TMO DESDE HISTORICO_TMO (sin tocar la curva de llamadas) ===
+    future_idx = df_hourly.index
+    tmo_future = forecast_tmo_from_historico(
+        historico_path=TMO_HIST_FILE,
+        future_idx=future_idx,
+        lookback_days=90,
+    )
+    df_hourly["tmo_s"] = tmo_future.values.astype(float)
+
+    # 7) Recalcular agentes (si corresponde) y re-escribir JSONs con el TMO nuevo
+    try:
+        from src.inferencia.erlang import required_agents
+        df_hourly["agentes_requeridos"] = [
+            required_agents(arrivals=float(c), aht_s=float(t))[0]
+            for c, t in zip(df_hourly["calls"].astype(float), df_hourly["tmo_s"].astype(float))
+        ]
+    except Exception:
+        df_hourly["agentes_requeridos"] = (df_hourly["calls"] / 20).round().astype(int)
+
+    write_hourly_json("public/prediccion_horaria.json", df_hourly,
+                      calls_col="calls", tmo_col="tmo_s", agentes_col="agentes_requeridos")
+    write_daily_json("public/prediccion_diaria.json", df_hourly,
+                     calls_col="calls", tmo_col="tmo_s")
+
+    # 8) (opcional) alertas clima
+    try:
+        from src.inferencia.alertas_clima import generar_alertas
+        generar_alertas(df_hourly[["calls"]])
+    except Exception as e:
+        print("⚠️ Alertas clima no generadas:", e)
+
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--horizonte", type=int, default=120)
     args = ap.parse_args()
     main(args.horizonte)
+
