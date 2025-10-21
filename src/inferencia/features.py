@@ -16,17 +16,25 @@ def ensure_ts(d: pd.DataFrame) -> pd.DataFrame:
     d = d.copy()
     # Normaliza nombres para detectar columnas conocidas
     lowmap = {c.lower().strip(): c for c in d.columns}
+
     # 1) Caso: columna ts directa
     for cand in ("ts", "fecha_hora", "datetime", "datatime"):
         if cand in lowmap:
             ts_col = lowmap[cand]
             ts = pd.to_datetime(d[ts_col], errors="coerce", dayfirst=True)
-            d = d.loc[ts.notna()].copy()
-            ts = ts[ts.notna()]
-            if getattr(ts, "tz", None) is None:
+
+            # Filtrar NaT
+            mask_ok = ts.notna()
+            d = d.loc[mask_ok].copy()
+            ts = ts[mask_ok]
+
+            # ⬇️ FIX: decidir correctamente localize vs convert
+            tzinfo = getattr(ts.dt, "tz", None)
+            if tzinfo is None:
                 ts = ts.dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT")
             else:
                 ts = ts.dt.tz_convert(TIMEZONE)
+
             d.index = ts
             return d.sort_index()
 
@@ -45,16 +53,26 @@ def ensure_ts(d: pd.DataFrame) -> pd.DataFrame:
     parts = tmp.str.extract(r'^\s*(\d{1,2})(?::\s*(\d{1,2}))?(?::\s*(\d{1,2}))?')
     hh = pd.to_numeric(parts[0], errors='coerce').clip(lower=0, upper=23).fillna(0).astype(int)
     mm = pd.to_numeric(parts[1], errors='coerce').clip(lower=0, upper=59).fillna(0).astype(int)
-    # segundos (opcional)
     ss = pd.to_numeric(parts[2], errors='coerce').clip(lower=0, upper=59).fillna(0).astype(int)
 
     hora_str = hh.map(lambda x: f"{x:02d}") + ":" + mm.map(lambda x: f"{x:02d}") + ":" + ss.map(lambda x: f"{x:02d}")
     ts = pd.to_datetime(fecha_dt.dt.strftime("%Y-%m-%d") + " " + hora_str,
                         errors="coerce", infer_datetime_format=True)
-    ts = ts.dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT")
 
-    d = d.loc[ts.notna()].copy()
-    d.index = ts[ts.notna()]
+    # Filtrar NaT
+    mask_ok = ts.notna()
+    d = d.loc[mask_ok].copy()
+    ts = ts[mask_ok]
+
+    # ⬇️ FIX: siempre tz_localize (porque lo acabamos de construir sin tz)
+    # (si llegara a venir con tz por alguna razón, convertimos)
+    tzinfo = getattr(ts.dt, "tz", None)
+    if tzinfo is None:
+        ts = ts.dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT")
+    else:
+        ts = ts.dt.tz_convert(TIMEZONE)
+
+    d.index = ts
     return d.sort_index()
 
 def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
@@ -84,3 +102,4 @@ def dummies_and_reindex(df: pd.DataFrame, cols_expected: list) -> pd.DataFrame:
     for c in x.columns:
         x[c] = pd.to_numeric(x[c], errors="coerce").fillna(0.0)
     return x
+
