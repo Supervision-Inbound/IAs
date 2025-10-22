@@ -1,220 +1,226 @@
 # src/main.py
-import argparse
 import os
-import numpy as np
+import argparse
 import pandas as pd
+import numpy as np
 
-from src.inferencia.inferencia_core import forecast_120d
-from src.inferencia.features import ensure_ts
+from inferencia.features import ensure_ts, add_time_parts
+from inferencia.inferencia_core import forecast_120d, TIMEZONE, TARGET_TMO
+from inferencia.erlang import required_agents
+from inferencia.utils_io import write_daily_json, write_hourly_json
 
-from src.data.loader_tmo import load_historico_tmo
-from src.inferencia.tmo_from_historico import forecast_tmo_from_historico
-from src.inferencia.utils_io import write_hourly_json, write_daily_json
+PUBLIC_DIR = "public"
+TARGET_CALLS = "recibidos_nacional"
 
-DATA_FILE = "data/historical_data.csv"
-HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
-TMO_HIST_FILE = "data/HISTORICO_TMO.csv"
+# -------------------------
+# Helpers de carga y DDL TMO
+# -------------------------
+def _read_any(path: str) -> pd.DataFrame:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"No existe archivo: {path}")
+    low = path.lower()
+    if low.endswith(".csv"):
+        try:
+            return pd.read_csv(path, low_memory=False)
+        except Exception:
+            return pd.read_csv(path, delimiter=";", low_memory=False)
+    elif low.endswith((".xlsx", ".xls")):
+        return pd.read_excel(path)
+    else:
+        # intento genérico
+        return pd.read_csv(path, low_memory=False)
 
-TARGET_CALLS_NEW = "recibidos_nacional"
-TARGET_TMO_NEW   = "tmo_general"
-TZ = "America/Santiago"
+def _load_holidays(holidays_file: str) -> set:
+    """
+    Lee un CSV/XLS con una columna de fechas (nombre flexible) y arma un set de date().
+    No pisa la columna 'feriados' del histórico; solo sirve para los ajustes en inferencia_core.
+    """
+    if not os.path.exists(holidays_file):
+        return set()
+    df = _read_any(holidays_file)
+    # buscar columna de fecha probable
+    for cand in ["fecha", "date", "dia", "día", "day"]:
+        if cand in {c.lower().strip(): c for c in df.columns}:
+            col = {c.lower().strip(): c for c in df.columns}[cand]
+            dt = pd.to_datetime(df[col], errors="coerce", dayfirst=True).dt.date
+            return set(d for d in dt.dropna().tolist())
+    # si solo hay una columna, intentar parsearla
+    if df.shape[1] == 1:
+        dt = pd.to_datetime(df.iloc[:, 0], errors="coerce", dayfirst=True).dt.date
+        return set(d for d in dt.dropna().tolist())
+    # fallback vacío
+    return set()
 
-def smart_read_historical(path: str) -> pd.DataFrame:
-    try:
-        df = pd.read_csv(path, low_memory=False)
-        if df.shape[1] > 1:
-            return df
-    except Exception:
-        pass
-    return pd.read_csv(path, delimiter=';', low_memory=False)
+def _coerce_num(s):
+    return pd.to_numeric(s, errors="coerce")
 
-def parse_tmo_to_seconds(val):
-    if pd.isna(val): return np.nan
-    s = str(val).strip().replace(",", ".")
-    if s.replace(".", "", 1).isdigit():
-        try: return float(s)
-        except: return np.nan
-    parts = s.split(":")
-    try:
-        if len(parts) == 3: return float(parts[0])*3600 + float(parts[1])*60 + float(parts[2])
-        if len(parts) == 2: return float(parts[0])*60   + float(parts[1])
-        return float(s)
-    except:
-        return np.nan
+def _tmo_ponderado_row(row) -> float:
+    """
+    Calcula TMO general ponderado:
+    - Si existen q_llamadas_comercial/tecnico y tmo_comercial/tecnico -> ponderación por cantidades
+    - Si existen proporciones y tmo por tipo -> ponderación por proporción
+    - Si existe TARGET_TMO ya calculado -> usarlo
+    """
+    # Opción 1: por cantidades
+    qc = row.get("q_llamadas_comercial", np.nan)
+    qt = row.get("q_llamadas_tecnico", np.nan)
+    tg = row.get("q_llamadas_general", np.nan)
+    tc = row.get("tmo_comercial", np.nan)
+    tt = row.get("tmo_tecnico", np.nan)
 
-def load_holidays(csv_path: str) -> set:
-    if not os.path.exists(csv_path): return set()
-    fer = pd.read_csv(csv_path)
-    cols_map = {c.lower().strip(): c for c in fer.columns}
-    fecha_col = next((cols_map[k] for k in ("fecha","date","dia","día") if k in cols_map), None)
-    if not fecha_col: return set()
-    fechas = pd.to_datetime(fer[fecha_col].astype(str), dayfirst=True, errors="coerce").dropna().dt.date
-    return set(fechas)
+    qc = np.nan if pd.isna(qc) else float(qc)
+    qt = np.nan if pd.isna(qt) else float(qt)
+    tg = np.nan if pd.isna(tg) else float(tg)
+    tc = np.nan if pd.isna(tc) else float(tc)
+    tt = np.nan if pd.isna(tt) else float(tt)
 
-def mark_holidays_index(dt_index, holidays_set: set) -> pd.Series:
-    tz = getattr(dt_index, "tz", None)
-    idx_dates = dt_index.tz_convert(TZ).date if tz is not None else dt_index.date
-    return pd.Series([d in holidays_set for d in idx_dates], index=dt_index, dtype=int, name="feriados")
+    if (not pd.isna(qc)) and (not pd.isna(qt)) and (not pd.isna(tc)) and (not pd.isna(tt)):
+        denom = (qc + qt) if pd.isna(tg) else tg
+        if denom and denom > 0:
+            return (tc * (qc / denom) + tt * (qt / denom))
 
-def add_es_dia_de_pago(df_idx: pd.DataFrame) -> pd.Series:
-    dias = [1,2,15,16,29,30,31]
-    return pd.Series(df_idx.index.day.isin(dias).astype(int), index=df_idx.index, name="es_dia_de_pago")
+    # Opción 2: por proporciones
+    pc = row.get("proporcion_comercial", np.nan)
+    pt = row.get("proporcion_tecnica", np.nan)
+    pc = np.nan if pd.isna(pc) else float(pc)
+    pt = np.nan if pd.isna(pt) else float(pt)
+    if (not pd.isna(pc)) and (not pd.isna(pt)) and (not pd.isna(tc)) and (not pd.isna(tt)):
+        s = pc + pt
+        if s > 0:
+            return (tc * pc + tt * pt) / s
 
-def safe_reset_index_ts(df: pd.DataFrame, prefer: str = "ts") -> pd.DataFrame:
-    name = prefer
-    i = 1
-    while name in df.columns:
-        name = f"{prefer}_{i}"
-        i += 1
-    return df.reset_index(names=name)
+    # Opción 3: TARGET_TMO ya viene
+    tg = row.get(TARGET_TMO, np.nan)
+    if not pd.isna(tg):
+        return float(tg)
 
+    return np.nan
+
+def _build_tmo_future_from_ddl(df_tmo_hist: pd.DataFrame, future_index: pd.DatetimeIndex) -> pd.Series:
+    """
+    Construye TMO horario futuro desde histórico (DDL):
+    - Calcula TMO ponderado por fila (si hay cantidades/proporciones).
+    - Arma perfil por (dow, hour) usando últimas 6–8 semanas.
+    - Proyecta a futuro mapeando (dow, hour).
+    - Fallback: mediana por hour, luego mediana global, luego 0.
+    """
+    if df_tmo_hist is None or df_tmo_hist.empty:
+        return pd.Series(np.zeros(len(future_index), dtype=float), index=future_index)
+
+    d = df_tmo_hist.copy()
+    d = ensure_ts(d)  # tz=America/Santiago, drop horas ambiguas (modo original)
+    if d.empty:
+        return pd.Series(np.zeros(len(future_index), dtype=float), index=future_index)
+
+    # calcular TMO ponderado por fila
+    d_cols = {c.lower().strip(): c for c in d.columns}
+    # intentar asegurar nombres básicos
+    # (si no existen, _tmo_ponderado_row usará TARGET_TMO si está)
+    # compute row-wise
+    tmo_p = d.apply(_tmo_ponderado_row, axis=1)
+    d["tmo_pond"] = _coerce_num(tmo_p)
+
+    # quedarnos con ventana reciente para el perfil (evita drift)
+    if not d.index.is_monotonic_increasing:
+        d = d.sort_index()
+    last_ts = d.index.max()
+    d_recent = d.loc[d.index >= (last_ts - pd.Timedelta(days=56))].copy()
+    if d_recent["tmo_pond"].dropna().empty:
+        # usar una ventana más amplia si no hay datos
+        d_recent = d.copy()
+
+    d_recent = add_time_parts(d_recent)
+    # perfil por (dow, hour): mediana robusta
+    prof = d_recent.groupby(["dow", "hour"])["tmo_pond"].median()
+
+    # fallback por hora (agregando todos los días) y global
+    med_by_hour = d_recent.groupby("hour")["tmo_pond"].median()
+    med_global = float(d_recent["tmo_pond"].median()) if not d_recent["tmo_pond"].dropna().empty else 0.0
+
+    # armar serie futura
+    fut = pd.DataFrame(index=future_index)
+    fut = add_time_parts(fut)
+    vals = []
+    for _, r in fut.iterrows():
+        key = (int(r["dow"]), int(r["hour"]))
+        v = prof.get(key, np.nan)
+        if pd.isna(v):
+            v = med_by_hour.get(int(r["hour"]), np.nan)
+        if pd.isna(v):
+            v = med_global
+        vals.append(float(v) if np.isfinite(v) else 0.0)
+
+    s = pd.Series(vals, index=future_index, dtype=float)
+    # limpiar extremos
+    s = s.clip(lower=0).fillna(0.0)
+    # redondeo similar a la salida original (entero)
+    s = np.round(s).astype(float)
+    return s
+
+# -------------------------
+# Flujo principal
+# -------------------------
 def main(horizonte_dias: int):
-    os.makedirs("public", exist_ok=True)
+    # Paths (configurables por ENV)
+    HISTORICAL_FILE = os.getenv("HISTORICAL_FILE", "data/historical_data.csv")
+    HISTORICAL_TMO_FILE = os.getenv("HISTORICAL_TMO_FILE", "data/TMO_HISTORICO.csv")
+    HOLIDAYS_FILE = os.getenv("HOLIDAYS_FILE", "data/Feriados_Chilev2.csv")
 
-    # 1) Histórico principal
-    dfh = smart_read_historical(DATA_FILE)
-    dfh.columns = dfh.columns.str.strip()
+    os.makedirs(PUBLIC_DIR, exist_ok=True)
 
-    if TARGET_CALLS_NEW not in dfh.columns:
-        for cand in ["recibidos_nacional","recibidos","total_llamadas","llamadas"]:
-            if cand in dfh.columns:
-                dfh = dfh.rename(columns={cand: TARGET_CALLS_NEW})
-                break
-
-    if TARGET_TMO_NEW not in dfh.columns:
-        tmo_source = None
-        for cand in ["tmo (segundos)","tmo_seg","tmo","tmo_general"]:
-            if cand in dfh.columns:
-                tmo_source = cand; break
-        if tmo_source:
-            dfh[TARGET_TMO_NEW] = dfh[tmo_source].apply(parse_tmo_to_seconds)
-
+    # 1) Cargar histórico de llamadas (NO tocar 'feriados' si ya viene)
+    dfh = _read_any(HISTORICAL_FILE)
     dfh = ensure_ts(dfh)
 
-    # 2) Merge HISTORICO_TMO
-    if os.path.exists(TMO_HIST_FILE):
-        df_tmo = load_historico_tmo(TMO_HIST_FILE)
-        dfh = dfh.join(df_tmo, how="left")
-        if "tmo_general" in dfh.columns:
-            dfh[TARGET_TMO_NEW] = dfh["tmo_general"].combine_first(dfh.get(TARGET_TMO_NEW))
+    # 2) Holidays set (solo para ajustes dentro de inferencia_core)
+    holidays_set = _load_holidays(HOLIDAYS_FILE)
 
-    # 3) Calendario
-    holidays_set = load_holidays(HOLIDAYS_FILE)
-    if "feriados" not in dfh.columns:
-        dfh["feriados"] = mark_holidays_index(dfh.index, holidays_set).values
-    dfh["feriados"] = pd.to_numeric(dfh["feriados"], errors="coerce").fillna(0).astype(int)
-    if "es_dia_de_pago" not in dfh.columns:
-        dfh["es_dia_de_pago"] = add_es_dia_de_pago(dfh).values
+    # 3) Forecast base (llamadas originales + tmo_s interno provisional)
+    #    OJO: forecast_120d ya escribe JSONs base; luego los sobrescribimos con TMO override.
+    df_hourly = forecast_120d(dfh, horizonte_dias, holidays_set)
 
-    # 4) Forzar numérico + ffill
-    for c in [
-        TARGET_TMO_NEW, "feriados", "es_dia_de_pago",
-        "proporcion_comercial","proporcion_tecnica","tmo_comercial","tmo_tecnico",
-        "q_llamadas_general","q_llamadas_comercial","q_llamadas_tecnico",
-    ]:
-        if c in dfh.columns:
-            dfh[c] = pd.to_numeric(dfh[c], errors="coerce").ffill()
+    # 4) Override de TMO final desde DDL/HISTÓRICO TMO (si existe)
+    tmo_override_aplicado = False
+    if os.path.exists(HISTORICAL_TMO_FILE):
+        try:
+            df_tmo_hist = _read_any(HISTORICAL_TMO_FILE)
+            tmo_future = _build_tmo_future_from_ddl(df_tmo_hist, df_hourly.index)
+            # asegurar Series
+            if not isinstance(tmo_future, pd.Series):
+                tmo_future = pd.Series(tmo_future, index=df_hourly.index, dtype=float)
 
-    # 5) Forecast (planner + TMO interno que luego se sobreescribe)
-    df_hourly = forecast_120d(
-        safe_reset_index_ts(dfh),
-        horizon_days=horizonte_dias,
-        holidays_set=holidays_set
-    )
+            # override TMO (salida final)
+            df_hourly["tmo_s"] = pd.to_numeric(tmo_future, errors="coerce").fillna(df_hourly["tmo_s"]).astype(float)
 
-    # 6) OVERRIDE TMO con HISTORICO_TMO
-    future_idx = df_hourly.index
-    tmo_future = forecast_tmo_from_historico(
-        historico_path=TMO_HIST_FILE,
-        future_idx=future_idx,
-        lookback_days=90,
-    )
+            # Recalcular agentes con TMO final
+            df_hourly["agentes_requeridos"] = required_agents(
+                traffic_calls=df_hourly["calls"].astype(float).values,
+                aht_seconds=df_hourly["tmo_s"].astype(float).values
+            ).astype(int)
 
-    # Diagnóstico simple
-    try:
-        if os.path.exists(TMO_HIST_FILE):
-            _df_raw = pd.read_csv(TMO_HIST_FILE, low_memory=False)
-            print(f"[TMO HIST] filas leídas: {len(_df_raw)}")
-    except Exception as e:
-        print("[TMO HIST] Diagnóstico lectura falló:", e)
+            tmo_override_aplicado = True
+        except Exception as e:
+            print(f"[TMO] Fallback activado: no se pudo aplicar override desde {HISTORICAL_TMO_FILE}. Error: {e}")
 
-    # Fallback si quedó 0/NaN
-    vals = np.asarray(tmo_future, dtype="float64")
-    vals[~np.isfinite(vals)] = 0.0
-    if (vals == 0).all():
-        print("[TMO] Fallback activado: perfil futuro vacío o todo 0.")
-        last_ts = dfh.index.max()
-        df_win = dfh.loc[dfh.index >= last_ts - pd.Timedelta(days=90)].copy()
+    if not tmo_override_aplicado:
+        print("[TMO] Se mantiene TMO del modelo interno (no hubo DDL válido).")
 
-        def _to_num(s):
-            return pd.to_numeric(s, errors="coerce") if s is not None else None
-
-        gm = _to_num(df_win.get("tmo_general"))
-        if gm is None or gm.dropna().empty:
-            tc = _to_num(df_win.get("tmo_comercial"))
-            tt = _to_num(df_win.get("tmo_tecnico"))
-            qc = _to_num(df_win.get("q_llamadas_comercial"))
-            qt = _to_num(df_win.get("q_llamadas_tecnico"))
-            qg = _to_num(df_win.get("q_llamadas_general"))
-            pc = _to_num(df_win.get("proporcion_comercial"))
-            pt = _to_num(df_win.get("proporcion_tecnica"))
-            gm = None
-            if tc is not None and tt is not None and qc is not None and qt is not None and qg is not None:
-                num = tc.astype(float)*qc.astype(float) + tt.astype(float)*qt.astype(float)
-                den = qg.astype(float).replace(0, np.nan)
-                gm = (num/den)
-            elif tc is not None and tt is not None and pc is not None and pt is not None:
-                w = (pc.astype(float).fillna(0.0) + pt.astype(float).fillna(0.0)).replace(0, np.nan)
-                gm = (tc.astype(float)*pc.astype(float) + tt.astype(float)*pt.astype(float)) / w
-            elif tc is not None and tt is not None:
-                gm = pd.concat([tc, tt], axis=1).median(axis=1, skipna=True)
-
-        if gm is not None and not gm.dropna().empty:
-            prof = (pd.DataFrame({"tmo": gm})
-                      .assign(dow=lambda x: x.index.dayofweek,
-                              hour=lambda x: x.index.hour)
-                      .groupby(["dow","hour"])["tmo"].median().rename("tmo_mediana").reset_index())
-            mm = pd.DataFrame({"ts": future_idx})
-            mm["dow"] = mm["ts"].dt.dayofweek
-            mm["hour"] = mm["ts"].dt.hour
-            out = mm.merge(prof, on=["dow","hour"], how="left")
-            med_global = out["tmo_mediana"].median(skipna=True)
-            out["tmo_mediana"] = out["tmo_mediana"].fillna(float(med_global) if np.isfinite(med_global) else 0.0)
-            vals = out["tmo_mediana"].to_numpy(dtype="float64")
-        else:
-            print("[TMO] Fallback sin datos: usando 0.")
-            vals = np.zeros(len(future_idx), dtype="float64")
-
-    # --- FIX: normalización NumPy, sin fillna de pandas sobre ndarray
-    vals = np.asarray(vals, dtype="float64")
-    vals[~np.isfinite(vals)] = 0.0
-    df_hourly["tmo_s"] = vals
-
-    # 7) Agentes y JSONs
-    try:
-        from src.inferencia.erlang import required_agents
-        df_hourly["agentes_requeridos"] = required_agents(
-            traffic_calls=df_hourly["calls"].astype(float).values,
-            aht_seconds=df_hourly["tmo_s"].astype(float).values
-        ).astype(int)
-    except Exception:
+    # 5) Persistir JSONs FINALES (sobrescriben los del paso base)
+    df_hourly["calls"] = pd.to_numeric(df_hourly["calls"], errors="coerce").fillna(0.0).astype(int)
+    df_hourly["tmo_s"] = pd.to_numeric(df_hourly["tmo_s"], errors="coerce").fillna(0.0).astype(int)
+    if "agentes_requeridos" not in df_hourly.columns:
         df_hourly["agentes_requeridos"] = (df_hourly["calls"] / 20).round().astype(int)
 
-    write_hourly_json("public/prediccion_horaria.json", df_hourly,
+    write_hourly_json(f"{PUBLIC_DIR}/prediccion_horaria.json", df_hourly,
                       calls_col="calls", tmo_col="tmo_s", agentes_col="agentes_requeridos")
-    write_daily_json("public/prediccion_diaria.json", df_hourly,
+    write_daily_json(f"{PUBLIC_DIR}/prediccion_diaria.json", df_hourly,
                      calls_col="calls", tmo_col="tmo_s")
 
-    # (opcional) alertas clima
-    try:
-        from src.alertas_clima import generar_alertas
-        generar_alertas(df_hourly[["calls"]])
-    except Exception as e:
-        print("⚠️ Alertas clima no generadas:", e)
+    print("✅ Listo: llamadas (lógica original) + TMO override DDL aplicado." if tmo_override_aplicado
+          else "✅ Listo: llamadas (lógica original); TMO interno (sin override).")
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--horizonte", type=int, default=120)
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--horizonte", type=int, default=int(os.getenv("HORIZONTE_DIAS", 120)))
+    args = parser.parse_args()
     main(args.horizonte)
-
