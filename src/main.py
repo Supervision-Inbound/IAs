@@ -10,10 +10,10 @@ from src.data.loader_tmo import load_historico_tmo
 
 DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
-TMO_HIST_FILE = "data/HISTORICO_TMO.csv"
+TMO_HIST_FILE = "data/HISTORICO_TMO.csv" # <- Fuente de verdad para TMO
 
 TARGET_CALLS_NEW = "recibidos_nacional"
-TARGET_TMO_NEW = "tmo_general"
+TARGET_TMO_NEW = "tmo_general" # <- Nombre estándar
 TZ = "America/Santiago"
 
 def smart_read_historical(path: str) -> pd.DataFrame:
@@ -84,16 +84,16 @@ def main(horizonte_dias: int):
     dfh = ensure_ts(dfh)
 
     # 2) Fusionar HISTORICO_TMO.csv (alineado por ts)
-    df_tmo_hist_only = None  # <-- NUEVA LÍNEA: Variable para TMO puro
     if os.path.exists(TMO_HIST_FILE):
-        df_tmo = load_historico_tmo(TMO_HIST_FILE)  # index ts
-        df_tmo_hist_only = df_tmo.copy()  # <-- NUEVA LÍNEA: Guardamos la data pura
-        
-        # left-join sobre dfh (mantiene las horas que usa el planner)
-        dfh = dfh.join(df_tmo, how="left")
-        # si tmo_general llegó desde TMO_HIST, úsalo como autoridad
-        if "tmo_general" in dfh.columns:
-            dfh[TARGET_TMO_NEW] = dfh["tmo_general"].combine_first(dfh[TARGET_TMO_NEW])
+        try:
+            df_tmo = load_historico_tmo(TMO_HIST_FILE)  # index ts
+            dfh = dfh.join(df_tmo, how="left")
+            if "tmo_general" in dfh.columns:
+                dfh[TARGET_TMO_NEW] = dfh["tmo_general"].combine_first(dfh[TARGET_TMO_NEW])
+        except Exception as e:
+            print(f"WARN: No se pudo cargar o unir {TMO_HIST_FILE}. Error: {e}")
+            if TARGET_TMO_NEW not in dfh.columns:
+                dfh[TARGET_TMO_NEW] = 0 # Fallback
 
     # 3) Derivar calendario para el histórico
     holidays_set = load_holidays(HOLIDAYS_FILE)
@@ -103,23 +103,20 @@ def main(horizonte_dias: int):
     if "es_dia_de_pago" not in dfh.columns:
         dfh["es_dia_de_pago"] = add_es_dia_de_pago(dfh).values
 
-    # 4) ffill de columnas clave para evitar NaN en el borde
+    # 4) ffill de columnas clave (Igual que tu v1 original)
     for c in [TARGET_TMO_NEW, "feriados", "es_dia_de_pago",
               "proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
         if c in dfh.columns:
             dfh[c] = dfh[c].ffill()
 
-    # 5) Forecast (le pasamos feriados y el DF de TMO puro)
+    # 5) Forecast (¡ESTA ES LA LÍNEA CORREGIDA!)
     df_hourly = forecast_120d(
-        dfh.reset_index(),
-        # <-- INICIO BLOQUE MODIFICADO -->
-        df_tmo_hist_only.reset_index() if df_tmo_hist_only is not None else None,
-        # <-- FIN BLOQUE MODIFICADO -->
-        horizon_days=horizonte_dias,
-        holidays_set=holidays_set
+        dfh.reset_index(), # Argumento 1 (Posicional)
+        horizon_days=horizonte_dias, # Argumento 2 (Keyword)
+        holidays_set=holidays_set  # Argumento 3 (Keyword)
     )
 
-    # 6) Alertas clima (usa la curva del planner)
+    # 6) Alertas clima
     from src.inferencia.alertas_clima import generar_alertas
     generar_alertas(df_hourly[["calls"]])
 
