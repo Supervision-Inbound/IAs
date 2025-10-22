@@ -158,7 +158,7 @@ def _baseline_median_mad(df_hist, col=TARGET_CALLS):
     g = d.groupby(["dow", "hour"])[col]
     base = g.median().rename("med").to_frame()
 
-    # --- ¡¡¡ESTA ES LA FUNCIÓN CORREGIDA!!! ---
+    # --- FUNCIÓN mad_robust CON INDENTACIÓN CORRECTA ---
     def mad_robust(x):
         x_clean = x.dropna()
         if len(x_clean) == 0:
@@ -166,10 +166,9 @@ def _baseline_median_mad(df_hist, col=TARGET_CALLS):
         med = np.median(x_clean)
         # Asegurarse que med sea escalar antes de restar
         if not np.isscalar(med):
-            # Si med no es escalar (caso raro), devolver NaN
             return np.nan
         return np.median(np.abs(x_clean - med))
-    # --- FIN DE LA CORRECCIÓN ---
+    # --- FIN FUNCIÓN ---
 
     mad = g.apply(mad_robust).rename("mad")
     base = base.join(mad)
@@ -211,7 +210,7 @@ def apply_outlier_cap(df_future, base_median_mad, holidays_set,
     capped["mad"] = capped["mad"].fillna(median_mad_global)
     capped["med"] = capped["med"].fillna(median_med_global)
     is_weekend = capped["dow"].isin([5,6]).values
-    K = np.where(is_weekend, k_weekend, k_weekday).astype(float)
+    K = np.where(is_weekend, k_weekday, k_weekday).astype(float)
     upper = capped["med"].values + K * capped["mad"].values
     calls_numeric = pd.to_numeric(capped[col_calls_future], errors='coerce').fillna(0.0)
     mask = (~is_hol.values) & (~is_post_hol.values) & (calls_numeric.values > upper)
@@ -221,17 +220,31 @@ def apply_outlier_cap(df_future, base_median_mad, holidays_set,
     return out
 
 def _is_holiday(ts, holidays_set: set) -> int:
-    if not holidays_set: return 0
+    if not holidays_set:
+        return 0
     if not isinstance(ts, pd.Timestamp):
-        try: ts = pd.to_datetime(ts);
-             if getattr(ts, "tz", None) is None: ts = ts.tz_localize(TIMEZONE, ambiguous='NaT', nonexistent='NaT')
-        except Exception: return 0
-    if pd.isna(ts): return 0
-    try: ts_aware = ts.tz_convert(TIMEZONE) if getattr(ts, "tz", None) is not None else ts.tz_localize(TIMEZONE, ambiguous='NaT', nonexistent='NaT');
-         if pd.isna(ts_aware): return 0; d = ts_aware.date()
+        try:
+            ts = pd.to_datetime(ts)
+            # --- CORRECCIÓN AQUÍ ---
+            if getattr(ts, "tz", None) is None:
+                ts = ts.tz_localize(TIMEZONE, ambiguous='NaT', nonexistent='NaT')
+            # --- FIN CORRECCIÓN ---
+        except Exception:
+            return 0
+    if pd.isna(ts):
+        return 0
+    try:
+        # --- CORRECCIÓN AQUÍ ---
+        ts_aware = ts.tz_convert(TIMEZONE) if getattr(ts, "tz", None) is not None else ts.tz_localize(TIMEZONE, ambiguous='NaT', nonexistent='NaT')
+        if pd.isna(ts_aware):
+            return 0
+        d = ts_aware.date()
+        # --- FIN CORRECCIÓN ---
     except Exception:
-        try: d = ts.date()
-        except Exception: return 0
+        try:
+            d = ts.date()
+        except Exception:
+            return 0
     return 1 if d in holidays_set else 0
 # ===========================================================
 
