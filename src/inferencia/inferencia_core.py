@@ -173,9 +173,11 @@ def apply_outlier_cap(df_future, base_median_mad, holidays_set,
     except Exception:
         curr_dates = d.index.date
         prev_dates = prev_idx.date
-    is_hol = pd.Series([dt in holidays_set for dt in curr_dates], index=d.index, dtype=bool) if holidays_set else pd.Series(False, index.d)
-    is_prev_hol = pd.Series([dt in holidays_set for dt in prev_dates], index=d.index, dtype=bool) if holidays_set else pd.Series(False, index.d)
+    
+    is_hol = pd.Series([dt in holidays_set for dt in curr_dates], index=d.index, dtype=bool) if holidays_set else pd.Series(False, index=d.index)
+    is_prev_hol = pd.Series([dt in holidays_set for dt in prev_dates], index=d.index, dtype=bool) if holidays_set else pd.Series(False, index=d.index)
     is_post_hol = (~is_hol) & (is_prev_hol)
+
     base = base_median_mad.copy()
     capped = d.merge(base, on=["dow","hour"], how="left")
     capped["mad"] = capped["mad"].fillna(capped["mad"].median() if not np.isnan(capped["mad"].median()) else 1.0)
@@ -187,7 +189,7 @@ def apply_outlier_cap(df_future, base_median_mad, holidays_set,
     capped.loc[mask, col_calls_future] = np.round(upper[mask]).astype(int)
     out = df_future.copy()
     
-    # --- ¡¡¡ESTA ES LA LÍNEA CORREGIDA!!! ---
+    # --- ¡¡¡ESTA ES LA LÍNEA CORREGIDA (v20)!!! ---
     out[col_calls_future] = capped[col_calls_future].astype(int).values
     
     return out
@@ -319,7 +321,7 @@ def forecast_calls_v1(df_hist_joined: pd.DataFrame, horizon_days: int = 120, hol
 def forecast_tmo_v8(df_hist_joined: pd.DataFrame, future_ts: pd.DatetimeIndex, holidays_set: set | None = None):
     """
     Flujo de predicción de TMO v8 (autorregresivo).
-    - Usa el 'df_hist_joined' COMPLETO.
+    - Usa el 'df_hist_joined' COMPLETO (rellenado por main.py v21).
     - Devuelve una pd.Series 'pred_tmo'.
     """
     # === Artefactos (Solo TMO) ===
@@ -334,8 +336,9 @@ def forecast_tmo_v8(df_hist_joined: pd.DataFrame, future_ts: pd.DatetimeIndex, h
     if TARGET_CALLS not in df_full.columns: df_full[TARGET_CALLS] = 0
     if TARGET_TMO not in df_full.columns: df_full[TARGET_TMO] = 0
         
+    # (El ffill de TMO ahora se hace en main.py v21 ANTES de llamar a esta función)
     df_full = df_full.dropna(subset=[TARGET_CALLS])
-    df_full[TARGET_TMO] = pd.to_numeric(df_full[TARGET_TMO], errors='coerce').ffill().fillna(0.0)
+    df_full[TARGET_TMO] = pd.to_numeric(df_full[TARGET_TMO], errors='coerce').fillna(0.0) # (Doble chequeo)
     for aux in ["feriados", "es_dia_de_pago"]:
         if aux in df_full.columns:
             df_full[aux] = df_full[aux].ffill()
