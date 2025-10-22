@@ -92,9 +92,19 @@ def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
 
 def dummies_and_reindex(df_row: pd.DataFrame, training_cols: list) -> pd.DataFrame:
     d = df_row.copy()
-    d = pd.get_dummies(d, columns=['dow', 'month', 'hour'], drop_first=False)
+    # Asegurar que las columnas categóricas existan antes de get_dummies
+    for cat_col in ['dow', 'month', 'hour']:
+        if cat_col not in d.columns:
+            # Si falta, añadirla con un valor por defecto (ej: 0) o NaN
+            # y manejar el tipo adecuado si es necesario
+            d[cat_col] = 0 # O np.nan, dependiendo de cómo se entrenó
+
+    # Especificar dtype=int o similar si es necesario
+    d = pd.get_dummies(d, columns=['dow', 'month', 'hour'], drop_first=False, dummy_na=False) # dummy_na=False por si acaso
+
     # ensure training columns
     for c in training_cols:
         if c not in d.columns:
             d[c] = 0
-    return d.reindex(columns=training_cols, fill_value=0)
+    # Usar float como tipo por defecto para evitar problemas con tipos mixtos
+    return d.reindex(columns=training_cols, fill_value=0).astype(float)
