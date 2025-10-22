@@ -25,7 +25,7 @@ TARGET_TMO = "tmo_general"
 
 HIST_WINDOW_DAYS = 90
 
-# === Config "como el ORIGINAL" ===
+# === Config como el ORIGINAL ===
 SKIP_HOLIDAY_EFFECTS = False   # aplicar ajustes feriado/post-feriado
 ENABLE_OUTLIER_CAP   = True    # cap por mediana+MAD
 
@@ -168,55 +168,25 @@ def apply_post_holiday_adjustment(df_future, holidays_set, post_calls_by_hour,
     out.loc[mask, col_calls_future] = np.round(new_vals).astype(float)
     return out
 
-# --------- Outlier cap (robustecido para evitar cap=0 por faltantes) ----------
+# --------- Outlier cap (STRICT: igual al original, sin completar grilla) ----------
 def _baseline_median_mad(df_hist, col=TARGET_CALLS):
     """
-    Calcula mediana y MAD por (dow, hour) y completa la grilla 7x24:
-    - Si falta una celda, usa mediana por HORA (agregando todos los días).
-    - Si aún falta, usa mediana GLOBAL.
-    - MAD: si 0 o NaN, usa el MAD global o un mínimo positivo.
+    Calcula mediana y MAD por (dow, hour) SIN completar grilla.
+    Si falta una celda, queda NaN y NO se capea esa fila (comportamiento original).
     """
     d = add_time_parts(df_hist[[col]].copy())
     g = d.groupby(["dow", "hour"])[col]
     base = g.median().rename("med").to_frame()
     mad = g.apply(lambda x: np.median(np.abs(x - np.median(x)))).rename("mad")
     base = base.join(mad)
-
-    # Grilla completa 7x24
-    grid = (
-        pd.MultiIndex.from_product([range(7), range(24)], names=["dow", "hour"])
-        .to_frame(index=False)
-        .set_index(["dow", "hour"])
-    )
-    base = grid.join(base, how="left")
-
-    # Mediana por HORA y global
-    med_by_hour = d.groupby("hour")[col].median()
-    med_global = float(d[col].median()) if not d[col].dropna().empty else 0.0
-
-    base["med"] = base["med"].where(base["med"].notna(),
-                                    base.index.get_level_values("hour").map(med_by_hour))
-    base["med"] = base["med"].fillna(med_global)
-
-    # MAD: si NaN -> 0; si todo 0/NaN -> usa un mínimo positivo
-    if base["mad"].isna().all():
-        base["mad"] = 0.0
-    base["mad"] = base["mad"].fillna(0.0)
-    mad_global = base["mad"][base["mad"] > 0].median()
-    if not np.isfinite(mad_global) or mad_global <= 0:
-        mad_global = max(1.0, float(np.nanmedian(np.abs(d[col] - np.nanmedian(d[col])))) )
-        if not np.isfinite(mad_global) or mad_global <= 0:
-            mad_global = 1.0
-    base["mad"] = base["mad"].replace(0, mad_global)
-
     return base.reset_index()
 
 def apply_outlier_cap(df_future, base_median_mad, holidays_set,
                       col_calls_future="calls",
                       k_weekday=K_WEEKDAY, k_weekend=K_WEEKEND):
     """
-    Cap sólo donde HAY límite válido (>0 y finito).
-    En feriados y post-feriado, no capear (como ya hacía el original).
+    Cap sólo donde med y mad existen (finito) y el límite > 0.
+    En feriados y post-feriado, no capear (como el original).
     """
     if df_future.empty:
         return df_future
@@ -227,10 +197,9 @@ def apply_outlier_cap(df_future, base_median_mad, holidays_set,
     med = pd.to_numeric(d["med"], errors="coerce")
     mad = pd.to_numeric(d["mad"], errors="coerce")
 
-    limits = med.fillna(np.nan) + mad.fillna(np.nan) * \
-             np.where(d["dow"].isin([5, 6]), float(k_weekend), float(k_weekday))
+    limits = med + mad * np.where(d["dow"].isin([5, 6]), float(k_weekend), float(k_weekday))
 
-    # feriado/post-feriado -> sin cap (como antes)
+    # feriado/post-feriado -> sin cap
     idx = df_future.index
     try:
         curr_dates = idx.tz_convert(TIMEZONE).date
@@ -242,7 +211,6 @@ def apply_outlier_cap(df_future, base_median_mad, holidays_set,
     is_prev_hol = pd.Series([d in holidays_set for d in prev_dates], index=idx, dtype="boolean")
     is_post = (is_hol != True) & (is_prev_hol == True)
 
-    # aplicar sólo donde no es feriado ni post y el límite es válido
     valid_limit = np.isfinite(limits.values) & (limits.values > 0)
     mask = ((is_hol != True) & (is_post != True)).values & valid_limit
 
@@ -252,10 +220,6 @@ def apply_outlier_cap(df_future, base_median_mad, holidays_set,
     new_vals = out.loc[mask, col_calls_future].values.astype(float)
     lim_vals = limits[mask].astype(float).values
     new_vals = np.minimum(new_vals, lim_vals)
-    bad = ~np.isfinite(new_vals)
-    if bad.any():
-        orig = out.loc[mask, col_calls_future].values.astype(float)
-        new_vals[bad] = orig[bad]
     out.loc[mask, col_calls_future] = new_vals
     out[col_calls_future] = out[col_calls_future].fillna(0.0).astype(float)
     return out
@@ -371,7 +335,7 @@ def forecast_120d(df_hist_calls: pd.DataFrame,
         df_hourly = apply_post_holiday_adjustment(df_hourly, holidays_set, post_calls_by_hour,
                                                   col_calls_future="calls")
 
-    # === Outlier Cap (ACTIVO, pero solo donde límite válido) ===
+    # === Outlier Cap (STRICT como el original) ===
     if ENABLE_OUTLIER_CAP:
         base_med_mad = _baseline_median_mad(df, col=TARGET_CALLS)
         df_hourly = apply_outlier_cap(df_hourly, base_med_mad, holidays_set,
@@ -398,4 +362,3 @@ def forecast_120d(df_hist_calls: pd.DataFrame,
                      calls_col="calls", tmo_col="tmo_s")
 
     return df_hourly
-
