@@ -21,7 +21,7 @@ TMO_SCALER = "models/scaler_tmo.pkl"
 TMO_COLS = "models/training_columns_tmo.json"
 
 TARGET_CALLS = "recibidos_nacional"
-TARGET_TMO = "tmo_general" # <- El target que predecirá el 2do bucle
+TARGET_TMO = "tmo_general"
 
 # Ventana reciente para lags/MA (no afecta last_ts)
 HIST_WINDOW_DAYS = 90
@@ -252,7 +252,7 @@ def _is_holiday(ts, holidays_set: set) -> int:
 def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holidays_set: set | None = None):
     """
     - Usa dos bucles autorregresivos:
-      1) Planner (Llamadas) - Lógica original (v1) restaurada.
+      1) Planner (Llamadas) - Lógica "v1 Perfecta" (con bug intencional).
       2) TMO (TMO General) - Nueva lógica (v8) autorregresiva.
     - Ajuste post-forecast por FERIADOS + POST-FERIADOS.
     - (Opcional) CAP de OUTLIERS por (dow,hour) con mediana+MAD.
@@ -279,7 +279,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
     df = df.dropna(subset=[TARGET_CALLS])
     df[TARGET_TMO] = pd.to_numeric(df[TARGET_TMO], errors='coerce').ffill().fillna(0.0)
 
-    # ffill de auxiliares
+    # ffill de auxiliares (SOLO AFECTA AL HISTÓRICO PARA TMO v8)
     for aux in ["feriados", "es_dia_de_pago"]:
         if aux in df.columns:
             df[aux] = df[aux].ffill()
@@ -299,13 +299,18 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
         tz=TIMEZONE
     )
 
-    # ===== BLOQUE 1: PLANNER DE LLAMADAS (IDÉNTICO AL ORIGINAL 'PERFECTO') =====
-    # --- ¡¡¡ESTE BLOQUE ESTÁ RESTAURADO A TU VERSIÓN ORIGINAL!!! ---
-    print("Iniciando predicción de Llamadas (Lógica Original)...")
-    if "feriados" in df_recent.columns:
-        dfp = df_recent[[TARGET_CALLS, "feriados"]].copy()
-    else:
-        dfp = df_recent[[TARGET_CALLS]].copy()
+    # ===== BLOQUE 1: PLANNER DE LLAMADAS (LÓGICA "PERFECTA" v1 RESTAURADA) =====
+    # --- ¡¡¡ESTE BLOQUE REPLICA EL "BUG" ORIGINAL QUE DABA LA PREDICCIÓN PERFECTA!!! ---
+    print("Iniciando predicción de Llamadas (Lógica Original 'Perfecta')...")
+    
+    # LA CLAVE (Línea 308 original): Creamos un df_recent_calls AISLADO.
+    # Esto replica el error de tu v1 original, donde 'df' se sub-seleccionó
+    # ANTES de que 'feriados' o 'es_dia_de_pago' se pudieran usar.
+    df_recent_calls = df_recent[[TARGET_CALLS]].copy()
+    
+    # De aquí en adelante, 'dfp' NUNCA tendrá 'feriados' o 'es_dia_de_pago'
+    # de la historia, forzando al modelo a predecir con 0, tal como lo hacía tu v1.
+    dfp = df_recent_calls.copy()
 
     dfp[TARGET_CALLS] = pd.to_numeric(dfp[TARGET_CALLS], errors="coerce").ffill().fillna(0.0)
 
@@ -313,37 +318,43 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
         tmp = pd.concat([dfp, pd.DataFrame(index=[ts])])
         tmp[TARGET_CALLS] = tmp[TARGET_CALLS].ffill()
 
+        # Esta línea NUNCA se ejecuta porque 'tmp' no tiene la columna 'feriados'
         if "feriados" in tmp.columns:
             tmp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
 
         tmp = add_lags_mas(tmp, TARGET_CALLS)
         tmp = add_time_parts(tmp)
 
-        X = dummies_and_reindex(tmp.tail(1), cols_pl)
+        # 'dummies_and_reindex' llenará 'feriados' y 'es_dia_de_pago' con 0
+        X = dummies_and_reindex(tmp.tail(1), cols_pl) 
         yhat = float(m_pl.predict(sc_pl.transform(X), verbose=0).flatten()[0])
         dfp.loc[ts, TARGET_CALLS] = max(0.0, yhat)
 
+        # Esta línea tampoco se ejecuta
         if "feriados" in dfp.columns:
             dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
 
     pred_calls = dfp.loc[future_ts, TARGET_CALLS]
-    print("Predicción de Llamadas completada.")
+    print("Predicción de Llamadas (v1) completada.")
     # --- FIN DEL BLOQUE DE LLAMADAS RESTAURADO ---
 
 
     # ===== BLOQUE 2: TMO ITERATIVO (LA NUEVA LÓGICA V8 QUE FUNCIONA) =====
+    # Este bloque SÍ usa el 'df_recent' completo, que tiene los datos
+    # históricos correctos de 'feriados' y 'es_dia_de_pago'.
     print("Iniciando predicción de TMO (Lógica v8 Autorregresiva)...")
     
+    cols_tmo_hist = [TARGET_TMO]
     if "feriados" in df_recent.columns:
-        dft = df_recent[[TARGET_TMO, "feriados"]].copy()
-    else:
-        dft = df_recent[[TARGET_TMO]].copy()
-        dft["feriados"] = 0 # Asegurar que existe
-
-    # 'es_dia_de_pago' se agrega en el bucle si es necesario por cols_tmo
+        cols_tmo_hist.append("feriados")
     if "es_dia_de_pago" in df_recent.columns:
-        dft["es_dia_de_pago"] = df_recent["es_dia_de_pago"]
-    else:
+         cols_tmo_hist.append("es_dia_de_pago")
+
+    dft = df_recent[cols_tmo_hist].copy()
+
+    if "feriados" not in dft.columns:
+        dft["feriados"] = 0
+    if "es_dia_de_pago" not in dft.columns:
         dft["es_dia_de_pago"] = 0
 
     dft[TARGET_TMO] = pd.to_numeric(dft[TARGET_TMO], errors="coerce").ffill().fillna(0.0)
@@ -353,7 +364,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
         tmp_t[TARGET_TMO] = tmp_t[TARGET_TMO].ffill()
         tmp_t.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
 
-        # Añadir dia de pago al futuro
+        # Añadir dia de pago al futuro (si el modelo TMO lo usa)
         if "es_dia_de_pago" in cols_tmo:
              tmp_t.loc[ts, "es_dia_de_pago"] = 1 if ts.day in [1,2,15,16,29,30,31] else 0
 
@@ -368,7 +379,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
              dft.loc[ts, "es_dia_de_pago"] = 1 if ts.day in [1,2,15,16,29,30,31] else 0
 
     pred_tmo = dft.loc[future_ts, TARGET_TMO]
-    print("Predicción de TMO completada.")
+    print("Predicción de TMO (v8) completada.")
     # --- FIN DEL NUEVO BLOQUE TMO ---
 
 
@@ -378,20 +389,18 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
     df_hourly["tmo_s"] = np.round(pred_tmo).astype(int) # <- Asigna la predicción TMO
 
     # ===== AJUSTE POR FERIADOS =====
+    # Nota: Los ajustes de feriados se aplican a la predicción base de llamadas
+    # (que fue hecha con feriados=0), lo cual es correcto.
     print("Aplicando ajustes de feriados...")
     if holidays_set and len(holidays_set) > 0:
-        # 'df' es el histórico unido, tiene ambas columnas
         (f_calls_by_hour, f_tmo_by_hour,
          g_calls, g_tmo, post_calls_by_hour) = compute_holiday_factors(df, holidays_set)
 
-        # Feriados (ahora ajusta TMO y Llamadas)
         df_hourly = apply_holiday_adjustment(
             df_hourly, holidays_set,
             f_calls_by_hour, f_tmo_by_hour,
             col_calls_future="calls", col_tmo_future="tmo_s"
         )
-
-        # Post-feriado (solo afecta llamadas)
         df_hourly = apply_post_holiday_adjustment(
             df_hourly, holidays_set, post_calls_by_hour,
             col_calls_future="calls"
