@@ -1,5 +1,16 @@
 [
   {
+    "comuna": "Cochamo",
+    "rango_alertas": [
+      {
+        "fecha": "2025-10-26",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
     "comuna": "Alto Bio Bio",
     "rango_alertas": []
   },
@@ -57,10 +68,6 @@
   },
   {
     "comuna": "Chonchi",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Cochamo",
     "rango_alertas": []
   },
   {
