@@ -57,6 +57,9 @@ def compute_holiday_factors(df_hist, holidays_set,
     cols = [col_calls]
     if col_tmo in df_hist.columns and not df_hist[col_tmo].isnull().all():
         cols.append(col_tmo)
+    
+    # [!] NOTA: df_hist aquí es el 'df_full' (ver línea 250)
+    # que SÍ tiene 'feriados' y 'tmo_general'
     dfh = add_time_parts(df_hist[cols].copy())
     dfh["is_holiday"] = _series_is_holiday(dfh.index, holidays_set)
     med_hol_calls = dfh[dfh["is_holiday"]].groupby("hour")[col_calls].median()
@@ -145,6 +148,7 @@ def apply_post_holiday_adjustment(df_future, holidays_set, post_calls_by_hour,
 
 # ========= Guardrail de outliers (IDÉNTICO AL ORIGINAL) ======
 def _baseline_median_mad(df_hist, col=TARGET_CALLS):
+    # [!] NOTA: df_hist aquí es el 'df_full' (ver línea 385)
     d = add_time_parts(df_hist[[col]].copy())
     g = d.groupby(["dow", "hour"])[col]
     base = g.median().rename("med").to_frame()
@@ -199,14 +203,6 @@ def _is_holiday(ts, holidays_set: set) -> int:
 
 # <-- Firma de la función (MODIFICADA v8) -->
 def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holidays_set: set | None = None):
-    """
-    - Usa dos bucles autorregresivos:
-      1) Planner (Llamadas) - Lógica "v1 Perfecta" (Aislada).
-      2) TMO (TMO General) - Nueva lógica (v8) autorregresiva.
-    - Ajuste post-forecast por FERIADOS + POST-FERIADOS.
-    - (Opcional) CAP de OUTLIERS por (dow,hour) con mediana+MAD.
-    - Erlang C y salidas JSON.
-    """
     # === Artefactos ===
     m_pl = tf.keras.models.load_model(PLANNER_MODEL, compile=False)
     sc_pl = joblib.load(PLANNER_SCALER)
@@ -217,39 +213,55 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
     cols_tmo = _load_cols(TMO_COLS)
 
     # === Base histórica ===
-    # 'df' contiene TODO: llamadas, tmo_general, feriados, es_dia_de_pago
-    # (Asumiendo que se usa el main.py v8/v10)
-    df = ensure_ts(df_hist_joined)
-
-    if TARGET_CALLS not in df.columns:
+    # 'df_hist_joined' (de main.py) tiene:
+    # [ts, TARGET_CALLS, (TARGET_TMO de hist), (TARGET_TMO de tmo.csv), feriados, es_dia_de_pago, ...]
+    
+    # 1. 'df_full' - Guarda la versión completa (con feriados, etc.)
+    #    para los ajustes de feriados y el bucle de TMO v8.
+    df_full = ensure_ts(df_hist_joined)
+    if TARGET_CALLS not in df_full.columns:
         raise ValueError(f"Falta columna {TARGET_CALLS} en historical_data.csv")
-    if TARGET_TMO not in df.columns:
+    if TARGET_TMO not in df_full.columns:
         print(f"WARN: Falta columna {TARGET_TMO}. El TMO será 0.")
-        df[TARGET_TMO] = 0
-
-    df = df.dropna(subset=[TARGET_CALLS])
-    df[TARGET_TMO] = pd.to_numeric(df[TARGET_TMO], errors='coerce').ffill().fillna(0.0)
-
-    # ffill de auxiliares (para TMO)
+        df_full[TARGET_TMO] = 0
+        
+    df_full = df_full.dropna(subset=[TARGET_CALLS])
+    df_full[TARGET_TMO] = pd.to_numeric(df_full[TARGET_TMO], errors='coerce').ffill().fillna(0.0)
     for aux in ["feriados", "es_dia_de_pago"]:
+        if aux in df_full.columns:
+            df_full[aux] = df_full[aux].ffill()
+
+    # 2. 'df' - REPLICA EXACTA DE LA LÓGICA V1
+    #    Aquí se aplica el "BUG BENEFICIOSO"
+    df = ensure_ts(df_hist_joined) # (v1, línea 239)
+    df = df[[TARGET_CALLS, TARGET_TMO] if TARGET_TMO in df.columns else [TARGET_CALLS]].copy() # (v1, línea 241)
+    df = df.dropna(subset=[TARGET_CALLS]) # (v1, línea 243)
+    
+    # (v1, líneas 246-249)
+    # Este bucle ahora falla silenciosamente (como en v1) porque 'df'
+    # ya no tiene 'feriados' ni 'es_dia_de_pago'.
+    for aux in ["feriados", "es_dia_de_pago", "tmo_comercial", "tmo_tecnico",
+                "proporcion_comercial", "proporcion_tecnica"]:
         if aux in df.columns:
             df[aux] = df[aux].ffill()
 
     last_ts = df.index.max()
     start_hist = last_ts - pd.Timedelta(days=HIST_WINDOW_DAYS)
-    
+
     # ===== [NUEVO] Fork de los datos históricos =====
     
-    # 1. Datos para Planner (Llamadas): Replicando el "bug" de v1
-    #    'df_recent_calls' SOLO tendrá [TARGET_CALLS]
-    df_recent_calls = df.loc[df.index >= start_hist, [TARGET_CALLS]].copy()
+    # 1. Datos para Planner (Llamadas): (v1, línea 254)
+    #    'df_recent' se crea desde 'df' (que ya no tiene feriados)
+    df_recent = df.loc[df.index >= start_hist].copy()
+    if df_recent.empty:
+        df_recent = df.copy()
     
-    # 2. Datos para TMO (v8): Con todas las columnas que necesita
-    cols_tmo_hist = [TARGET_TMO]
-    if "feriados" in df.columns: cols_tmo_hist.append("feriados")
-    if "es_dia_de_pago" in df.columns: cols_tmo_hist.append("es_dia_de_pago")
-    df_recent_tmo = df.loc[df.index >= start_hist, cols_tmo_hist].copy()
-
+    # 2. Datos para TMO (v8):
+    #    'df_recent_tmo' se crea desde 'df_full' (que sí tiene todo)
+    df_recent_tmo = df_full.loc[df_full.index >= start_hist].copy()
+    if df_recent_tmo.empty:
+        df_recent_tmo = df_full.copy()
+    
     # ===============================================
 
     # ===== Horizonte futuro =====
@@ -260,16 +272,16 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
         tz=TIMEZONE
     )
 
-    # ===== BLOQUE 1: PLANNER DE LLAMADAS (LÓGICA "PERFECTA" v1) =====
-    # --- ¡¡¡Este bloque usa 'df_recent_calls' (datos limpios)!!! ---
+    # ===== BLOQUE 1: PLANNER DE LLAMADAS (IDÉNTICO AL ORIGINAL 'PERFECTO') =====
+    # --- ¡¡¡Este bloque usa 'df_recent' (datos v1 "rotos")!!! ---
     print("Iniciando predicción de Llamadas (Lógica Original v1)...")
     
-    # 'if "feriados"...' será FALSO, 'else' se ejecutará.
-    # Esto es idéntico a tu v1.
-    if "feriados" in df_recent_calls.columns:
-        dfp = df_recent_calls[[TARGET_CALLS, "feriados"]].copy()
+    # (v1, líneas 273-277)
+    # 'if "feriados"...' será FALSO.
+    if "feriados" in df_recent.columns:
+        dfp = df_recent[[TARGET_CALLS, "feriados"]].copy()
     else:
-        dfp = df_recent_calls[[TARGET_CALLS]].copy()
+        dfp = df_recent[[TARGET_CALLS]].copy()
 
     dfp[TARGET_CALLS] = pd.to_numeric(dfp[TARGET_CALLS], errors="coerce").ffill().fillna(0.0)
 
@@ -277,7 +289,8 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
         tmp = pd.concat([dfp, pd.DataFrame(index=[ts])])
         tmp[TARGET_CALLS] = tmp[TARGET_CALLS].ffill()
 
-        # 'if "feriados"...' será FALSO
+        # (v1, líneas 281-282)
+        # 'if "feriados"...' será FALSO.
         if "feriados" in tmp.columns:
             tmp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
 
@@ -289,7 +302,8 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
         yhat = float(m_pl.predict(sc_pl.transform(X), verbose=0).flatten()[0])
         dfp.loc[ts, TARGET_CALLS] = max(0.0, yhat)
 
-        # 'if "feriados"...' será FALSO
+        # (v1, líneas 291-292)
+        # 'if "feriados"...' será FALSO.
         if "feriados" in dfp.columns:
             dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
 
@@ -299,10 +313,16 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
 
 
     # ===== BLOQUE 2: TMO ITERATIVO (LÓGICA v8 QUE FUNCIONA) =====
-    # --- ¡¡¡Este bloque usa 'df_recent_tmo' (datos completos)!!! ---
+    # --- ¡¡¡Este bloque usa 'df_recent_tmo' (datos v8 completos)!!! ---
     print("Iniciando predicción de TMO (Lógica v8 Autorregresiva)...")
     
-    dft = df_recent_tmo.copy()
+    cols_tmo_hist = [TARGET_TMO]
+    if "feriados" in df_recent_tmo.columns:
+        cols_tmo_hist.append("feriados")
+    if "es_dia_de_pago" in df_recent_tmo.columns:
+         cols_tmo_hist.append("es_dia_de_pago")
+
+    dft = df_recent_tmo[cols_tmo_hist].copy()
 
     if "feriados" not in dft.columns: dft["feriados"] = 0
     if "es_dia_de_pago" not in dft.columns: dft["es_dia_de_pago"] = 0
@@ -338,12 +358,13 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
     df_hourly["tmo_s"] = np.round(pred_tmo).astype(int)
 
     # ===== AJUSTE POR FERIADOS =====
-    # El 'df' aquí es el histórico completo, usado para 'compute_holiday_factors'
-    # lo cual es correcto.
+    # (v1, línea 369)
+    # Usa 'df_full' (que tiene la data histórica correcta) para calcular
+    # los factores de ajuste.
     print("Aplicando ajustes de feriados...")
     if holidays_set and len(holidays_set) > 0:
         (f_calls_by_hour, f_tmo_by_hour,
-         g_calls, g_tmo, post_calls_by_hour) = compute_holiday_factors(df, holidays_set)
+         g_calls, g_tmo, post_calls_by_hour) = compute_holiday_factors(df_full, holidays_set)
 
         df_hourly = apply_holiday_adjustment(
             df_hourly, holidays_set,
@@ -358,7 +379,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
     # ===== (OPCIONAL) CAP de OUTLIERS (Solo para llamadas) =====
     if ENABLE_OUTLIER_CAP:
         print("Aplicando guardrail de outliers a llamadas...")
-        base_mad = _baseline_median_mad(df, col=TARGET_CALLS)
+        # (v1, línea 385)
+        # Usa 'df_full' para calcular el MAD
+        base_mad = _baseline_median_mad(df_full, col=TARGET_CALLS)
         df_hourly = apply_outlier_cap(
             df_hourly, base_mad, holidays_set,
             col_calls_future="calls",
