@@ -186,7 +186,10 @@ def apply_outlier_cap(df_future, base_median_mad, holidays_set,
     mask = (~is_hol.values) & (~is_post_hol.values) & (capped[col_calls_future].astype(float).values > upper)
     capped.loc[mask, col_calls_future] = np.round(upper[mask]).astype(int)
     out = df_future.copy()
-    out[col_calls_future] = capped[col_calls_futu_re].astype(int).values
+    
+    # --- ¡¡¡ESTA ES LA LÍNEA CORREGIDA!!! ---
+    out[col_calls_future] = capped[col_calls_future].astype(int).values
+    
     return out
 # ===========================================================
 
@@ -225,7 +228,6 @@ def forecast_calls_v1(df_hist_joined: pd.DataFrame, horizon_days: int = 120, hol
     df = df.dropna(subset=[TARGET_CALLS]) # (v1, línea 243)
     
     # (v1, líneas 246-249)
-    # --- ¡¡¡ESTA ES LA LÍNEA CORREGIDA!!! ---
     # (TARGET_TMO NO está en esta lista, replicando el v1 original)
     for c in ["feriados", "es_dia_de_pago",
               "proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
