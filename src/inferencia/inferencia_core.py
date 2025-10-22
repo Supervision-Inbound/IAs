@@ -157,9 +157,23 @@ def _baseline_median_mad(df_hist, col=TARGET_CALLS):
     d = add_time_parts(df_hist_col.to_frame(name=col).copy())
     g = d.groupby(["dow", "hour"])[col]
     base = g.median().rename("med").to_frame()
-    def mad_robust(x): x_clean = x.dropna(); if len(x_clean) == 0: return np.nan; med = np.median(x_clean); return np.median(np.abs(x_clean - med))
+
+    # --- ¡¡¡ESTA ES LA FUNCIÓN CORREGIDA!!! ---
+    def mad_robust(x):
+        x_clean = x.dropna()
+        if len(x_clean) == 0:
+            return np.nan
+        med = np.median(x_clean)
+        # Asegurarse que med sea escalar antes de restar
+        if not np.isscalar(med):
+            # Si med no es escalar (caso raro), devolver NaN
+            return np.nan
+        return np.median(np.abs(x_clean - med))
+    # --- FIN DE LA CORRECCIÓN ---
+
     mad = g.apply(mad_robust).rename("mad")
     base = base.join(mad)
+
     if base["mad"].isna().all(): base["mad"] = 0.0
     median_mad_global = base["mad"].median()
     if pd.isna(median_mad_global) or median_mad_global == 0: median_mad_global = 1.0
@@ -168,6 +182,7 @@ def _baseline_median_mad(df_hist, col=TARGET_CALLS):
     if pd.isna(median_med_global): median_med_global = 0.0
     base["med"] = base["med"].fillna(median_med_global)
     return base.reset_index()
+
 
 def apply_outlier_cap(df_future, base_median_mad, holidays_set,
                       col_calls_future="calls",
@@ -434,7 +449,7 @@ def forecast_separate_outputs(df_hist_joined: pd.DataFrame, horizon_days: int = 
     # 1. Ejecutar predicción de llamadas v1
     #    (Esta función ya aplica ajustes y outliers con lógica v1)
     df_hourly_calls = forecast_calls_v1(
-        df_hist_joined, # No necesita copy aquí, forecast_calls_v1 lo hace
+        df_hist_joined.copy(), # Usar copia para asegurar aislamiento
         horizon_days=horizon_days,
         holidays_set=holidays_set
     )
@@ -443,7 +458,7 @@ def forecast_separate_outputs(df_hist_joined: pd.DataFrame, horizon_days: int = 
     # 2. Ejecutar predicción de TMO v8
     #    (main.py v21 ya rellena el TMO histórico antes de llamar aquí)
     pred_tmo = forecast_tmo_v8(
-        df_hist_joined, # No necesita copy aquí, forecast_tmo_v8 lo hace
+        df_hist_joined.copy(), # Usar copia para asegurar aislamiento
         future_ts,
         holidays_set
     )
@@ -453,16 +468,16 @@ def forecast_separate_outputs(df_hist_joined: pd.DataFrame, horizon_days: int = 
     print("Aplicando ajustes de feriados (solo TMO v8)...")
     if holidays_set and len(holidays_set) > 0:
         # ¡IMPORTANTE! Calcular factores usando el 'df' v1 (roto) para consistencia con llamadas
-        df_v1_hist = ensure_ts(df_hist_joined)
+        df_v1_hist = ensure_ts(df_hist_joined) # Recrear el df v1 aquí
         df_v1_hist = df_v1_hist[[TARGET_CALLS, TARGET_TMO] if TARGET_TMO in df_v1_hist.columns else [TARGET_CALLS]].copy()
         df_v1_hist = df_v1_hist.dropna(subset=[TARGET_CALLS])
         for c in ["feriados", "es_dia_de_pago","proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
-            # Este ffill falla silenciosamente como en v1
-            if c in df_v1_hist.columns: df_v1_hist[c] = df_v1_hist[c].ffill()
+            if c in df_v1_hist.columns: df_v1_hist[c] = df_v1_hist[c].ffill() # Falla silenciosamente
 
         (f_calls_by_hour, f_tmo_by_hour, # Usamos f_tmo_by_hour
          g_calls, g_tmo, post_calls_by_hour) = compute_holiday_factors(df_v1_hist, holidays_set)
 
+        # Aplicar solo el ajuste de TMO
         df_hourly_tmo = apply_holiday_adjustment(
             df_hourly_tmo, holidays_set,
             {}, # No aplicar factor de llamadas aquí
