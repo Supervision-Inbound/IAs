@@ -186,7 +186,7 @@ def apply_outlier_cap(df_future, base_median_mad, holidays_set,
     mask = (~is_hol.values) & (~is_post_hol.values) & (capped[col_calls_future].astype(float).values > upper)
     capped.loc[mask, col_calls_future] = np.round(upper[mask]).astype(int)
     out = df_future.copy()
-    out[col_calls_future] = capped[col_calls_future].astype(int).values
+    out[col_calls_future] = capped[col_calls_futu_re].astype(int).values
     return out
 # ===========================================================
 
@@ -225,9 +225,11 @@ def forecast_calls_v1(df_hist_joined: pd.DataFrame, horizon_days: int = 120, hol
     df = df.dropna(subset=[TARGET_CALLS]) # (v1, línea 243)
     
     # (v1, líneas 246-249)
-    for c in [TARGET_TMO, "feriados", "es_dia_de_pago",
+    # --- ¡¡¡ESTA ES LA LÍNEA CORREGIDA!!! ---
+    # (TARGET_TMO NO está en esta lista, replicando el v1 original)
+    for c in ["feriados", "es_dia_de_pago",
               "proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
-        if c in df.columns: # <-- solo TARGET_TMO será True
+        if c in df.columns: # <-- Esto siempre será Falso
             df[c] = df[c].ffill()
 
     last_ts = df.index.max()
@@ -276,7 +278,6 @@ def forecast_calls_v1(df_hist_joined: pd.DataFrame, horizon_days: int = 120, hol
     # ===== Curva base (sin ajuste) =====
     df_hourly = pd.DataFrame(index=future_ts)
     df_hourly["calls"] = np.round(pred_calls).astype(int)
-    # (Se omite 'tmo_s' porque esta es solo la función de llamadas)
 
     # ===== AJUSTE POR FERIADOS (LÓGICA V1) =====
     print("Aplicando ajustes de feriados (lógica v1)...")
@@ -287,7 +288,7 @@ def forecast_calls_v1(df_hist_joined: pd.DataFrame, horizon_days: int = 120, hol
 
         df_hourly = apply_holiday_adjustment(
             df_hourly, holidays_set,
-            f_calls_by_hour, f_tmo_by_hour, # f_tmo_by_hour se ignora
+            f_calls_by_hour, f_tmo_by_hour,
             col_calls_future="calls", col_tmo_future="tmo_s" # tmo_s no existe aquí
         )
         df_hourly = apply_post_holiday_adjustment(
@@ -328,10 +329,10 @@ def forecast_tmo_v8(df_hist_joined: pd.DataFrame, future_ts: pd.DatetimeIndex, h
     # 1. 'df_full' - Usa la versión completa (con feriados, etc.)
     df_full = ensure_ts(df_hist_joined)
     
-    if TARGET_CALLS not in df_full.columns: df_full[TARGET_CALLS] = 0 # (Por si acaso)
+    if TARGET_CALLS not in df_full.columns: df_full[TARGET_CALLS] = 0
     if TARGET_TMO not in df_full.columns: df_full[TARGET_TMO] = 0
         
-    df_full = df_full.dropna(subset=[TARGET_CALLS]) # Base de llamadas
+    df_full = df_full.dropna(subset=[TARGET_CALLS])
     df_full[TARGET_TMO] = pd.to_numeric(df_full[TARGET_TMO], errors='coerce').ffill().fillna(0.0)
     for aux in ["feriados", "es_dia_de_pago"]:
         if aux in df_full.columns:
