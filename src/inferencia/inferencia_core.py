@@ -110,7 +110,7 @@ def compute_holiday_factors(df_hist, holidays_set,
     post_calls_by_hour = {
         int(h): _safe_ratio(med_post_calls.get(h, np.nan),
                             med_nor_calls.get(h, np.nan),
-                            fallback=1.05)  # leve alza por defecto
+                            fallback=1.05)
         for h in range(24)
     }
     post_calls_by_hour = {h: float(np.clip(v, 0.90, 1.80)) for h, v in post_calls_by_hour.items()}
@@ -293,25 +293,44 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
     tmo_static_features = {"proporcion_comercial","proporcion_tecnica","tmo_comercial","tmo_tecnico"}
     df_for_tmo_features = df.ffill()
 
+    # Qué columnas realmente tenemos disponibles
+    avail_static = [c for c in tmo_static_features if c in df_for_tmo_features.columns]
+
+    # Ventana reciente “laboral”
     last_ts_features = df_for_tmo_features.index.max()
-    recent_data = df_for_tmo_features.loc[
+    recent_mask = (
         (df_for_tmo_features.index >= last_ts_features - pd.Timedelta(days=14)) &
         (df_for_tmo_features.index.hour >= 8) &
         (df_for_tmo_features.index.hour <= 20)
-    ]
-    features_to_agg = list(tmo_static_features.intersection(df_for_tmo_features.columns))
+    )
+    recent_data = df_for_tmo_features.loc[recent_mask, avail_static] if avail_static else pd.DataFrame(index=df_for_tmo_features.index)
 
-    if recent_data.empty or (features_to_agg and recent_data[features_to_agg].isnull().all().all()):
-        print("WARN: No se encontraron datos TMO robustos. Usando iloc[-1].")
-        last_vals_agg = df_for_tmo_features.iloc[[-1]]
+    static_tmo_cols_dict = {c: 0.0 for c in tmo_static_features}  # fallback por defecto
+
+    if avail_static:
+        if not recent_data.empty and not recent_data[avail_static].isnull().all().all():
+            # Mediana 14d (solo numérico)
+            med = recent_data[avail_static].apply(pd.to_numeric, errors="coerce").median()
+            for c in avail_static:
+                val = med.get(c)
+                if pd.notna(val):
+                    static_tmo_cols_dict[c] = float(val)
+            info_payload = {c: static_tmo_cols_dict[c] for c in sorted(tmo_static_features)}
+            print(f"INFO: Usando valores TMO robustos (mediana 14d): {info_payload}")
+        else:
+            # Última fila disponible como fallback
+            last_row = df_for_tmo_features[avail_static].tail(1).apply(pd.to_numeric, errors="coerce")
+            if not last_row.empty:
+                for c in avail_static:
+                    val = last_row.iloc[0].get(c)
+                    if pd.notna(val):
+                        static_tmo_cols_dict[c] = float(val)
+                info_payload = {c: static_tmo_cols_dict[c] for c in sorted(tmo_static_features)}
+                print(f"WARN: Mediana 14d no disponible; usando últimos valores: {info_payload}")
+            else:
+                print("WARN: No hay datos válidos para features TMO; usando ceros.")
     else:
-        last_vals_agg_series = recent_data[features_to_agg].median()
-        last_vals_agg = pd.DataFrame(last_vals_agg_series).T
-        print(f"INFO: Usando valores TMO robustos (mediana 14d): {last_vals_agg.to_dict('records')[0]}")
-
-    static_tmo_cols_dict = {}
-    for c in tmo_static_features:
-        static_tmo_cols_dict[c] = float(last_vals_agg[c].iloc[0]) if c in last_vals_agg.columns else 0.0
+        print("WARN: No existen columnas estáticas de TMO en el histórico; usando ceros.")
 
     # ===== Horizonte futuro =====
     future_ts = pd.date_range(
@@ -348,7 +367,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
             tmp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
 
         # 3) Features:
-        # 3a) Lags/MA de llamadas (ya definida en features)
+        # 3a) Lags/MA de llamadas
         tmp_with_feats = add_lags_mas(tmp, TARGET_CALLS)
 
         # 3b) Lags/MA de TMO (autorregresivo)
@@ -367,7 +386,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         yhat_calls = max(0.0, yhat_calls)
         dfp.loc[ts, TARGET_CALLS] = yhat_calls
 
-        # 5) Predicción de TMO autorregresivo (usa lags de TMO + calls predichas)
+        # 5) Predicción de TMO autorregresivo
         current_row.loc[ts, TARGET_CALLS] = yhat_calls
         X_tmo = dummies_and_reindex(current_row, cols_tmo)
         yhat_tmo = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
@@ -423,3 +442,4 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
                      df_hourly, "calls", "tmo_s")
 
     return df_hourly
+
