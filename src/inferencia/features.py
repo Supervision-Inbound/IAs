@@ -4,21 +4,17 @@ import numpy as np
 
 TIMEZONE = "America/Santiago"
 
-def _col(name: str) -> str:
-    return name
-
 def _localize_ts_strict(ts: pd.Series) -> pd.Series:
     """
-    Compatibilidad con pipeline original:
-    - Si el índice es naive -> tz_localize con ambiguous='NaT' y nonexistent='shift_forward'
-    - Si ya es tz-aware -> convertir a America/Santiago
-    - Las horas ambiguas se DESCARTAN (NaT -> drop), como hacía el original.
+    Modo ORIGINAL:
+    - Si naive -> tz_localize con ambiguous='NaT' (descarta hora ambigua) y nonexistent='shift_forward'
+    - Si tz-aware -> tz_convert a America/Santiago
     """
     tzinfo = getattr(ts.dt, "tz", None)
     if tzinfo is None:
         ts = ts.dt.tz_localize(
             TIMEZONE,
-            ambiguous="NaT",         # <- descarta hora ambigua
+            ambiguous="NaT",          # DESCARTA hora ambigua
             nonexistent="shift_forward",
         )
     else:
@@ -28,8 +24,7 @@ def _localize_ts_strict(ts: pd.Series) -> pd.Series:
 def ensure_ts(d: pd.DataFrame) -> pd.DataFrame:
     """
     Devuelve DF indexado por ts (tz=America/Santiago), ordenado.
-    Acepta 'ts' directo o (fecha + hora). Compatibilidad con pipeline original:
-    - En DST, horas ambiguas se eliminan (ambiguous='NaT').
+    Acepta 'ts' directo o (fecha + hora).
     """
     d = d.copy()
     lowmap = {c.lower().strip(): c for c in d.columns}
@@ -53,7 +48,7 @@ def ensure_ts(d: pd.DataFrame) -> pd.DataFrame:
 
     fecha_dt = pd.to_datetime(d[fcol].astype(str), errors="coerce", dayfirst=True)
 
-    # Hora robusta: admite "8", "8:0", "8.0", "08:00", "08:00:00"
+    # Hora robusta: 8 / 8:0 / 8.0 / 08:00 / 08:00:00
     hora_raw = d[hcol].astype(str).str.strip().str.replace(".", ":", regex=False)
     parts = hora_raw.str.extract(r'^\s*(\d{1,2})(?::\s*(\d{1,2}))?(?::\s*(\d{1,2}))?')
     hh = pd.to_numeric(parts[0], errors='coerce').clip(0, 23).fillna(0).astype(int)
@@ -61,11 +56,7 @@ def ensure_ts(d: pd.DataFrame) -> pd.DataFrame:
     ss = pd.to_numeric(parts[2], errors='coerce').clip(0, 59).fillna(0).astype(int)
 
     hora_str = hh.map(lambda x: f"{x:02d}") + ":" + mm.map(lambda x: f"{x:02d}") + ":" + ss.map(lambda x: f"{x:02d}")
-    ts = pd.to_datetime(
-        fecha_dt.dt.strftime("%Y-%m-%d") + " " + hora_str,
-        errors="coerce",
-        infer_datetime_format=True
-    )
+    ts = pd.to_datetime(fecha_dt.dt.strftime("%Y-%m-%d") + " " + hora_str, errors="coerce", infer_datetime_format=True)
     ts = _localize_ts_strict(ts)
     mask_ok = ts.notna()
     d = d.loc[mask_ok].copy()
