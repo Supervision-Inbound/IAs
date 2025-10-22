@@ -108,7 +108,9 @@ def main(horizonte_dias: int):
         dfh["es_dia_de_pago"] = add_es_dia_de_pago(dfh).values
 
     # 4) ffill de columnas clave (Lógica v1)
-    for c in [TARGET_TMO_NEW, "feriados", "es_dia_de_pago",
+    # --- ¡LÍNEA CORREGIDA! ---
+    # (Se excluye TARGET_TMO_NEW para replicar v1)
+    for c in ["feriados", "es_dia_de_pago",
               "proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
         if c in dfh.columns:
             dfh[c] = dfh[c].ffill()
@@ -116,8 +118,6 @@ def main(horizonte_dias: int):
     # --- ¡NUEVA LÓGICA DE ORQUESTACIÓN! ---
 
     # 5) Forecast Llamadas (Lógica v1 Perfecta)
-    #    Esta función replicará el "bug beneficioso" de v1 internamente
-    #    y devolverá la predicción de 'calls' ajustada.
     print("--- Iniciando Inferencia v1 (Llamadas) ---")
     df_hourly_calls = forecast_calls_v1(
         dfh.reset_index(),
@@ -127,13 +127,16 @@ def main(horizonte_dias: int):
     print("--- Inferencia v1 (Llamadas) Completada ---")
 
     # 6) Forecast TMO (Lógica v8 Dinámica)
-    #    Esta función usará los datos completos para predecir el TMO.
     print("--- Iniciando Inferencia v8 (TMO) ---")
-    future_ts = df_hourly_calls.index # Usamos el índice futuro de la predicción de llamadas
+    future_ts = df_hourly_calls.index 
     
+    # Para el TMO v8, SÍ rellenamos el TMO histórico
+    if TARGET_TMO_NEW in dfh.columns:
+        dfh[TARGET_TMO_NEW] = dfh[TARGET_TMO_NEW].ffill()
+
     pred_tmo = forecast_tmo_v8(
-        dfh.reset_index(), # Pasamos el histórico completo
-        future_ts,         # Pasamos el índice futuro
+        dfh.reset_index(), 
+        future_ts,         
         holidays_set
     )
     print("--- Inferencia v8 (TMO) Completada ---")
@@ -142,7 +145,7 @@ def main(horizonte_dias: int):
     df_hourly = df_hourly_calls.copy()
     df_hourly["tmo_s"] = np.round(pred_tmo).astype(int)
 
-    # 8) Lógica de Erlang (Movida desde inferencia_core)
+    # 8) Lógica de Erlang
     print("Calculando agentes requeridos (Erlang C)...")
     df_hourly["agents_prod"] = 0
     for ts in df_hourly.index:
@@ -150,7 +153,7 @@ def main(horizonte_dias: int):
         df_hourly.at[ts, "agents_prod"] = int(a)
     df_hourly["agents_sched"] = df_hourly["agents_prod"].apply(schedule_agents)
 
-    # 9) Salidas JSON (Movidas desde inferencia_core)
+    # 9) Salidas JSON
     print("Generando archivos JSON de salida...")
     write_hourly_json(f"{PUBLIC_DIR}/prediccion_horaria.json",
                       df_hourly, "calls", "tmo_s", "agents_sched")
