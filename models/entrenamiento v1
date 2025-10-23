@@ -1,0 +1,297 @@
+# =================================================================================
+# SCRIPT DE ENTRENAMIENTO (v7 - CALIBRACIÓN FINAL) - KAGGLE
+# 1. Mantiene los exitosos modelos Planificador y Analista de TMO.
+# 2. Implementa "class_weight" para calibrar al Analista de Riesgos, aumentando su
+#    sensibilidad (Recall) a los picos reales.
+# =================================================================================
+
+import os
+import json
+import joblib
+import shutil
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import (mean_absolute_error, r2_score, roc_auc_score,
+                             accuracy_score, precision_score, recall_score,
+                             confusion_matrix)
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# --- CONFIGURACIÓN GLOBAL ---
+KAGGLE_INPUT_DIR = "/kaggle/input/data-ia/"
+HOSTING_FILE = os.path.join(KAGGLE_INPUT_DIR, "Hosting ia.xlsx")
+CLIMA_FILE = os.path.join(KAGGLE_INPUT_DIR, "historico_clima.csv")
+TMO_FILE = os.path.join(KAGGLE_INPUT_DIR, "TMO_HISTORICO.csv")
+
+OUTPUT_DIR = "/kaggle/working/models/"
+TARGET_CALLS = "recibidos_nacional"
+TARGET_TMO = "tmo_general"
+EPOCHS = 100
+BATCH_SIZE = 256
+SEED = 42
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
+
+# --- FUNCIONES DE UTILIDADES ---
+def read_data(path, hoja=None):
+    path_lower = path.lower()
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Archivo no encontrado: {path}.")
+    if path_lower.endswith(".csv"):
+        try:
+            df = pd.read_csv(path, low_memory=False)
+            if df.shape[1] == 1 and ';' in df.iloc[0,0]:
+                df = pd.read_csv(path, delimiter=';', low_memory=False)
+            return df
+        except Exception:
+            return pd.read_csv(path, delimiter=';', low_memory=False)
+    elif path_lower.endswith((".xlsx", ".xls")):
+        return pd.read_excel(path, sheet_name=hoja if hoja is not None else 0)
+    else:
+        raise ValueError(f"Formato no soportado: {path}")
+
+def ensure_ts(df):
+    df.columns = [c.lower().strip().replace(' ', '_') for c in df.columns]
+    date_col = next((c for c in df.columns if 'fecha' in c), None)
+    hour_col = next((c for c in df.columns if 'hora' in c), None)
+    if not date_col or not hour_col:
+        raise ValueError("No se encontraron 'fecha' y 'hora'.")
+    df["ts"] = pd.to_datetime(df[date_col].astype(str) + ' ' + df[hour_col].astype(str), errors='coerce')
+    return df.dropna(subset=["ts"]).sort_values("ts")
+
+def add_time_parts(df):
+    df["dow"] = df["ts"].dt.dayofweek
+    df["month"] = df["ts"].dt.month
+    df["hour"] = df["ts"].dt.hour
+    df["day"] = df["ts"].dt.day
+    df["sin_hour"] = np.sin(2 * np.pi * df["hour"] / 24)
+    df["cos_hour"] = np.cos(2 * np.pi * df["hour"] / 24)
+    df["sin_dow"] = np.sin(2 * np.pi * df["dow"] / 7)
+    df["cos_dow"] = np.cos(2 * np.pi * df["dow"] / 7)
+    return df
+
+def create_nn_model(n_features, loss='mean_squared_error', output_bias=None, is_classifier=False):
+    if output_bias is not None:
+        output_bias = tf.keras.initializers.Constant(output_bias)
+    
+    model = tf.keras.Sequential([
+        tf.keras.layers.Dense(256, activation='relu', input_shape=(n_features,)),
+        tf.keras.layers.Dropout(0.3),
+        tf.keras.layers.Dense(128, activation='relu'),
+        tf.keras.layers.Dropout(0.2),
+        tf.keras.layers.Dense(64, activation='relu'),
+        tf.keras.layers.Dense(1, activation='sigmoid' if is_classifier else 'linear', bias_initializer=output_bias)
+    ])
+    
+    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_learning_rate=0.001, decay_steps=10000, decay_rate=0.9)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule, clipnorm=1.0)
+    
+    metrics = [tf.keras.metrics.AUC(name='auc')] if is_classifier else ['mae']
+    model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+    return model
+
+def normalize_climate_columns(df):
+    column_map = {'temperatura': ['temperature_2m', 'temperatura'], 'precipitacion': ['precipitation', 'precipitacion', 'precipitación'], 'lluvia': ['rain', 'lluvia']}
+    df_renamed = df.copy()
+    for standard_name, possible_names in column_map.items():
+        for name in possible_names:
+            if name in df_renamed.columns:
+                df_renamed.rename(columns={name: standard_name}, inplace=True)
+                break
+    return df_renamed
+
+# --- FASE 1: ENTRENAMIENTO DEL MODELO BASELINE ---
+def train_planner_model(df_hosting):
+    print("\n" + "="*50); print("--- FASE 1: ENTRENANDO MODELO 1 (EL PLANIFICADOR) v3 ---"); print("="*50)
+    df_base = add_time_parts(df_hosting.copy())
+    df_base['es_dia_de_pago'] = df_base['day'].isin([1, 2, 15, 16, 29, 30, 31]).astype(int)
+    for lag in [24, 48, 72, 168]:
+        df_base[f'lag_{lag}'] = df_base[TARGET_CALLS].shift(lag)
+    for window in [24, 72, 168]:
+        df_base[f'ma_{window}'] = df_base[TARGET_CALLS].rolling(window, min_periods=1).mean()
+    df_base.dropna(inplace=True)
+    
+    features_base = [col for col in df_base.columns if col.startswith(('lag_', 'ma_'))] + ['sin_hour', 'cos_hour', 'sin_dow', 'cos_dow', 'feriados', 'es_dia_de_pago', 'dow', 'month', 'hour']
+    
+    X = pd.get_dummies(df_base[features_base], columns=['dow', 'month', 'hour'])
+    y = df_base[TARGET_CALLS]
+    
+    X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, shuffle=False)
+    
+    scaler = StandardScaler()
+    X_tr_s = scaler.fit_transform(X_tr)
+    X_te_s = scaler.transform(X_te)
+    
+    model = create_nn_model(X_tr_s.shape[1])
+    model.fit(X_tr_s, y_tr, validation_data=(X_te_s, y_te), epochs=EPOCHS, batch_size=BATCH_SIZE, verbose=1, 
+              callbacks=[tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)])
+    
+    pred = model.predict(X_te_s).flatten()
+    print(f"\nResultado Planificador v3: MAE={mean_absolute_error(y_te, pred):.2f} | R2={r2_score(y_te, pred):.3f}")
+    
+    model.save(f"{OUTPUT_DIR}modelo_planner.keras")
+    joblib.dump(scaler, f"{OUTPUT_DIR}scaler_planner.pkl")
+    with open(f"{OUTPUT_DIR}training_columns_planner.json", "w") as f: json.dump(list(X.columns), f)
+        
+    return model, scaler, list(X.columns)
+
+# --- FASE 2: ENTRENAMIENTO DEL ANALISTA DE RIESGOS (CLASIFICADOR v7) ---
+def train_risk_analyst_model(df_hosting, df_clima, planner_model, planner_scaler, planner_cols):
+    print("\n" + "="*50); print("--- FASE 2: ENTRENANDO MODELO 2 (EL ANALISTA DE RIESGOS) v7 ---"); print("="*50)
+    df_planner_full = add_time_parts(df_hosting.copy()); df_planner_full['es_dia_de_pago'] = df_planner_full['day'].isin([1, 2, 15, 16, 29, 30, 31]).astype(int)
+    for lag in [24, 48, 72, 168]: df_planner_full[f'lag_{lag}'] = df_planner_full[TARGET_CALLS].shift(lag)
+    for window in [24, 72, 168]: df_planner_full[f'ma_{window}'] = df_planner_full[TARGET_CALLS].rolling(window, min_periods=1).mean()
+    df_planner_full.dropna(inplace=True)
+    
+    X_full_dummies = pd.get_dummies(df_planner_full, columns=['dow', 'month', 'hour'])
+    X_full = X_full_dummies.reindex(columns=planner_cols, fill_value=0)
+    X_full_s = planner_scaler.transform(X_full)
+    df_planner_full['llamadas_predichas_normales'] = planner_model.predict(X_full_s)
+    df_planner_full['pico_de_llamadas'] = (df_planner_full[TARGET_CALLS] - df_planner_full['llamadas_predichas_normales']).clip(0)
+    
+    pico_threshold = df_planner_full['pico_de_llamadas'].quantile(0.95)
+    print(f"Umbral para definir un 'evento de alto volumen': {pico_threshold:.2f} llamadas adicionales.")
+    df_planner_full['evento_de_alto_volumen'] = (df_planner_full['pico_de_llamadas'] > pico_threshold).astype(int)
+    df_picos = df_planner_full[['ts', 'evento_de_alto_volumen']].copy()
+    
+    df_clima_proc = add_time_parts(df_clima.copy()); df_clima_proc = df_clima_proc.sort_values(['comuna', 'ts'])
+    climate_cols_to_fill = ['temperatura', 'precipitacion', 'lluvia']
+    for col in climate_cols_to_fill:
+        if col in df_clima_proc.columns: df_clima_proc[col] = df_clima_proc.groupby('comuna')[col].ffill()
+    df_clima_proc.dropna(subset=climate_cols_to_fill, inplace=True)
+    weather_metrics = [m for m in climate_cols_to_fill if m in df_clima_proc.columns]
+    if not weather_metrics: raise ValueError("Ninguna columna de clima esperada fue encontrada.")
+    
+    print("Calculando baselines de clima...")
+    baselines = df_clima_proc.groupby(['comuna', 'dow', 'hour'])[weather_metrics].agg(['median', 'std']).reset_index()
+    baselines.columns = ['_'.join(col).strip() for col in baselines.columns.values]; std_cols = [col for col in baselines.columns if col.endswith('_std')]; baselines[std_cols] = baselines[std_cols].fillna(0)
+    df_clima_proc = pd.merge(df_clima_proc, baselines, left_on=['comuna', 'dow', 'hour'], right_on=['comuna_', 'dow_', 'hour_'])
+    for metric in weather_metrics:
+        median_col = f'{metric}_median'; std_col = f'{metric}_std'
+        df_clima_proc[f'anomalia_{metric}'] = (df_clima_proc[metric] - df_clima_proc[median_col]) / (df_clima_proc[std_col] + 1e-6)
+    
+    anomaly_cols = [f'anomalia_{m}' for m in weather_metrics]; n_comunas = df_clima_proc['comuna'].nunique()
+    agg_functions = {col: ['max', 'sum', lambda x: (x > 2.5).sum() / n_comunas] for col in anomaly_cols}
+    df_agregado = df_clima_proc.groupby('ts').agg(agg_functions).reset_index()
+    df_agregado.columns = [f"{col[0]}_{col[1] if col[1] != '<lambda_0>' else 'pct_comunas_afectadas'}" for col in df_agregado.columns]
+    
+    df_final_anomaly = pd.merge(df_agregado, df_picos, left_on='ts_', right_on='ts')
+    X = df_final_anomaly.drop(columns=['ts_', 'ts', 'evento_de_alto_volumen'])
+    y = df_final_anomaly['evento_de_alto_volumen']
+    
+    X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, shuffle=False)
+    scaler = StandardScaler(); X_tr_s = scaler.fit_transform(X_tr); X_te_s = scaler.transform(X_te)
+    
+    # --- CALIBRACIÓN CON CLASS_WEIGHT ---
+    neg, pos = np.bincount(y_tr)
+    total = neg + pos
+    weight_for_0 = (1 / neg) * (total / 2.0)
+    weight_for_1 = (1 / pos) * (total / 2.0)
+    class_weight = {0: weight_for_0, 1: weight_for_1}
+    print(f"Pesos de clase calculados: 0 -> {class_weight[0]:.2f}, 1 -> {class_weight[1]:.2f}")
+    
+    initial_bias = np.log([pos / neg])
+    model = create_nn_model(X_tr_s.shape[1], loss='binary_crossentropy', output_bias=initial_bias, is_classifier=True)
+    
+    model.fit(X_tr_s, y_tr, validation_data=(X_te_s, y_te), epochs=EPOCHS, batch_size=BATCH_SIZE, verbose=1,
+              class_weight=class_weight, # <-- ¡LA INSTRUCCIÓN CLAVE!
+              callbacks=[tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)])
+    
+    pred_proba = model.predict(X_te_s).flatten()
+    pred_class = (pred_proba > 0.5).astype(int)
+    
+    print("\n--- Resultados del Analista de Riesgos v7 ---")
+    print(f"AUC: {roc_auc_score(y_te, pred_proba):.3f}")
+    print(f"Accuracy: {accuracy_score(y_te, pred_class):.3f}")
+    print(f"Precision: {precision_score(y_te, pred_class, zero_division=0):.3f}")
+    print(f"Recall: {recall_score(y_te, pred_class, zero_division=0):.3f}")
+    print("\nMatriz de Confusión (Test Set):")
+    print(confusion_matrix(y_te, pred_class))
+    
+    model.save(f"{OUTPUT_DIR}modelo_riesgos.keras")
+    joblib.dump(scaler, f"{OUTPUT_DIR}scaler_riesgos.pkl")
+    joblib.dump(baselines, f"{OUTPUT_DIR}baselines_clima.pkl")
+    with open(f"{OUTPUT_DIR}training_columns_riesgos.json", "w") as f: json.dump(list(X.columns), f)
+    
+    return df_agregado
+
+# --- FASE 3: ENTRENAMIENTO DEL MODELO DE TMO ---
+def train_tmo_model(df_tmo, df_hosting_full, df_anomaly_features):
+    print("\n" + "="*50); print("--- FASE 3: ENTRENANDO MODELO 3 (ANALISTA DE OPERACIONES - TMO) v3 ---"); print("="*50)
+    df_tmo_proc = df_tmo.copy(); df_tmo_proc = add_time_parts(df_tmo_proc)
+    df_tmo_proc['proporcion_comercial'] = df_tmo_proc['q_llamadas_comercial'] / (df_tmo_proc['q_llamadas_general'] + 1e-6)
+    df_tmo_proc['proporcion_tecnica'] = df_tmo_proc['q_llamadas_tecnico'] / (df_tmo_proc['q_llamadas_general'] + 1e-6)
+    
+    df_merged = pd.merge(df_tmo_proc, df_hosting_full, on='ts', how='inner')
+    df_merged = pd.merge(df_merged, df_anomaly_features, left_on='ts', right_on='ts_', how='inner')
+    df_merged['es_dia_de_pago'] = df_merged['day'].isin([1, 2, 15, 16, 29, 30, 31]).astype(int)
+    if 'precipitacion' in df_merged.columns:
+        df_merged['precipitacion_x_dia_habil'] = df_merged['precipitacion'] * df_merged['es_dia_habil']
+    
+    features_tmo = ['proporcion_comercial', 'proporcion_tecnica', 'tmo_comercial', 'tmo_tecnico', TARGET_CALLS, 'sin_hour', 'cos_hour', 'sin_dow', 'cos_dow', 'feriados', 'es_dia_de_pago', 'dow', 'month', 'hour'] + [col for col in df_anomaly_features.columns if col not in ['ts_', 'ts']]
+    if 'precipitacion_x_dia_habil' in df_merged.columns: features_tmo.append('precipitacion_x_dia_habil')
+
+    X = pd.get_dummies(df_merged[features_tmo], columns=['dow', 'month', 'hour'])
+    y = df_merged[TARGET_TMO]
+    X.dropna(inplace=True); y = y.loc[X.index]
+    
+    X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, shuffle=False)
+    
+    scaler = StandardScaler(); X_tr_s = scaler.fit_transform(X_tr); X_te_s = scaler.transform(X_te)
+    
+    model = create_nn_model(X_tr_s.shape[1])
+    model.fit(X_tr_s, y_tr, validation_data=(X_te_s, y_te), epochs=EPOCHS, batch_size=BATCH_SIZE, verbose=1, 
+              callbacks=[tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)])
+    
+    pred = model.predict(X_te_s).flatten()
+    print(f"\nResultado Analista de TMO v3: MAE={mean_absolute_error(y_te, pred):.2f} | R2={r2_score(y_te, pred):.3f}")
+    
+    model.save(f"{OUTPUT_DIR}modelo_tmo.keras")
+    joblib.dump(scaler, f"{OUTPUT_DIR}scaler_tmo.pkl")
+    with open(f"{OUTPUT_DIR}training_columns_tmo.json", "w") as f: json.dump(list(X.columns), f)
+
+# --- FUNCIÓN PRINCIPAL ORQUESTADORA ---
+def main():
+    if os.path.exists(OUTPUT_DIR):
+        shutil.rmtree(OUTPUT_DIR)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    
+    print("Cargando datos iniciales...")
+    df_hosting = read_data(HOSTING_FILE)
+    df_hosting = ensure_ts(df_hosting)
+    df_hosting = df_hosting.rename(columns={'recibidos': TARGET_CALLS})
+    columna_feriados = 'feriados'
+    if columna_feriados not in df_hosting.columns:
+        raise ValueError(f"No se encontró '{columna_feriados}'.")
+    df_hosting[columna_feriados] = pd.to_numeric(df_hosting[columna_feriados], errors='coerce').fillna(0).astype(int)
+    df_hosting = df_hosting.groupby("ts").agg({TARGET_CALLS: 'sum', columna_feriados: 'max'}).reset_index()
+
+    df_clima_raw = read_data(CLIMA_FILE)
+    df_clima = ensure_ts(df_clima_raw)
+    df_clima = normalize_climate_columns(df_clima)
+    
+    df_tmo_raw = read_data(TMO_FILE)
+    df_tmo = ensure_ts(df_tmo_raw)
+    df_tmo = df_tmo.rename(columns={'tmo_general': TARGET_TMO})
+
+    max_date_calls = df_hosting['ts'].max()
+    print(f"Alineando todos los datos a la última fecha de llamadas: {max_date_calls}")
+    df_clima = df_clima[df_clima['ts'] <= max_date_calls]
+    df_tmo = df_tmo[df_tmo['ts'] <= max_date_calls]
+    
+    planner_model, planner_scaler, planner_cols = train_planner_model(df_hosting)
+    anomaly_features = train_risk_analyst_model(df_hosting, df_clima, planner_model, planner_scaler, planner_cols)
+    train_tmo_model(df_tmo, df_hosting, anomaly_features)
+
+    print("\n" + "="*50); print("--- FASE 4: EMPAQUETANDO ARTEFACTOS ---"); print("="*50)
+    shutil.make_archive('/kaggle/working/artefactos_tres_especialistas_v7', 'zip', '/kaggle/working/models')
+    print("¡Proceso completado!")
+    print("\nTodos los artefactos de los tres modelos han sido guardados y comprimidos en 'artefactos_tres_especialistas_v7.zip'.")
+    print("Por favor, busca y descarga este archivo desde la sección 'Output' de tu notebook.")
+
+if __name__ == "__main__":
+    main()
