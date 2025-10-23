@@ -278,6 +278,12 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         if c not in df.columns:
             df[c] = np.nan
 
+    # >>>> NO CONSIDERAR DIA DE PAGO: forzamos columna a 0 (o la creamos en 0)
+    if "es_dia_de_pago" not in df.columns:
+        df["es_dia_de_pago"] = 0
+    else:
+        df["es_dia_de_pago"] = 0
+
     # IMPORTANTE: Rellenar TMO y proporciones con los datos del TMO puro
     if df_hist_tmo_only is not None and not df_hist_tmo_only.empty:
         try:
@@ -287,9 +293,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
                 # 'update' alinea por índice y rellena
                 df.update(df_tmo_pure, overwrite=True) 
         except Exception as e:
-            print(f"WARN: Error procesando df_hist_tmo_only ({e}), usando datos unidos.")
+            print(f"WARN: Error procesando df_hist_tmo_only ({e}), usando datos unidos).")
 
-    # ffill final
+    # ffill final (dia de pago queda 0 igualmente)
     cols_to_ffill = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"] + list(tmo_static_features)
     for c in cols_to_ffill:
         if c in df.columns:
@@ -304,9 +310,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         df_recent = df.copy()
 
     # === Valores Estáticos (Mediana Robusta) ===
-    # Usamos la mediana robusta del TMO puro (o el unido) para las *proporciones*
-    # que no son autorregresivas.
-    df_for_tmo_features = df.ffill() # Usamos el DF ya unido y ffilled
+    df_for_tmo_features = df.ffill()
     
     last_ts_features = df_for_tmo_features.index.max()
     recent_data = df_for_tmo_features.loc[
@@ -342,6 +346,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
     cols_iter = [TARGET_CALLS, TARGET_TMO]
     if "feriados" in df_recent.columns:
         cols_iter.append("feriados")
+    # incluimos es_dia_de_pago si existe, PERO SIEMPRE EN 0
     if "es_dia_de_pago" in df_recent.columns:
         cols_iter.append("es_dia_de_pago")
             
@@ -349,6 +354,10 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
     dfp[TARGET_CALLS] = pd.to_numeric(dfp[TARGET_CALLS], errors="coerce").ffill().fillna(0.0)
     dfp[TARGET_TMO] = pd.to_numeric(dfp[TARGET_TMO], errors="coerce").ffill().fillna(0.0)
     
+    # es_dia_de_pago forzado a 0 si está presente
+    if "es_dia_de_pago" in dfp.columns:
+        dfp["es_dia_de_pago"] = 0
+
     # Añadir las features estáticas (proporciones, etc.) a dfp
     for c, val in static_tmo_cols_dict.items():
         dfp[c] = val
@@ -366,9 +375,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         
         if "feriados" in tmp.columns:
             tmp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
+        # NO considerar día de pago: siempre 0
         if "es_dia_de_pago" in tmp.columns:
-            tmp.loc[ts, "es_dia_de_pago"] = 1 if ts.day in [1, 2, 15, 16, 29, 30, 31] else 0
-
+            tmp.loc[ts, "es_dia_de_pago"] = 0
 
         # 3. Crear TODOS los features (Lags, MAs, Tiempo)
         # 3a. Lags de Llamadas (función existente)
@@ -384,7 +393,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         tmp_with_feats = add_time_parts(tmp_with_feats)
         
         # 4. PREDECIR LLAMADAS (PLANNER)
-        # Tomamos solo la última fila (la hora 'ts' con todos sus features)
         current_row = tmp_with_feats.tail(1)
         
         X_pl = dummies_and_reindex(current_row, cols_pl)
@@ -395,7 +403,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         dfp.loc[ts, TARGET_CALLS] = yhat_calls
         
         # 5. PREDECIR TMO (ANALISTA)
-        # Actualizar la fila 'current_row' con la predicción de llamadas que acabamos de hacer
         current_row.loc[ts, TARGET_CALLS] = yhat_calls 
         
         X_tmo = dummies_and_reindex(current_row, cols_tmo)
@@ -408,8 +415,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         # 6. Guardar feriado/dia_pago (ya hecho)
         if "feriados" in dfp.columns:
             dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
+        # NO considerar día de pago: siempre 0
         if "es_dia_de_pago" in dfp.columns:
-            dfp.loc[ts, "es_dia_de_pago"] = 1 if ts.day in [1, 2, 15, 16, 29, 30, 31] else 0
+            dfp.loc[ts, "es_dia_de_pago"] = 0
 
     print("Predicción iterativa completada.")
 
@@ -420,7 +428,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
 
     # ===== AJUSTE POR FERIADOS =====
     if holidays_set and len(holidays_set) > 0:
-        # 'df' es el histórico unido, correcto para calcular factores
         (f_calls_by_hour, f_tmo_by_hour,
          g_calls, g_tmo, post_calls_by_hour) = compute_holiday_factors(df, holidays_set)
 
@@ -436,7 +443,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
 
     # ===== (OPCIONAL) CAP de OUTLIERS =====
     if ENABLE_OUTLIER_CAP:
-        # 'df' es el histórico unido, correcto para factores de llamadas
         base_mad = _baseline_median_mad(df, col=TARGET_CALLS)
         df_hourly = apply_outlier_cap(
             df_hourly, base_mad, holidays_set,
@@ -459,3 +465,4 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
 
     return df_hourly
 # --- ¡¡¡FIN FUNCIÓN MODIFICADA!!! ---
+
