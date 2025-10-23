@@ -1,3 +1,5 @@
+# requirements.txt (Versiones fijas compatibles con Keras 2.x / TF < 2.12)
+
 # --- Core ML Libraries ---
 # Fija scikit-learn a la versión con la que se guardó el scaler
 scikit-learn==1.2.2
@@ -5,9 +7,9 @@ scikit-learn==1.2.2
 pandas==1.5.3
 # Fija numpy a una versión compatible con pandas 1.5.x y sklearn 1.2.x
 numpy==1.23.5
-# Fija tensorflow a una versión estable anterior a la >=2.13 que usas ahora.
-# Si sabes exactamente cuál usaste, pon esa. 2.12.0 es una opción.
-tensorflow==2.12.0
+# *** Fija TensorFlow a una versión ANTERIOR a 2.12 ***
+# TensorFlow 2.10 u 2.11 son buenas opciones que usan Keras 2 de forma estable
+tensorflow==2.11.0
 # Fija joblib a una versión contemporánea a sklearn 1.2.2
 joblib==1.2.0
 
@@ -17,3 +19,7 @@ requests-cache>=1.1
 python-dateutil>=2.8
 tqdm>=4.66
 retry-requests>=2.0
+
+# --- Añade aquí cualquier otra librería específica que uses ---
+# Ejemplo: openpyxl si lees .xlsx directamente con pandas
+# openpyxl==<version>
