@@ -88,7 +88,7 @@ def main(horizonte_dias: int):
     if os.path.exists(TMO_HIST_FILE):
         df_tmo = load_historico_tmo(TMO_HIST_FILE)  # index ts
         df_tmo_hist_only = df_tmo.copy()  # <-- NUEVA LÍNEA: Guardamos la data pura
-
+        
         # left-join sobre dfh (mantiene las horas que usa el planner)
         dfh = dfh.join(df_tmo, how="left")
         # si tmo_general llegó desde TMO_HIST, úsalo como autoridad
@@ -104,18 +104,17 @@ def main(horizonte_dias: int):
         dfh["es_dia_de_pago"] = add_es_dia_de_pago(dfh).values
 
     # 4) ffill de columnas clave para evitar NaN en el borde
-    #    (TARGET_TMO_NEW NO se rellena aquí en v1)
-    for c in ["feriados", "es_dia_de_pago",
+    for c in [TARGET_TMO_NEW, "feriados", "es_dia_de_pago",
               "proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
         if c in dfh.columns:
             dfh[c] = dfh[c].ffill()
 
-    # 5) Forecast (Llamada original v1)
+    # 5) Forecast (le pasamos feriados y el DF de TMO puro)
     df_hourly = forecast_120d(
         dfh.reset_index(),
-        # <-- INICIO BLOQUE ORIGINAL v1 -->
+        # <-- INICIO BLOQUE MODIFICADO -->
         df_tmo_hist_only.reset_index() if df_tmo_hist_only is not None else None,
-        # <-- FIN BLOQUE ORIGINAL v1 -->
+        # <-- FIN BLOQUE MODIFICADO -->
         horizon_days=horizonte_dias,
         holidays_set=holidays_set
     )
