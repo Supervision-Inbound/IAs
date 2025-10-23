@@ -1,11 +1,11 @@
 [
   {
-    "comuna": "Maullin",
+    "comuna": "Valdivia",
     "rango_alertas": [
       {
         "fecha": "2025-10-26",
-        "hora_inicio": 0,
-        "hora_fin": 0,
+        "hora_inicio": 4,
+        "hora_fin": 5,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -13,12 +13,6 @@
   {
     "comuna": "Villarrica",
     "rango_alertas": [
-      {
-        "fecha": "2025-10-26",
-        "hora_inicio": 6,
-        "hora_fin": 6,
-        "impacto_llamadas_adicionales": 0
-      },
       {
         "fecha": "2025-10-29",
         "hora_inicio": 18,
@@ -264,6 +258,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Maullin",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Melipeuco",
     "rango_alertas": []
   },
@@ -461,10 +459,6 @@
   },
   {
     "comuna": "Tucapel",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Valdivia",
     "rango_alertas": []
   },
   {
