@@ -45,34 +45,10 @@ def _load_cols(path: str):
     with open(path, "r") as f:
         return json.load(f)
 
-def _prepare_full_data(df_hist_joined):
-    df_input_copy = df_hist_joined.copy()
-    df_full = ensure_ts(df_input_copy)
-    if TARGET_CALLS not in df_full.columns:
-        print(f"ERROR: Falta columna {TARGET_CALLS} en datos para TMO. TMO se saltará.")
-        return None
-    else:
-        if TARGET_TMO not in df_full.columns:
-            print(f"WARN: Falta columna {TARGET_TMO} en datos para TMO. Se usará 0.")
-            df_full[TARGET_TMO] = 0.0
-        df_full = df_full.dropna(subset=[TARGET_CALLS])
-        df_full[TARGET_TMO] = pd.to_numeric(df_full[TARGET_TMO], errors='coerce').ffill().fillna(0.0)
-        for aux in ["feriados", "es_dia_de_pago"]:
-            if aux in df_full.columns:
-                df_full[aux] = df_full[aux].ffill()
-            else:
-                print(f"WARN: Columna '{aux}' faltante para TMO, se añadirá con ceros.")
-                if isinstance(df_full.index, pd.DatetimeIndex):
-                     if aux == "feriados": df_full[aux] = 0
-                     elif aux == "es_dia_de_pago": df_full[aux] = add_es_dia_de_pago(df_full.index).values
-                else: df_full[aux] = 0
-        # Check final si el df quedó vacío
-        if df_full.empty:
-            print("ERROR: df_full quedó vacío después del preprocesamiento para TMO.")
-            return None
-        return df_full
-
-# ========= Helpers (Función _is_holiday corregida v30) =========
+# ========= Helpers (Idénticos a v1, con correcciones de robustez de v28/v30) =========
+# (_safe_ratio, _series_is_holiday, compute_holiday_factors,
+#  apply_holiday_adjustment, apply_post_holiday_adjustment,
+#  _baseline_median_mad, apply_outlier_cap, _is_holiday)
 def _safe_ratio(num, den, fallback=1.0):
     num = float(num) if num is not None and not np.isnan(num) else np.nan
     den = float(den) if den is not None and not np.isnan(den) and den != 0 else np.nan
@@ -182,10 +158,10 @@ def _baseline_median_mad(df_hist, col=TARGET_CALLS):
     g = d.groupby(["dow", "hour"])[col]
     base = g.median().rename("med").to_frame()
     def mad_robust(x):
-        x_clean = x.dropna()
-        if len(x_clean) == 0: return np.nan
-        med = np.median(x_clean)
-        if not np.isscalar(med): return np.nan
+        x_clean = x.dropna();
+        if len(x_clean) == 0: return np.nan;
+        med = np.median(x_clean);
+        if not np.isscalar(med): return np.nan;
         return np.median(np.abs(x_clean - med))
     mad = g.apply(mad_robust).rename("mad")
     base = base.join(mad)
@@ -235,57 +211,33 @@ def apply_outlier_cap(df_future, base_median_mad, holidays_set,
     out[col_calls_future] = capped[col_calls_future].astype(int).values
     return out
 
-# --- Función _is_holiday CORREGIDA (v30) ---
 def _is_holiday(ts, holidays_set: set) -> int:
-    if not holidays_set:
-        return 0
-
-    # 1. Ensure ts is a valid Timestamp
+    # --- v30 Correction Applied ---
+    if not holidays_set: return 0
     if not isinstance(ts, pd.Timestamp):
         try:
             ts = pd.to_datetime(ts)
-        except Exception:
-            # print(f"DEBUG: Failed to convert {ts} to datetime") # Optional debug
-            return 0 # Cannot proceed if not convertible
-    if pd.isna(ts): # Check if conversion resulted in NaT
-        # print("DEBUG: Timestamp is NaT") # Optional debug
-        return 0
-
-    # 2. Ensure ts is timezone-aware (in the target timezone)
+            if getattr(ts, "tz", None) is None: ts = ts.tz_localize(TIMEZONE, ambiguous='NaT', nonexistent='NaT')
+        except Exception: return 0
+    if pd.isna(ts): return 0
     ts_aware = None
     try:
         if getattr(ts, "tz", None) is None:
-            # Localize if naive
             ts_aware = ts.tz_localize(TIMEZONE, ambiguous='NaT', nonexistent='NaT')
         else:
-            # Convert if already aware but possibly different timezone
             ts_aware = ts.tz_convert(TIMEZONE)
-        # Check again if localization/conversion resulted in NaT
-        if pd.isna(ts_aware):
-             # print(f"DEBUG: Timestamp became NaT after tz handling: {ts}") # Optional debug
-             return 0
+        if pd.isna(ts_aware): return 0
     except Exception as e:
-        # print(f"DEBUG: Error handling timezone for {ts}: {e}") # Optional debug
-        # Fallback: Try using date without timezone if conversion fails
-        try:
-            d = ts.date()
-            # Asegurarse que holidays_set sea un set aquí también
-            if holidays_set is None: holidays_set = set()
-            return 1 if d in holidays_set else 0
-        except Exception:
-             # print(f"DEBUG: Failed to get date even without tz for {ts}") # Optional debug
-             return 0 # Cannot get date at all
-
-    # 3. Get the date from the timezone-aware timestamp
+        # Fallback 1: Try using date without timezone if conversion fails
+        try: d = ts.date(); return 1 if d in holidays_set else 0
+        except Exception: return 0 # Cannot get date at all
+    # Proceed with tz_aware if successful
     try:
         d = ts_aware.date()
-        # Asegurarse que holidays_set sea un set
-        if holidays_set is None: holidays_set = set()
+        if holidays_set is None: holidays_set = set() # Ensure it's a set
         return 1 if d in holidays_set else 0
-    except Exception as e:
-         # print(f"DEBUG: Failed to get date from tz-aware timestamp {ts_aware}: {e}") # Optional debug
-         return 0 # Should not happen if ts_aware is valid, but safeguard
-# --- FIN Función _is_holiday CORREGIDA ---
+    except Exception: return 0 # Should not happen, but safeguard
+    # --- End v30 Correction ---
 
 
 # --- ¡¡¡FIRMA ORIGINAL v1 RESTAURADA (con df_tmo_hist_only)!!! ---
@@ -302,18 +254,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_tmo_hist_only: pd.DataFrame |
     m_tmo = tf.keras.models.load_model(TMO_MODEL, compile=False)
     sc_tmo = joblib.load(TMO_SCALER)
     cols_tmo = _load_cols(TMO_COLS)
-
-    # === [NUEVO v29] Pre-cálculo de datos completos para TMO v8/v29 ===
-    df_full_tmo_v8 = _prepare_full_data(df_hist_joined)
-    df_recent_tmo = None # Inicializar
-    if df_full_tmo_v8 is not None:
-        last_ts_full = df_full_tmo_v8.index.max()
-        start_hist_tmo = last_ts_full - pd.Timedelta(days=HIST_WINDOW_DAYS)
-        df_recent_tmo = df_full_tmo_v8.loc[df_full_tmo_v8.index >= start_hist_tmo].copy()
-        if df_recent_tmo.empty:
-            df_recent_tmo = df_full_tmo_v8.copy()
-    # === FIN BLOQUE NUEVO v29 ===
-
 
     # === Base histórica (LÓGICA ORIGINAL v1 INTACTA) ===
     # 'df' se usará para el bucle de llamadas y los helpers de ajuste v1.
@@ -393,76 +333,69 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_tmo_hist_only: pd.DataFrame |
     print("Predicción de Llamadas (v1) completada.")
     # --- FIN DEL BLOQUE DE LLAMADAS v1 ---
 
+    # ===== [NUEVO v31] Preparación TARDÍA de datos TMO v8/v29 =====
+    df_full_tmo_v8 = _prepare_full_data(df_hist_joined)
+    df_recent_tmo = None
+    if df_full_tmo_v8 is not None:
+        last_ts_full = df_full_tmo_v8.index.max()
+        # Usar start_hist basado en last_ts de llamadas para alinear? O last_ts_full?
+        # Usaremos last_ts_full para consistencia con la data completa de TMO
+        start_hist_tmo = last_ts_full - pd.Timedelta(days=HIST_WINDOW_DAYS)
+        df_recent_tmo = df_full_tmo_v8.loc[df_full_tmo_v8.index >= start_hist_tmo].copy()
+        if df_recent_tmo.empty:
+            df_recent_tmo = df_full_tmo_v8.copy()
+    # ===== FIN BLOQUE NUEVO v31 =====
 
-    # ===== [NUEVO v29 - Cambio 2] TMO iterativo v8/v29 (reemplaza cálculo original v1) =====
+    # ===== [NUEVO v31] TMO iterativo v8/v29 =====
     pred_tmo = pd.Series(0.0, index=future_ts) # Fallback: TMO = 0
-    if df_full_tmo_v8 is not None and df_recent_tmo is not None: # Ejecutar solo si los datos están listos
+    if df_full_tmo_v8 is not None and df_recent_tmo is not None:
         try:
             print("Iniciando predicción de TMO (Lógica v8/v29 Autorregresiva)...")
-
             cols_tmo_hist = [TARGET_TMO]
             if "feriados" in df_recent_tmo.columns: cols_tmo_hist.append("feriados")
             if "es_dia_de_pago" in df_recent_tmo.columns: cols_tmo_hist.append("es_dia_de_pago")
-
-            # Usar df_recent_tmo (derivado de df_full_tmo_v8)
             dft = df_recent_tmo[cols_tmo_hist].copy()
-
             if "feriados" not in dft.columns: dft["feriados"] = 0
             if "es_dia_de_pago" not in dft.columns: dft["es_dia_de_pago"] = 0
-
             dft[TARGET_TMO] = pd.to_numeric(dft[TARGET_TMO], errors="coerce").ffill().fillna(0.0)
 
-            for ts in future_ts: # future_ts ya está definido por la lógica v1
+            for ts in future_ts:
                 if not isinstance(ts, pd.Timestamp): ts = pd.to_datetime(ts)
                 if getattr(ts, "tz", None) is None: ts = ts.tz_localize(TIMEZONE, ambiguous='NaT', nonexistent='NaT')
                 if pd.isna(ts): continue
                 current_idx = pd.DatetimeIndex([ts])
-
                 tmp_t = pd.concat([dft, pd.DataFrame(index=current_idx)])
                 tmp_t[TARGET_TMO] = tmp_t[TARGET_TMO].ffill()
                 tmp_t.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
-
-                if "es_dia_de_pago" in cols_tmo:
-                     tmp_t.loc[ts, "es_dia_de_pago"] = 1 if ts.day in [1,2,15,16,29,30,31] else 0
-
+                if "es_dia_de_pago" in cols_tmo: tmp_t.loc[ts, "es_dia_de_pago"] = 1 if ts.day in [1,2,15,16,29,30,31] else 0
                 if not isinstance(tmp_t.index, pd.DatetimeIndex):
                     try:
                         tmp_t.index = pd.to_datetime(tmp_t.index)
                         if getattr(tmp_t.index, "tz", None) is None: tmp_t.index = tmp_t.index.tz_localize(TIMEZONE, ambiguous='NaT', nonexistent='NaT')
                     except Exception as e: print(f"WARN: Error convirtiendo índice en bucle TMO: {e}"); continue
-
                 tmp_t = add_lags_mas(tmp_t, TARGET_TMO)
                 tmp_t = add_time_parts(tmp_t)
-
                 Xt = dummies_and_reindex(tmp_t.tail(1), cols_tmo)
                 yhat_t = float(m_tmo.predict(sc_tmo.transform(Xt), verbose=0).flatten()[0])
                 dft.loc[ts, TARGET_TMO] = max(0.0, yhat_t)
                 dft.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
-                if "es_dia_de_pago" in cols_tmo:
-                     dft.loc[ts, "es_dia_de_pago"] = 1 if ts.day in [1,2,15,16,29,30,31] else 0
+                if "es_dia_de_pago" in cols_tmo: dft.loc[ts, "es_dia_de_pago"] = 1 if ts.day in [1,2,15,16,29,30,31] else 0
 
             pred_tmo_calculated = dft.loc[future_ts, TARGET_TMO]
-            pred_tmo = pred_tmo_calculated.ffill().fillna(0.0) # Actualizar pred_tmo si el cálculo fue exitoso
+            pred_tmo = pred_tmo_calculated.ffill().fillna(0.0)
             print("Predicción de TMO (v8/v29) completada.")
-
         except Exception as e_tmo:
-            print(f"ERROR: Falló la predicción de TMO v8/v29: {e_tmo}")
-            print("WARN: Usando TMO=0 como fallback.")
-            # pred_tmo ya está inicializado a 0.0
-    else:
-         print("WARN: Saltando predicción TMO v8/v29 debido a datos faltantes. Usando TMO=0.")
-    # ===== FIN BLOQUE NUEVO v29 =====
+            print(f"ERROR: Falló la predicción de TMO v8/v29: {e_tmo}"); print("WARN: Usando TMO=0 como fallback.")
+    else: print("WARN: Saltando predicción TMO v8/v29 debido a datos faltantes. Usando TMO=0.")
+    # ===== FIN BLOQUE NUEVO v31 =====
 
 
     # ===== Curva base (sin ajuste) =====
     df_hourly = pd.DataFrame(index=future_ts)
     df_hourly["calls"] = np.round(pred_calls).astype(int)
-    # --- [NUEVO v29 - Cambio 3] ---
     df_hourly["tmo_s"] = np.round(pred_tmo).astype(int) # <-- Usa la salida del bucle v8/v29 o el fallback
 
     # ===== AJUSTE POR FERIADOS (LÓGICA V1 INTACTA) =====
-    # (v1, línea 369)
-    # ¡IMPORTANTE! Usa 'df' (el "roto" v1) para calcular los factores.
     print("Aplicando ajustes de feriados (lógica v1)...")
     if holidays_set and len(holidays_set) > 0:
         df_adj = df.copy()
@@ -472,58 +405,36 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_tmo_hist_only: pd.DataFrame |
                  if getattr(df_adj.index, "tz", None) is None: df_adj.index = df_adj.index.tz_localize(TIMEZONE, ambiguous='NaT', nonexistent='NaT')
                  else: df_adj.index = df_adj.index.tz_convert(TIMEZONE)
              except Exception as e: print(f"WARN: No se pudo convertir índice de 'df' para ajustes: {e}"); pass
-
-        (f_calls_by_hour, f_tmo_by_hour,
-         g_calls, g_tmo, post_calls_by_hour) = compute_holiday_factors(df_adj, holidays_set)
-
-        df_hourly = apply_holiday_adjustment(
-            df_hourly, holidays_set,
-            f_calls_by_hour, f_tmo_by_hour,
-            col_calls_future="calls", col_tmo_future="tmo_s"
-        )
-        df_hourly = apply_post_holiday_adjustment(
-            df_hourly, holidays_set, post_calls_by_hour,
-            col_calls_future="calls"
-        )
+        (f_calls_by_hour, f_tmo_by_hour, g_calls, g_tmo, post_calls_by_hour) = compute_holiday_factors(df_adj, holidays_set)
+        df_hourly = apply_holiday_adjustment(df_hourly, holidays_set, f_calls_by_hour, f_tmo_by_hour, col_calls_future="calls", col_tmo_future="tmo_s")
+        df_hourly = apply_post_holiday_adjustment(df_hourly, holidays_set, post_calls_by_hour, col_calls_future="calls")
 
     # ===== (OPCIONAL) CAP de OUTLIERS (Solo para llamadas) (LÓGICA V1 INTACTA) =====
     if ENABLE_OUTLIER_CAP:
         print("Aplicando guardrail de outliers a llamadas (lógica v1)...")
-        # (v1, línea 385)
-        # ¡IMPORTANTE! Usa 'df' (el "roto" v1) para calcular el MAD.
         df_mad = df.copy()
         base_mad = _baseline_median_mad(df_mad, col=TARGET_CALLS)
-        df_hourly = apply_outlier_cap(
-            df_hourly, base_mad, holidays_set,
-            col_calls_future="calls",
-            k_weekday=K_WEEKDAY, k_weekend=K_WEEKEND
-        )
+        df_hourly = apply_outlier_cap(df_hourly, base_mad, holidays_set, col_calls_future="calls", k_weekday=K_WEEKDAY, k_weekend=K_WEEKEND)
 
     # ===== Erlang por hora (Lógica v1 INTACTA) =====
     print("Calculando agentes requeridos (Erlang C)...")
     df_hourly["agents_prod"] = 0
-    # Importar localmente para asegurar disponibilidad
-    from .erlang import required_agents, schedule_agents
+    from .erlang import required_agents, schedule_agents # Importar aquí por si acaso
     for ts in df_hourly.index:
         calls_val = float(df_hourly.at[ts, "calls"])
         tmo_val = float(df_hourly.at[ts, "tmo_s"])
         if calls_val >= 0 and tmo_val > 0:
              a, _ = required_agents(calls_val, tmo_val)
              df_hourly.at[ts, "agents_prod"] = int(a)
-        else:
-             df_hourly.at[ts, "agents_prod"] = 0
-
+        else: df_hourly.at[ts, "agents_prod"] = 0
     df_hourly["agents_sched"] = df_hourly["agents_prod"].apply(schedule_agents)
 
 
     # ===== Salidas (Lógica v1 INTACTA) =====
     print("Generando archivos JSON de salida...")
-    # Importar localmente para asegurar disponibilidad
-    from .utils_io import write_daily_json, write_hourly_json
-    write_hourly_json(f"{PUBLIC_DIR}/prediccion_horaria.json",
-                      df_hourly, "calls", "tmo_s", "agents_sched")
-    write_daily_json(f"{PUBLIC_DIR}/prediccion_diaria.json",
-                     df_hourly, "calls", "tmo_s")
+    from .utils_io import write_daily_json, write_hourly_json # Importar aquí por si acaso
+    write_hourly_json(f"{PUBLIC_DIR}/prediccion_horaria.json", df_hourly, "calls", "tmo_s", "agents_sched")
+    write_daily_json(f"{PUBLIC_DIR}/prediccion_diaria.json", df_hourly, "calls", "tmo_s")
 
     print("--- Proceso de Inferencia Finalizado ---")
     return df_hourly
