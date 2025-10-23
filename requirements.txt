@@ -1,9 +1,17 @@
-
+# --- Core ML Libraries ---
+# Fija scikit-learn a la versión con la que se guardó el scaler
 scikit-learn==1.2.2
+# Fija pandas a una versión pre-2.0 compatible con sklearn 1.2.x
 pandas==1.5.3
+# Fija numpy a una versión compatible con pandas 1.5.x y sklearn 1.2.x
 numpy==1.23.5
+# Fija tensorflow a una versión estable anterior a la >=2.13 que usas ahora.
+# Si sabes exactamente cuál usaste, pon esa. 2.12.0 es una opción.
 tensorflow==2.12.0
+# Fija joblib a una versión contemporánea a sklearn 1.2.2
 joblib==1.2.0
+
+# --- Otras dependencias (mantén las originales o >= si no causaron problemas) ---
 requests>=2.31
 requests-cache>=1.1
 python-dateutil>=2.8
