@@ -18,6 +18,12 @@
         "hora_inicio": 2,
         "hora_fin": 3,
         "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2025-10-30",
+        "hora_inicio": 18,
+        "hora_fin": 18,
+        "impacto_llamadas_adicionales": 0
       }
     ]
   },
