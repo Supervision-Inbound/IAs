@@ -1,12 +1,17 @@
 [
   {
     "fecha": "2025-07-27",
-    "llamadas_diarias": 51,
-    "tmo_diario": 121.0
+    "llamadas_diarias": 48,
+    "tmo_diario": 109.0
   },
   {
     "fecha": "2025-07-28",
-    "llamadas_diarias": 3339,
-    "tmo_diario": 114.30434782608695
+    "llamadas_diarias": 3400,
+    "tmo_diario": 109.625
+  },
+  {
+    "fecha": "2025-07-29",
+    "llamadas_diarias": 3312,
+    "tmo_diario": 120.17391304347827
   }
 ]
