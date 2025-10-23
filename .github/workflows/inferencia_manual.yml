@@ -16,18 +16,31 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.11" # Asegúrate que coincida con tu requirements.txt
 
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
+          # Asegúrate que este requirements.txt es el compatible con TF 2.12+
           pip install -r requirements.txt
 
       - name: Download release assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Este script debe traer los NUEVOS artefactos
           python -m src.download_release --owner Supervision-Inbound --repo IAs
+
+      # --- NUEVO PASO DE VERIFICACIÓN ---
+      - name: Verify Model Files
+        run: |
+          echo "Listing models directory:"
+          ls -l models/
+          echo "Checking TensorFlow version used by Python:"
+          python -c "import tensorflow as tf; print(f'Python sees TF version: {tf.__version__}')"
+          echo "Attempting to get Keras model summary (will fail if incompatible):"
+          python -c "import tensorflow as tf; print('Loading model...'); tf.keras.models.load_model('models/modelo_planner.keras').summary(); print('Model loaded OK!')" || echo "Model load failed as expected OR succeeded unexpectedly."
+      # --- FIN NUEVO PASO ---
 
       - name: Run inference
         env:
@@ -48,4 +61,3 @@ jobs:
         with:
           name: salidas-json
           path: public/*.json
-
