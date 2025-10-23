@@ -38,10 +38,6 @@ def _load_cols(path: str):
 
 
 # ========= Helpers de FERIADOS (PORTADOS + EXTENDIDOS) =========
-# ... (todas las funciones _safe_ratio, _series_is_holiday, compute_holiday_factors, 
-#      apply_holiday_adjustment, apply_post_holiday_adjustment
-#      permanecen EXACTAMENTE IGUALES) ...
-# ===========================================================
 def _safe_ratio(num, den, fallback=1.0):
     num = float(num) if num is not None and not np.isnan(num) else np.nan
     den = float(den) if den is not None and not np.isnan(den) and den != 0 else np.nan
@@ -175,8 +171,6 @@ def apply_post_holiday_adjustment(df_future, holidays_set, post_calls_by_hour,
 # ===========================================================
 
 # ========= NUEVO: Guardrail de outliers por (dow,hour) ======
-# ... (las funciones _baseline_median_mad y apply_outlier_cap
-#      permanecen EXACTAMENTE IGUALES) ...
 def _baseline_median_mad(df_hist, col=TARGET_CALLS):
     """
     Baseline robusto por (dow,hour): mediana y MAD.
@@ -249,15 +243,12 @@ def _is_holiday(ts, holidays_set: set) -> int:
     return 1 if d in holidays_set else 0
 
 
-# <-- INICIO: LÍNEA MODIFICADA (firma de la función) -->
+# --- ¡¡¡INICIO FUNCIÓN MODIFICADA!!! ---
 def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame | None, horizon_days: int = 120, holidays_set: set | None = None):
-# <-- FIN: LÍNEA MODIFICADA -->
     """
-    - Parser robusto (igual al repo bueno).
-    - Filtro dropna(subset=[TARGET_CALLS]) (sin cap a hoy).
-    - Horizonte = 1h después de last_ts.
-    - Planner iterativo con 'feriados' también en FUTURO.
-    - TMO horario (con 'feriados' futuro si aplica).
+    Versión Autorregresiva (v8)
+    - Planner iterativo (Llamadas).
+    - TMO iterativo (TMO) usando lags de TMO y predicción de llamadas.
     - Ajuste post-forecast por FERIADOS + POST-FERIADOS.
     - (Opcional) CAP de OUTLIERS por (dow,hour) con mediana+MAD.
     - Erlang C y salidas JSON.
@@ -271,28 +262,71 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
     sc_tmo = joblib.load(TMO_SCALER)
     cols_tmo = _load_cols(TMO_COLS)
 
-    # === Base histórica ===
-    # df_hist_joined (el primer argumento) es el DF principal, unido
+    # === Base histórica (para lags) ===
     df = ensure_ts(df_hist_joined)
 
     if TARGET_CALLS not in df.columns:
         raise ValueError(f"Falta columna {TARGET_CALLS} en historical_data.csv")
+    
+    # Asegurar que TMO_TARGET exista en el DF unido para el histórico
+    if TARGET_TMO not in df.columns:
+        df[TARGET_TMO] = np.nan
 
-    df = df[[TARGET_CALLS, TARGET_TMO] if TARGET_TMO in df.columns else [TARGET_CALLS]].copy()
-    df = df.dropna(subset=[TARGET_CALLS])
+    # Asegurar que las features estáticas de TMO existan
+    tmo_static_features = {"proporcion_comercial","proporcion_tecnica","tmo_comercial","tmo_tecnico"}
+    for c in tmo_static_features:
+        if c not in df.columns:
+            df[c] = np.nan
 
-    # ff de auxiliares (si existen en histórico)
-    for aux in ["feriados", "es_dia_de_pago", "tmo_comercial", "tmo_tecnico",
-                "proporcion_comercial", "proporcion_tecnica"]:
-        if aux in df.columns:
-            df[aux] = df[aux].ffill()
+    # IMPORTANTE: Rellenar TMO y proporciones con los datos del TMO puro
+    if df_hist_tmo_only is not None and not df_hist_tmo_only.empty:
+        try:
+            df_tmo_pure = ensure_ts(df_hist_tmo_only).ffill()
+            if not df_tmo_pure.empty:
+                print("INFO: Sobrescribiendo features TMO con HISTORICO_TMO.csv")
+                # 'update' alinea por índice y rellena
+                df.update(df_tmo_pure, overwrite=True) 
+        except Exception as e:
+            print(f"WARN: Error procesando df_hist_tmo_only ({e}), usando datos unidos.")
+
+    # ffill final
+    cols_to_ffill = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"] + list(tmo_static_features)
+    for c in cols_to_ffill:
+        if c in df.columns:
+            df[c] = df[c].ffill()
+    
+    df = df.dropna(subset=[TARGET_CALLS]) # Solo dropear si faltan llamadas
 
     last_ts = df.index.max()
-
     start_hist = last_ts - pd.Timedelta(days=HIST_WINDOW_DAYS)
     df_recent = df.loc[df.index >= start_hist].copy()
     if df_recent.empty:
         df_recent = df.copy()
+
+    # === Valores Estáticos (Mediana Robusta) ===
+    # Usamos la mediana robusta del TMO puro (o el unido) para las *proporciones*
+    # que no son autorregresivas.
+    df_for_tmo_features = df.ffill() # Usamos el DF ya unido y ffilled
+    
+    last_ts_features = df_for_tmo_features.index.max()
+    recent_data = df_for_tmo_features.loc[
+        (df_for_tmo_features.index >= last_ts_features - pd.Timedelta(days=14)) &
+        (df_for_tmo_features.index.hour >= 8) &
+        (df_for_tmo_features.index.hour <= 20)
+    ]
+    features_to_agg = list(tmo_static_features.intersection(df_for_tmo_features.columns))
+    
+    if recent_data.empty or not features_to_agg or recent_data[features_to_agg].isnull().all().all():
+        print("WARN: No se encontraron datos TMO robustos. Usando iloc[-1].")
+        last_vals_agg = df_for_tmo_features.iloc[[-1]]
+    else:
+        last_vals_agg_series = recent_data[features_to_agg].median()
+        last_vals_agg = pd.DataFrame(last_vals_agg_series).T
+        print(f"INFO: Usando valores TMO robustos (mediana 14d): {last_vals_agg.to_dict('records')[0]}")
+    
+    static_tmo_cols_dict = {}
+    for c in tmo_static_features:
+        static_tmo_cols_dict[c] = float(last_vals_agg[c].iloc[0]) if c in last_vals_agg.columns and not pd.isna(last_vals_agg[c].iloc[0]) else 0.0
 
     # ===== Horizonte futuro =====
     future_ts = pd.date_range(
@@ -302,96 +336,99 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         tz=TIMEZONE
     )
 
-    # ===== Planner iterativo (con 'feriados' futuro) =====
-    # --- ¡¡¡ESTE BLOQUE NO SE TOCA!!! ---
-    # (Usa 'df_recent' que viene del 'df_hist_joined' y está bien)
+    # ===== Bucle Iterativo (Llamadas + TMO) =====
+    
+    # dfp (DataFrame de predicción) ahora contiene AMBOS targets
+    cols_iter = [TARGET_CALLS, TARGET_TMO]
     if "feriados" in df_recent.columns:
-        dfp = df_recent[[TARGET_CALLS, "feriados"]].copy()
-    else:
-        dfp = df_recent[[TARGET_CALLS]].copy()
-
+        cols_iter.append("feriados")
+    if "es_dia_de_pago" in df_recent.columns:
+        cols_iter.append("es_dia_de_pago")
+            
+    dfp = df_recent[cols_iter].copy()
     dfp[TARGET_CALLS] = pd.to_numeric(dfp[TARGET_CALLS], errors="coerce").ffill().fillna(0.0)
+    dfp[TARGET_TMO] = pd.to_numeric(dfp[TARGET_TMO], errors="coerce").ffill().fillna(0.0)
+    
+    # Añadir las features estáticas (proporciones, etc.) a dfp
+    for c, val in static_tmo_cols_dict.items():
+        dfp[c] = val
 
+    print("Iniciando predicción iterativa (Llamadas + TMO)...")
     for ts in future_ts:
+        # 1. Crear el 'slice' temporal para esta hora (historia + 'ts' vacío)
         tmp = pd.concat([dfp, pd.DataFrame(index=[ts])])
+        
+        # 2. ffill de los targets y features estáticas
         tmp[TARGET_CALLS] = tmp[TARGET_CALLS].ffill()
-
+        tmp[TARGET_TMO] = tmp[TARGET_TMO].ffill()
+        for c in static_tmo_cols_dict.keys():
+            tmp.loc[ts, c] = static_tmo_cols_dict[c] # Propagar valor estático
+        
         if "feriados" in tmp.columns:
             tmp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
+        if "es_dia_de_pago" in tmp.columns:
+            tmp.loc[ts, "es_dia_de_pago"] = 1 if ts.day in [1, 2, 15, 16, 29, 30, 31] else 0
 
-        tmp = add_lags_mas(tmp, TARGET_CALLS)
-        tmp = add_time_parts(tmp)
 
-        X = dummies_and_reindex(tmp.tail(1), cols_pl)
-        yhat = float(m_pl.predict(sc_pl.transform(X), verbose=0).flatten()[0])
-        dfp.loc[ts, TARGET_CALLS] = max(0.0, yhat)
-
+        # 3. Crear TODOS los features (Lags, MAs, Tiempo)
+        # 3a. Lags de Llamadas (función existente)
+        tmp_with_feats = add_lags_mas(tmp, TARGET_CALLS) 
+        
+        # 3b. Lags de TMO (añadidos manualmente)
+        for lag in [24, 48, 72, 168]:
+            tmp_with_feats[f'tmo_lag_{lag}'] = tmp_with_feats[TARGET_TMO].shift(lag)
+        for window in [24, 72, 168]:
+            tmp_with_feats[f'tmo_ma_{window}'] = tmp_with_feats[TARGET_TMO].rolling(window, min_periods=1).mean()
+        
+        # 3c. Features de Tiempo
+        tmp_with_feats = add_time_parts(tmp_with_feats)
+        
+        # 4. PREDECIR LLAMADAS (PLANNER)
+        # Tomamos solo la última fila (la hora 'ts' con todos sus features)
+        current_row = tmp_with_feats.tail(1)
+        
+        X_pl = dummies_and_reindex(current_row, cols_pl)
+        yhat_calls = float(m_pl.predict(sc_pl.transform(X_pl), verbose=0).flatten()[0])
+        yhat_calls = max(0.0, yhat_calls)
+        
+        # Guardar predicción de llamadas en dfp
+        dfp.loc[ts, TARGET_CALLS] = yhat_calls
+        
+        # 5. PREDECIR TMO (ANALISTA)
+        # Actualizar la fila 'current_row' con la predicción de llamadas que acabamos de hacer
+        current_row.loc[ts, TARGET_CALLS] = yhat_calls 
+        
+        X_tmo = dummies_and_reindex(current_row, cols_tmo)
+        yhat_tmo = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
+        yhat_tmo = max(0.0, yhat_tmo) # TMO no puede ser negativo
+        
+        # Guardar predicción de TMO en dfp
+        dfp.loc[ts, TARGET_TMO] = yhat_tmo
+        
+        # 6. Guardar feriado/dia_pago (ya hecho)
         if "feriados" in dfp.columns:
             dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
+        if "es_dia_de_pago" in dfp.columns:
+            dfp.loc[ts, "es_dia_de_pago"] = 1 if ts.day in [1, 2, 15, 16, 29, 30, 31] else 0
 
-    pred_calls = dfp.loc[future_ts, TARGET_CALLS]
-    # --- FIN DEL BLOQUE INTOCABLE ---
+    print("Predicción iterativa completada.")
 
-    # ===== TMO por hora =====
-    base_tmo = pd.DataFrame(index=future_ts)
-    base_tmo[TARGET_CALLS] = pred_calls.values
-
-    # <-- INICIO BLOQUE MODIFICADO: Seleccionar la fuente de 'last_vals' -->
-    tmo_features_req = {"proporcion_comercial","proporcion_tecnica","tmo_comercial","tmo_tecnico"}
-    df_for_tmo_features = df.ffill() # Fallback al df unido
-    
-    if df_hist_tmo_only is not None and not df_hist_tmo_only.empty:
-        try:
-            df_tmo_pure = ensure_ts(df_hist_tmo_only).ffill()
-            if not df_tmo_pure.empty and tmo_features_req.issubset(df_tmo_pure.columns):
-                # Usar el archivo TMO puro si tiene las columnas y datos
-                df_for_tmo_features = df_tmo_pure
-                print("INFO: Usando HISTORICO_TMO.csv para features de TMO.")
-            else:
-                print("WARN: HISTORICO_TMO.csv no es válido o le faltan columnas, usando datos unidos.")
-        except Exception as e:
-            print(f"WARN: Error procesando df_hist_tmo_only ({e}), usando datos unidos.")
-
-    # Obtener la *última* fila de la fuente de datos seleccionada
-    last_vals = df_for_tmo_features.iloc[[-1]]
-    
-    if not tmo_features_req.issubset(last_vals.columns):
-        print("WARN: Faltan columnas TMO en 'last_vals'. Usando fallback de ceros.")
-        # Fallback si ni el DF unido ni el TMO puro tenían las columnas
-        last_vals = pd.DataFrame([[0,0,0,0]], columns=list(tmo_features_req), index=last_vals.index)
-    # <-- FIN BLOQUE MODIFICADO -->
-
-    for c in ["proporcion_comercial","proporcion_tecnica","tmo_comercial","tmo_tecnico"]:
-        base_tmo[c] = float(last_vals[c].iloc[0]) if c in last_vals.columns else 0.0
-
-    if "feriados" in df.columns: # 'feriados' se sigue basando en el DF principal
-        base_tmo["feriados"] = [_is_holiday(ts, holidays_set) for ts in base_tmo.index]
-
-    base_tmo = add_time_parts(base_tmo)
-    Xt = dummies_and_reindex(base_tmo, cols_tmo)
-    y_tmo = m_tmo.predict(sc_tmo.transform(Xt), verbose=0).flatten()
-    y_tmo = np.maximum(0, y_tmo)
-
-    # ===== Curva base (sin ajuste) =====
+    # ===== Curva base (extraída del bucle) =====
     df_hourly = pd.DataFrame(index=future_ts)
-    df_hourly["calls"] = np.round(pred_calls).astype(int)
-    df_hourly["tmo_s"] = np.round(y_tmo).astype(int)
+    df_hourly["calls"] = np.round(dfp.loc[future_ts, TARGET_CALLS]).astype(int)
+    df_hourly["tmo_s"] = np.round(dfp.loc[future_ts, TARGET_TMO]).astype(int)
 
     # ===== AJUSTE POR FERIADOS =====
     if holidays_set and len(holidays_set) > 0:
-        # 'df' aquí es el 'df_hist_joined' procesado, lo cual es correcto
-        # porque compute_holiday_factors necesita TMO y LLAMADAS históricos.
+        # 'df' es el histórico unido, correcto para calcular factores
         (f_calls_by_hour, f_tmo_by_hour,
          g_calls, g_tmo, post_calls_by_hour) = compute_holiday_factors(df, holidays_set)
 
-        # Feriados
         df_hourly = apply_holiday_adjustment(
             df_hourly, holidays_set,
             f_calls_by_hour, f_tmo_by_hour,
             col_calls_future="calls", col_tmo_future="tmo_s"
         )
-
-        # Post-feriado (día siguiente)
         df_hourly = apply_post_holiday_adjustment(
             df_hourly, holidays_set, post_calls_by_hour,
             col_calls_future="calls"
@@ -399,8 +436,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
 
     # ===== (OPCIONAL) CAP de OUTLIERS =====
     if ENABLE_OUTLIER_CAP:
-        # 'df' aquí también es el 'df_hist_joined', que es correcto para
-        # calcular el MAD de las llamadas.
+        # 'df' es el histórico unido, correcto para factores de llamadas
         base_mad = _baseline_median_mad(df, col=TARGET_CALLS)
         df_hourly = apply_outlier_cap(
             df_hourly, base_mad, holidays_set,
@@ -422,3 +458,4 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
                      df_hourly, "calls", "tmo_s")
 
     return df_hourly
+# --- ¡¡¡FIN FUNCIÓN MODIFICADA!!! ---
