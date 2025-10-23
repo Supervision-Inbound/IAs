@@ -1,17 +1,22 @@
 [
   {
+    "comuna": "Valdivia",
+    "rango_alertas": [
+      {
+        "fecha": "2025-10-26",
+        "hora_inicio": 4,
+        "hora_fin": 4,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
     "comuna": "Villarrica",
     "rango_alertas": [
       {
         "fecha": "2025-10-29",
         "hora_inicio": 2,
-        "hora_fin": 2,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2025-10-29",
-        "hora_inicio": 18,
-        "hora_fin": 19,
+        "hora_fin": 3,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -454,10 +459,6 @@
   },
   {
     "comuna": "Tucapel",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Valdivia",
     "rango_alertas": []
   },
   {
