@@ -1,12 +1,21 @@
-# requirements.txt (Python 3.11 compatible para re-entrenamiento v29)
+# requirements.txt (Python 3.11 compatible para inferencia con modelos v29 re-entrenados)
 
 # --- Core ML Libraries ---
+# Fija scikit-learn a la versión con la que se guardó el scaler original
+# (Si re-entrenaste con una versión >1.2.2, podrías intentar actualizarla aquí también,
+# pero 1.2.2 es lo más seguro basado en el warning original)
 scikit-learn==1.2.2
+
+# Fija pandas a una versión pre-2.0 compatible con sklearn 1.2.x
 pandas==1.5.3
-# numpy < 1.24 es a menudo requerido por TF 2.12
+
+# Fija numpy a una versión compatible con pandas 1.5.x y TF 2.12
 numpy==1.23.5
-# TensorFlow compatible con Python 3.11
+
+# TensorFlow compatible con Python 3.11 (versión vista en tus logs)
 tensorflow==2.12.0
+
+# Fija joblib a una versión contemporánea a sklearn 1.2.2
 joblib==1.2.0
 
 # --- Otras dependencias ---
@@ -15,7 +24,7 @@ requests-cache>=1.1
 python-dateutil>=2.8
 tqdm>=4.66
 retry-requests>=2.0
-# Necesario para leer Excel en pandas
+# Necesario para leer Excel en pandas (si main.py lo necesita)
 openpyxl
 
 # --- Añade aquí cualquier otra librería específica ---
