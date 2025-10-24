@@ -1,1 +1,466 @@
-[]
+[
+  {
+    "comuna": "Alto Bio Bio",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Ancud",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Angol",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Antuco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Arauco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Bulnes",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Cabrero",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Calbuco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Carahue",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Castro",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Cañete",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Chaiten",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Chile Chico",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Cholchol",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Chonchi",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Cochamo",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Cochrane",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Collipulli",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Contulmo",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Coronel",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Corral",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Coyhaique",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Cunco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Curacautin",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Curaco De Velez",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Curanilahue",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Curarrehue",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Dalcahue",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "El Carmen",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Ercilla",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Florida",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Freire",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Fresia",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Frutillar",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Futaleufu",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Futrono",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Galvarino",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Gorbea",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Hualaihue",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Hualqui",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "La Union",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Lago Ranco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Lago Verde",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Laja",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Lanco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Lautaro",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Lebu",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Llanquihue",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Loncoche",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Lonquimay",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Los Alamos",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Los Angeles",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Los Lagos",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Los Muermos",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Los Sauces",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Lota",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Lumaco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Mafil",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Mariquina",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Maullin",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Melipeuco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Mulchen",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Nacimiento",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Negrete",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Nueva Imperial",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Ohiggins",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Osorno",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Padre Las Casas",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Paillaco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Palena",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Panguipulli",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Pemuco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Perquenco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Pinto",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Pitrufquen",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Pucon",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Puerto Cisnes",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Puerto Montt",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Puerto Octay",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Puerto Varas",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Puqueldon",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Puren",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Purranque",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Puyehue",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Queilen",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Quellon",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Quemchi",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Quilaco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Quilleco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Quillon",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Quinchao",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Ranquil",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Renaico",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Rio Bueno",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Rio Ibañez",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Rio Negro",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Saavedra",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "San Ignacio",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "San Juan De La Costa",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "San Pablo",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "San Rosendo",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Santa Barbara",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Santa Juana",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Temuco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Teodoro Schmidt",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Tirua",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Tolten",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Tome",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Traiguen",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Tucapel",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Valdivia",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Victoria",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Vilcun",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Villarrica",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Yumbel",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Yungay",
+    "rango_alertas": []
+  }
+]
