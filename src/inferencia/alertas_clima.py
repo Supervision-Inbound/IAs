@@ -1,325 +1,271 @@
 # src/inferencia/alertas_clima.py
-# (Asegúrate de que las importaciones y constantes iniciales sean correctas para tu proyecto)
-import pandas as pd
+import os, json, time
 import numpy as np
-import joblib
-import os
-import json
+import pandas as pd
+import joblib, tensorflow as tf
+import requests, requests_cache
 
-from .features import add_time_parts # Necesario para dow, hour
-from .utils_io import write_json # Para escribir la salida
+# Fallback de retry: usa retry-requests si está disponible; si no, urllib3 Retry
+try:
+    from retry_requests import retry  # pip install retry-requests
+    def _wrap_retry(session, retries=3, backoff_factor=1.5):
+        return retry(session, retries=retries, backoff_factor=backoff_factor)
+except Exception:
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    def _wrap_retry(session, retries=3, backoff_factor=1.5):
+        r = Retry(
+            total=retries,
+            backoff_factor=backoff_factor,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=False
+        )
+        session.mount("https://", HTTPAdapter(max_retries=r))
+        session.mount("http://", HTTPAdapter(max_retries=r))
+        return session
 
-# --- Constantes (Asegúrate que coincidan con tu entrenamiento/inferencia) ---
-CLIMA_DIR = "data" # O donde esté el archivo de clima histórico para la inferencia
-CLIMA_HIST_FILE = os.path.join(CLIMA_DIR, "historico_clima.csv") # Archivo histórico usado en inferencia
-BASELINES_FILE = "models/baselines_clima.pkl" # Archivo guardado en entrenamiento Fase 2
-RIESGOS_MODEL = "models/modelo_riesgos.keras" # Modelo de riesgos (opcional, si se usa probabilidad)
-RIESGOS_SCALER = "models/scaler_riesgos.pkl" # Scaler de riesgos (opcional)
-RIESGOS_COLS = "models/training_columns_riesgos.json" # Columnas de riesgos (opcional)
+from .features import add_time_parts
+from .utils_io import write_json
 
+TIMEZONE = "America/Santiago"
 PUBLIC_DIR = "public"
-TIMEZONE = "America/Santiago" # Asegurar consistencia
 
-# Umbrales (pueden ajustarse)
-ANOMALIA_THRESHOLD = 2.5 # Desviaciones estándar para considerar anomalía
-PCT_COMUNAS_THRESHOLD = 0.15 # 15% de comunas afectadas para alerta general
-PROBABILIDAD_RIESGO_THRESHOLD = 0.6 # Umbral si se usa el modelo de riesgos
+# Aceptar ambos nombres (Coordenadas vs Cordenadas)
+CANDIDATE_COORDS = [
+    "data/Comunas_Coordenadas.csv",   # nombre correcto
+    "data/Comunas_Cordenadas.csv",    # variante en tu repo
+]
 
-# Columnas esperadas de clima
-WEATHER_METRICS = ['temperatura', 'precipitacion', 'lluvia']
-# --- Fin Constantes ---
+# Modelos / artefactos de riesgos
+RIESGOS_MODEL = "models/modelo_riesgos.keras"
+RIESGOS_SCALER = "models/scaler_riesgos.pkl"
+RIESGOS_COLS = "models/training_columns_riesgos.json"
+CLIMA_BASELINES = "models/baselines_clima.pkl"
 
-def _load_cols(path: str):
-    """Carga columnas desde JSON."""
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        print(f"WARN: Archivo de columnas no encontrado: {path}")
-        return None
-    except Exception as e:
-        print(f"ERROR: No se pudo cargar archivo de columnas {path}: {e}")
-        return None
+OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+HOURLY_VARS = ["temperature_2m","precipitation","rain"]
+UNITS = {"temperature_unit":"celsius","precipitation_unit":"mm"}
 
+FORECAST_DAYS = 8
+ALERT_Z = 2.5            # umbral z por comuna-hora
+UPLIFT_ALPHA = 0.25      # factor de conversión proba_evento → % extra
 
-def _load_clima_historico(path=CLIMA_HIST_FILE):
-    """Carga y preprocesa el archivo histórico de clima para inferencia."""
-    if not os.path.exists(path):
-        print(f"WARN: Archivo de clima histórico no encontrado en {path}. No se generarán alertas.")
-        return None
-    try:
-        try: df = pd.read_csv(path, low_memory=False)
-        except (pd.errors.ParserError, UnicodeDecodeError): df = pd.read_csv(path, delimiter=';', low_memory=False)
+def _load_cols(path):
+    with open(path,"r") as f:
+        return json.load(f)
 
-        df.columns = [c.lower().strip().replace(' ', '_') for c in df.columns]
+def _client():
+    sess = requests_cache.CachedSession(".openmeteo_cache", expire_after=3600)
+    return _wrap_retry(sess, retries=3, backoff_factor=1.5)
 
-        # Renombrar columnas a estándar
-        column_map = {'temperatura': ['temperature_2m', 'temperatura'],
-                      'precipitacion': ['precipitation', 'precipitacion', 'precipitación'],
-                      'lluvia': ['rain', 'lluvia']}
-        for std_name, variations in column_map.items():
-            for var in variations:
-                if var in df.columns and std_name not in df.columns:
-                    df = df.rename(columns={var: std_name})
-                    break
+def _resolve_coords_path() -> str | None:
+    for p in CANDIDATE_COORDS:
+        if os.path.exists(p):
+            return p
+    return None
 
-        # Asegurar columnas de fecha/hora
-        date_col = next((c for c in df.columns if 'fecha' in c), None)
-        hour_col = next((c for c in df.columns if 'hora' in c), None)
-        if not date_col or not hour_col:
-            print(f"WARN: No se encontraron columnas 'fecha'/'hora' en {path}. No se puede procesar clima.")
-            return None
+def _read_csv_smart(path: str) -> pd.DataFrame:
+    # Intenta varios encodings y separadores, como en tu inferencia antigua
+    encodings = ("utf-8", "utf-8-sig", "latin1", "cp1252")
+    seps = [";", ",", "\t", "|"]
+    last_err = None
+    for enc in encodings:
+        try:
+            # intento auto
+            df = pd.read_csv(path, encoding=enc, engine="python")
+            if df.shape[1] > 1:
+                return df
+        except Exception as e:
+            last_err = e
+        # intentos forzando separador
+        for sep in seps:
+            try:
+                df = pd.read_csv(path, encoding=enc, sep=sep)
+                if df.shape[1] > 1:
+                    return df
+            except Exception as e2:
+                last_err = e2
+                continue
+    if last_err:
+        raise last_err
+    raise ValueError(f"No pude leer {path} con encodings/separadores estándar.")
 
-        # Parsear timestamp
-        try: df["ts"] = pd.to_datetime(df[date_col].astype(str) + ' ' + df[hour_col].astype(str), errors='coerce', dayfirst=True)
-        except Exception as e: print(f"WARN: Error parseando fecha/hora en clima: {e}"); return None
+def _pick_col(cols, candidates):
+    m = {c.lower().strip(): c for c in cols}
+    for cand in candidates:
+        key = cand.lower().strip()
+        for k, orig in m.items():
+            if key == k or key in k:
+                return orig
+    return None
 
-        df = df.dropna(subset=["ts"])
-        if df.empty: print("WARN: DataFrame de clima vacío después de parsear ts."); return None
+def _read_coords() -> pd.DataFrame:
+    path = _resolve_coords_path()
+    if not path:
+        return pd.DataFrame()  # handled upstream (no romper)
+    df = _read_csv_smart(path)
+    df.columns = [c.strip() for c in df.columns]
 
-        # Localizar timezone
-        df["ts"] = df["ts"].dt.tz_localize(TIMEZONE, ambiguous='NaT', nonexistent='NaT')
-        df = df.dropna(subset=["ts"]) # Drop NaT
-        if df.empty: print("WARN: DataFrame de clima vacío después de localizar timezone."); return None
+    comuna_col = _pick_col(df.columns, ["comuna","municipio","localidad","ciudad","name","nombre"])
+    lat_col    = _pick_col(df.columns, ["lat","latitude","latitud","y"])
+    lon_col    = _pick_col(df.columns, ["lon","lng","long","longitude","longitud","x"])
 
-        # Asegurar columna 'comuna'
-        if 'comuna' not in df.columns:
-            print("WARN: No se encontró columna 'comuna' en archivo de clima. No se puede calcular baseline.")
-            return None
+    if not comuna_col or not lat_col or not lon_col:
+        raise ValueError(f"CSV de coordenadas debe tener comuna/lat/lon. Columnas: {list(df.columns)}")
 
-        # Seleccionar y ordenar
-        cols_to_keep = ['ts', 'comuna'] + [m for m in WEATHER_METRICS if m in df.columns]
-        df = df[cols_to_keep].sort_values(['comuna', 'ts']).reset_index(drop=True)
+    df = df.rename(columns={comuna_col:"comuna", lat_col:"lat", lon_col:"lon"}).copy()
+    for c in ["lat","lon"]:
+        if df[c].dtype == object:
+            df[c] = df[c].astype(str).str.replace(",", ".", regex=False).str.strip()
+    df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
+    df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
+    df = df.dropna(subset=["lat","lon"])
+    df = df[(df["lat"].between(-90, 90)) & (df["lon"].between(-180, 180))]
+    df = df.drop_duplicates(subset=["comuna"]).reset_index(drop=True)
+    return df
 
-        # Rellenar NaNs en métricas de clima (antes de add_time_parts)
-        metrics_present = [m for m in WEATHER_METRICS if m in df.columns]
-        for col in metrics_present:
-             df[col] = pd.to_numeric(df[col], errors='coerce')
-             # Relleno robusto por comuna
-             df[col] = df.groupby('comuna', group_keys=False)[col].apply(lambda x: x.ffill().bfill())
-        # Eliminar filas si *aún* hay NaNs después de rellenar
-        df = df.dropna(subset=metrics_present, how='any')
+def _fetch_forecast(sess, lat, lon):
+    params = dict(
+        latitude=float(lat), longitude=float(lon),
+        hourly=",".join(HOURLY_VARS),
+        forecast_days=int(FORECAST_DAYS),
+        timezone=TIMEZONE, **UNITS
+    )
+    r = sess.get(OPEN_METEO_URL, params=params)
+    r.raise_for_status()
+    js = r.json()
+    times = pd.to_datetime(js["hourly"]["time"])
+    df = pd.DataFrame({"ts": times})
+    for v in HOURLY_VARS:
+        df[v] = js["hourly"].get(v, np.nan)
+    return df
 
-
-        print(f"INFO: Clima histórico cargado y preprocesado. Filas: {len(df)}")
-        return df
-
-    except Exception as e:
-        print(f"ERROR: Falló la carga/procesamiento del clima histórico {path}. Error: {e}")
-        return None
-
-def _anomalias_vs_baseline(df_clima_actual, baselines):
-    """Calcula las anomalías (z-score) vs baseline por comuna/dow/hour."""
-    if df_clima_actual is None or df_clima_actual.empty:
-        print("INFO: No hay datos de clima actual para calcular anomalías.")
-        return pd.DataFrame() # Devuelve vacío si no hay datos
-    if baselines is None or baselines.empty:
-        print("WARN: No hay datos de baseline cargados. No se pueden calcular anomalías.")
-        return pd.DataFrame()
-
-    print("INFO: Calculando anomalías climáticas...")
-    d = add_time_parts(df_clima_actual.copy()) # Necesita 'dow', 'hour'
-
-    # Verificar columnas en 'baselines' ANTES del merge
-    expected_baseline_cols = ['comuna', 'dow', 'hour']
-    metrics_present_in_clima = [m for m in WEATHER_METRICS if m in d.columns]
-    for metric in metrics_present_in_clima:
-        expected_baseline_cols.extend([f'{metric}_median', f'{metric}_std'])
-
-    missing_baseline_cols = [col for col in expected_baseline_cols if col not in baselines.columns]
-    if missing_baseline_cols:
-        print(f"WARN: Faltan columnas esperadas en el archivo baselines: {missing_baseline_cols}")
-        # Intentar continuar solo con las columnas presentes? O devolver vacío?
-        # Decidimos continuar, pero las anomalías para esas métricas faltarán.
-        baselines_cols_to_use = [col for col in expected_baseline_cols if col in baselines.columns]
-        if len(baselines_cols_to_use) <= 3: # Si solo quedan comuna, dow, hour
-             print("ERROR: No hay columnas de métricas válidas en baselines. No se pueden calcular anomalías.")
-             return pd.DataFrame()
-        baselines = baselines[baselines_cols_to_use]
-
-
-    # --- ¡¡¡ESTA ES LA LÍNEA CORREGIDA!!! ---
-    # Merge usando los nombres de columna correctos (sin '_') del baseline
-    try:
-        merged = d.merge(baselines, on=["comuna", "dow", "hour"], how="left")
-    except KeyError as e:
-         print(f"ERROR en merge de anomalías: {e}. Columnas disponibles en clima: {d.columns}. Columnas disponibles en baseline: {baselines.columns}")
-         return pd.DataFrame()
-    except Exception as e:
-        print(f"ERROR inesperado en merge de anomalías: {e}")
-        return pd.DataFrame()
-    # --- FIN CORRECCIÓN ---
-
-
-    # Calcular anomalías solo para métricas presentes en ambos dataframes
-    anomalias = {}
-    metrics_calculables = []
-    for metric in metrics_present_in_clima:
-        median_col = f'{metric}_median'
-        std_col = f'{metric}_std'
-        if median_col in merged.columns and std_col in merged.columns:
-            # Rellenar NaNs post-merge (si comuna/dow/hour no estaba en baseline)
-            merged[median_col] = merged[median_col].fillna(merged[metric].median())
-            merged[std_col] = merged[std_col].fillna(0) # Asumir 0 std si falta baseline
-
-            anomalia_col = f'anomalia_{metric}'
-            # Evitar división por cero o std muy pequeños
-            std_safe = merged[std_col].replace(0, 1e-6)
-            merged[anomalia_col] = (merged[metric] - merged[median_col]) / std_safe
-            anomalias[anomalia_col] = merged[anomalia_col]
-            metrics_calculables.append(metric) # Marcar como calculada
+def _anomalias_vs_baseline(df_clima, baselines):
+    # baselines con columnas: metric_median, metric_std por (comuna,dow,hour)
+    d = add_time_parts(df_clima.set_index("ts"))
+    d = d.reset_index()
+    # normalizar nombres de clima
+    d = d.rename(columns={"temperature_2m":"temperatura", "rain":"lluvia"})
+    for metric in ["temperatura","precipitacion","lluvia"]:
+        if metric not in d.columns:
+            d[metric] = np.nan
+    b = baselines.copy()
+    d = d.merge(b, left_on=["comuna","dow","hour"], right_on=["comuna_","dow_","hour_"], how="left")
+    for metric in ["temperatura","precipitacion","lluvia"]:
+        med = f"{metric}_median"; std = f"{metric}_std"
+        if med in d.columns and std in d.columns:
+            d[f"z_{metric}"] = (d[metric] - d[med]) / (d[std] + 1e-6)
         else:
-            print(f"WARN: No se encontraron columnas {median_col}/{std_col} en baselines mergeados para calcular anomalía de {metric}.")
+            d[f"z_{metric}"] = 0.0
+    return d
 
+def generar_alertas(pred_calls_hourly: pd.DataFrame) -> None:
+    """
+    pred_calls_hourly: DataFrame index=ts con columna 'calls' (predicción planner) para calcular uplift adicional.
+    Si no hay CSV de coordenadas, genera alertas_clima.json vacío y sale sin error.
+    """
+    # Si no hay coords, escribe salida vacía y termina
+    coords = _read_coords()
+    if coords.empty:
+        write_json(f"{PUBLIC_DIR}/alertas_clima.json", [])
+        print("⚠️ No se encontró data/Comunas_Coordenadas.csv ni data/Comunas_Cordenadas.csv. Se generó alertas_clima.json vacío.")
+        return
 
-    # Crear DataFrame de salida solo con 'ts' y las anomalías calculadas
-    if not anomalias:
-         print("WARN: No se pudo calcular ninguna anomalía.")
-         return pd.DataFrame()
+    # Cargar artefactos
+    m = tf.keras.models.load_model(RIESGOS_MODEL, compile=False)
+    sc = joblib.load(RIESGOS_SCALER)
+    cols = _load_cols(RIESGOS_COLS)
+    baselines = joblib.load(CLIMA_BASELINES)
 
-    df_anomalias = pd.DataFrame(anomalias, index=merged.index)
-    df_anomalias['ts'] = merged['ts'] # Añadir ts para agrupación posterior
-    # Añadir comuna por si se quiere agrupar por comuna en el futuro
-    df_anomalias['comuna'] = merged['comuna']
+    sess = _client()
 
+    # 1) Descargar clima por comuna
+    registros = []
+    for _, r in coords.iterrows():
+        comuna, lat, lon = r["comuna"], r["lat"], r["lon"]
+        dfc = _fetch_forecast(sess, lat, lon)
+        dfc["comuna"] = comuna
+        registros.append(dfc)
+        time.sleep(0.2)
+    clima = pd.concat(registros, ignore_index=True)
+    clima["ts"] = pd.to_datetime(clima["ts"]).dt.tz_localize(TIMEZONE)
 
-    # Devolver DataFrame con ts, comuna y columnas de anomalia_*
-    return df_anomalias[['ts', 'comuna'] + list(anomalias.keys())]
+    # 2) Z-scores vs baseline y agregados a nivel ts (matching training columns)
+    zed = _anomalias_vs_baseline(clima, baselines)
+    n_comunas = coords["comuna"].nunique()
+    agg = zed.groupby("ts").agg({
+        "z_temperatura":["max","sum", lambda x: (x>ALERT_Z).sum()/max(1,n_comunas)],
+        "z_precipitacion":["max","sum", lambda x: (x>ALERT_Z).sum()/max(1,n_comunas)],
+        "z_lluvia":["max","sum", lambda x: (x>ALERT_Z).sum()/max(1,n_comunas)],
+    })
+    agg.columns = [
+        "anomalia_temperatura_max","anomalia_temperatura_sum","anomalia_temperatura_pct_comunas_afectadas",
+        "anomalia_precipitacion_max","anomalia_precipitacion_sum","anomalia_precipitacion_pct_comunas_afectadas",
+        "anomalia_lluvia_max","anomalia_lluvia_sum","anomalia_lluvia_pct_comunas_afectadas"
+    ]
 
+    # Asegurar DataFrame con mismas columnas y orden que el scaler/modelo
+    agg = agg.reindex(columns=cols, fill_value=0.0).astype(float)
 
-def _agregar_anomalias(df_anomalias):
-    """Agrega anomalías por timestamp para obtener features de riesgo."""
-    if df_anomalias is None or df_anomalias.empty:
-        return pd.DataFrame()
+    # 3) Probabilidad de evento alto volumen (usar DataFrame, no .values)
+    Xs = sc.transform(agg)  # conserva nombres de columnas
+    proba_evento = m.predict(Xs, verbose=0).flatten()
+    proba = pd.Series(proba_evento, index=agg.index)
 
-    print("INFO: Agregando anomalías por timestamp...")
-    anomaly_cols = [col for col in df_anomalias.columns if col.startswith('anomalia_')]
-    if not anomaly_cols:
-        print("WARN: No hay columnas de anomalías para agregar.")
-        return pd.DataFrame()
+    # 4) Construir salida por comuna con uplift vs planner
+    salida = []
+    zed["score_comuna"] = zed[["z_temperatura","z_precipitacion","z_lluvia"]].clip(lower=0).mean(axis=1)
 
-    n_comunas = df_anomalias['comuna'].nunique()
-    if n_comunas == 0:
-        print("WARN: No hay comunas en df_anomalias para agregar.")
-        return pd.DataFrame()
+    # Normalizar el índice del planner por si viene naive/otra zona
+    pred_calls_hourly = pred_calls_hourly.copy()
+    if getattr(pred_calls_hourly.index, "tz", None) is None:
+        pred_calls_hourly.index = pred_calls_hourly.index.tz_localize(TIMEZONE)
 
-    agg_functions = {
-         col: [('max', 'max'), ('sum', 'sum'), ('pct_comunas_afectadas', lambda x: (x > ANOMALIA_THRESHOLD).sum() / n_comunas)]
-         for col in anomaly_cols
-    }
+    for comuna, dfc in zed.groupby("comuna"):
+        dfc = dfc.sort_values("ts")
+        dfc["alerta"] = dfc["score_comuna"] > ALERT_Z
 
-    df_agregado = df_anomalias.groupby('ts').agg(agg_functions).reset_index()
-    # Aplanar MultiIndex de columnas correctamente
-    df_agregado.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in df_agregado.columns.values]
-    df_agregado = df_agregado.rename(columns={'ts_':'ts'}) # Renombrar columna ts
+        # Alinear proba_global y planner
+        dfc["proba_global"] = proba.reindex(dfc["ts"]).ffill().fillna(0.0).values
+        planner_series = pred_calls_hourly.reindex(dfc["ts"]).ffill().fillna(0.0)["calls"].astype(float).values
 
-    print(f"INFO: Anomalías agregadas. Filas: {len(df_agregado)}")
-    return df_agregado
+        # score normalizado y robustez numérica
+        max_s = float(max(dfc["score_comuna"].max(), ALERT_Z))
+        score_norm = (dfc["score_comuna"] / max_s).clip(0, 1).astype(float)
 
-def _generar_alertas_simples(df_agregado):
-    """Genera alertas basadas en umbrales simples de anomalía."""
-    alertas = []
-    if df_agregado is None or df_agregado.empty:
-        return alertas
+        # Uplift robusto: reemplaza NaN/inf por 0, garantiza no-negatividad
+        extra_raw = dfc["proba_global"].astype(float).values * float(UPLIFT_ALPHA) * score_norm.values * planner_series
+        extra_clean = np.nan_to_num(extra_raw, nan=0.0, posinf=0.0, neginf=0.0)
+        extra_clean = np.clip(extra_clean, 0, np.iinfo(np.int32).max)
+        dfc["extra_calls"] = np.round(extra_clean).astype(int)
 
-    print("INFO: Generando alertas simples basadas en umbrales...")
-    # Iterar sobre cada hora agregada
-    for _, row in df_agregado.iterrows():
-        ts = row['ts']
-        alertas_hora = []
-        # Revisar cada métrica de anomalía agregada
-        for col in df_agregado.columns:
-            if col.endswith('_pct_comunas_afectadas') and pd.notna(row[col]) and row[col] >= PCT_COMUNAS_THRESHOLD:
-                metrica = col.split('_')[1] # Extraer nombre de métrica (temp, precip, lluvia)
-                alertas_hora.append(f"{metrica.capitalize()} anómala ({row[col]:.1%})")
-            # Podrías añadir más reglas aquí, ej: max > X*threshold
+        # agrupar horas consecutivas en rangos por día
+        d = dfc.loc[dfc["alerta"], ["ts","extra_calls"]].copy()
+        d["fecha"] = d["ts"].dt.date
+        d["hora"] = d["ts"].dt.hour
 
-        if alertas_hora:
-            alertas.append({
-                "ts": ts.strftime("%Y-%m-%d %H:%M:%S"),
-                "alerta": f"Alto riesgo climático: {'; '.join(alertas_hora)}"
+        rangos = []
+        if not d.empty:
+            cur_date, h0, h1, vals = None, None, None, []
+            for _, r0 in d.iterrows():
+                f, h, v = r0["fecha"], int(r0["hora"]), int(r0["extra_calls"])
+                if cur_date is None:
+                    cur_date, h0, h1, vals = f, h, h, [v]; continue
+                if f == cur_date and h == h1 + 1:
+                    h1, vals = h, vals+[v]
+                else:
+                    rangos.append({
+                        "fecha": str(cur_date), "hora_inicio": h0, "hora_fin": h1,
+                        "impacto_llamadas_adicionales": int(max(sum(vals), 0))
+                    })
+                    cur_date, h0, h1, vals = f, h, h, [v]
+            rangos.append({
+                "fecha": str(cur_date), "hora_inicio": h0, "hora_fin": h1,
+                "impacto_llamadas_adicionales": int(max(sum(vals), 0))
             })
-    print(f"INFO: Generadas {len(alertas)} alertas simples.")
-    return alertas
 
-# --- Función Principal ---
-def generar_alertas(df_prediccion_llamadas):
-    """
-    Función principal para generar alertas climáticas.
-    1. Carga clima histórico y baselines.
-    2. Calcula anomalías para las horas futuras de la predicción.
-    3. Agrega anomalías por hora.
-    4. Genera alertas basadas en umbrales simples.
-    5. Escribe las alertas en un JSON.
-    """
-    print("\n--- Iniciando Generación de Alertas Climáticas ---")
-    alertas_finales = []
-    output_path = os.path.join(PUBLIC_DIR, "alertas_clima.json")
+        salida.append({"comuna": comuna, "rango_alertas": rangos})
 
-    try:
-        # 1. Cargar Baselines
-        if not os.path.exists(BASELINES_FILE):
-            print(f"WARN: Archivo de baselines no encontrado en {BASELINES_FILE}. No se pueden generar alertas.")
-            write_json(output_path, []) # Escribir JSON vacío
-            return
-        baselines = joblib.load(BASELINES_FILE)
-        # Asegurarse que las columnas del baseline estén en minúsculas y sin '_' extras al final
-        baselines.columns = [c.lower().replace('_','') if c.endswith('_') else c.lower() for c in baselines.columns]
-        # Renombrar columnas clave si es necesario (ej: si se guardaron con '_')
-        rename_map = {'comuna_':'comuna', 'dow_':'dow', 'hour_':'hour'}
-        baselines = baselines.rename(columns={k:v for k,v in rename_map.items() if k in baselines.columns})
-
-        print("INFO: Baselines climáticos cargados.")
-
-        # 2. Cargar y procesar clima histórico (para el rango futuro)
-        df_clima_hist = _load_clima_historico(CLIMA_HIST_FILE)
-        if df_clima_hist is None or df_clima_hist.empty:
-             write_json(output_path, []) # Escribir JSON vacío si no hay clima
-             return
-
-        # Filtrar clima histórico solo para el rango de la predicción
-        if df_prediccion_llamadas is None or df_prediccion_llamadas.empty:
-             print("WARN: DataFrame de predicción de llamadas vacío. No se pueden generar alertas.")
-             write_json(output_path, [])
-             return
-
-        # Asegurar índice datetime en predicción
-        if not isinstance(df_prediccion_llamadas.index, pd.DatetimeIndex):
-            try: df_prediccion_llamadas.index = pd.to_datetime(df_prediccion_llamadas.index)
-            except: print("ERROR: Índice de predicción de llamadas inválido."); write_json(output_path, []); return
-
-        start_pred = df_prediccion_llamadas.index.min()
-        end_pred = df_prediccion_llamadas.index.max()
-
-        # Filtrar clima histórico por el rango de fechas/horas de la predicción
-        df_clima_futuro = df_clima_hist[
-            (df_clima_hist['ts'] >= start_pred) & (df_clima_hist['ts'] <= end_pred)
-        ].copy()
-
-        if df_clima_futuro.empty:
-            print(f"INFO: No se encontraron datos climáticos históricos para el rango futuro ({start_pred} a {end_pred}). No se generarán alertas.")
-            write_json(output_path, [])
-            return
-
-        # 3. Calcular Anomalías
-        df_anomalias = _anomalias_vs_baseline(df_clima_futuro, baselines)
-
-        # 4. Agregar Anomalías
-        df_agregado = _agregar_anomalias(df_anomalias)
-
-        # 5. Generar Alertas (Método Simple)
-        alertas_finales = _generar_alertas_simples(df_agregado)
-
-        # (Opcional: Podrías añadir lógica para usar el modelo de riesgos aquí si lo deseas)
-
-    except FileNotFoundError as e:
-        print(f"ERROR: Archivo no encontrado durante generación de alertas: {e}")
-    except Exception as e:
-        print(f"ERROR inesperado durante la generación de alertas climáticas: {e}")
-        import traceback
-        traceback.print_exc() # Imprimir traceback para depuración
-
-    # 6. Escribir JSON de Alertas (incluso si está vacío)
-    print(f"INFO: Escribiendo {len(alertas_finales)} alertas en {output_path}")
-    write_json(output_path, alertas_finales)
-    print("--- Generación de Alertas Climáticas Finalizada ---")
+    # Ordenar: comunas con alertas primero
+    salida.sort(key=lambda x: (len(x["rango_alertas"]) == 0, x["comuna"]))
+    write_json(f"{PUBLIC_DIR}/alertas_clima.json", salida)
