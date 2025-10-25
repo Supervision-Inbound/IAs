@@ -8,27 +8,33 @@ from src.inferencia.inferencia_core import forecast_120d
 from src.inferencia.features import ensure_ts
 from src.data.loader_tmo import load_historico_tmo
 
-# Rutas (ajústalas si tu repo usa otras)
-DATA_FILE = "data/historical_data.csv"         # histórico principal (clima/feriados/otros + llamadas)
-HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"    # feriados
-TMO_HIST_FILE = "data/HISTORICO_TMO.csv"       # histórico TMO puro (para AR de TMO)
+DATA_FILE = "data/historical_data.csv"
+HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
+TMO_HIST_FILE = "data/HISTORICO_TMO.csv"
 
-TARGET_CALLS = "recibidos_nacional"            # nombre estándar dentro del flujo
+TARGET_CALLS = "recibidos_nacional"
 TARGET_TMO = "tmo_general"
 
 
+def read_csv_smart(path: str) -> pd.DataFrame:
+    """Lee CSV probando ',', luego ';' si detecta una sola columna con ';' en la primera fila."""
+    df = pd.read_csv(path, low_memory=False)
+    if df.shape[1] == 1:
+        first = str(df.iloc[0, 0])
+        if ';' in first:
+            df = pd.read_csv(path, delimiter=';', low_memory=False)
+    return df
+
+
 def parse_tmo_to_seconds(val):
-    """Permite leer TMO como 'mm:ss', 'hh:mm:ss' o float."""
     if pd.isna(val):
         return np.nan
     s = str(val).strip().replace(",", ".")
-    # num simple
     try:
         if s.replace(".", "", 1).isdigit():
             return float(s)
     except Exception:
         pass
-    # mm:ss o hh:mm:ss
     parts = s.split(":")
     try:
         if len(parts) == 3:
@@ -41,10 +47,9 @@ def parse_tmo_to_seconds(val):
 
 
 def load_holidays(file_path):
-    """Devuelve un set de fechas (YYYY-MM-DD) feriadas."""
     if not os.path.exists(file_path):
         return set()
-    dfh = pd.read_csv(file_path)
+    dfh = read_csv_smart(file_path)
     cols = [c for c in dfh.columns if "fecha" in c.lower() or "date" in c.lower()]
     if not cols:
         return set()
@@ -54,18 +59,16 @@ def load_holidays(file_path):
 
 
 def normalize_time_columns(dfh: pd.DataFrame) -> pd.DataFrame:
-    """Genera/normaliza 'ts' antes de ensure_ts (soporta muchos alias)."""
     cols_norm = {c.lower().strip(): c for c in dfh.columns}
-    # una sola columna tipo datetime/timestamp
     for alias in ("ts", "datetime", "datatime", "timestamp", "fecha_hora", "fechahora", "fecha y hora"):
         if alias in cols_norm:
             if alias != "ts":
                 dfh = dfh.rename(columns={cols_norm[alias]: "ts"})
             return dfh
-    # 'fecha' + 'hora'
+
     fecha_like = next((c for c in dfh.columns if "fecha" in c.lower()), None)
-    hora_like = next((c for c in dfh.columns if "hora" in c.lower()), None)
-    if fecha_like and hora_like and "ts" not in dfh.columns:
+    hora_like  = next((c for c in dfh.columns if "hora"  in c.lower()), None)
+    if fecha_like and hora_like and fecha_like != hora_like and "ts" not in dfh.columns:
         dfh["ts"] = pd.to_datetime(
             dfh[fecha_like].astype(str) + " " + dfh[hora_like].astype(str),
             errors="coerce", dayfirst=True
@@ -74,7 +77,6 @@ def normalize_time_columns(dfh: pd.DataFrame) -> pd.DataFrame:
 
 
 def map_calls_column(dfh: pd.DataFrame) -> pd.DataFrame:
-    """Mapea cualquier alias razonable de llamadas a TARGET_CALLS (sin renombrar nada más)."""
     if TARGET_CALLS in dfh.columns:
         return dfh
     aliases = [
@@ -92,48 +94,39 @@ def map_calls_column(dfh: pd.DataFrame) -> pd.DataFrame:
 
 
 def main(horizonte_dias: int = 120):
-    # 1) Cargar histórico principal (puede o no traer TMO; no lo usaremos como fuente)
     if not os.path.exists(DATA_FILE):
         raise FileNotFoundError(f"No se encontró {DATA_FILE}")
 
-    dfh = pd.read_csv(DATA_FILE, low_memory=False)
+    # LECTURA ROBUSTA (clave para tu caso)
+    dfh = read_csv_smart(DATA_FILE)
     dfh = normalize_time_columns(dfh)
-    dfh = ensure_ts(dfh).reset_index()  # asegura 'ts'
+    dfh = ensure_ts(dfh).reset_index()
 
-    # 2) Asegurar columna de llamadas (planner)
     dfh = map_calls_column(dfh)
 
-    # 3) Normalizar TMO si existiera accidentalmente aquí (no lo usaremos como fuente)
     if TARGET_TMO in dfh.columns:
         dfh[TARGET_TMO] = dfh[TARGET_TMO].apply(parse_tmo_to_seconds)
 
-    # 4) Cargar feriados
     holidays_set = load_holidays(HOLIDAYS_FILE)
 
-    # 5) Cargar HISTÓRICO TMO puro (única fuente de lags/MA de TMO)
     if not os.path.exists(TMO_HIST_FILE):
         raise FileNotFoundError(
-            f"No se encontró {TMO_HIST_FILE}. "
-            "El TMO autoregresivo requiere el histórico TMO puro (mismo esquema que entrenamiento)."
+            f"No se encontró {TMO_HIST_FILE}. El TMO autoregresivo requiere el histórico TMO puro."
         )
 
-    df_tmo = load_historico_tmo(TMO_HIST_FILE)  # index=ts, columnas tmo/proporciones
+    df_tmo = load_historico_tmo(TMO_HIST_FILE)
     if TARGET_TMO in df_tmo.columns:
         df_tmo[TARGET_TMO] = df_tmo[TARGET_TMO].apply(parse_tmo_to_seconds)
     df_tmo_hist_only = df_tmo.copy().reset_index()
 
-    # Importante: NO fusionamos TMO al histórico principal.
-    # El core leerá TMO solo desde df_tmo_hist_only (igual que en entrenamiento).
-
-    # 6) Inferencia (planner intacto; TMO AR con su histórico propio)
+    # OJO: no fusionamos TMO al histórico principal; el core usa solo df_tmo_hist_only
     df_hourly = forecast_120d(
-        df_hist_joined=dfh,                       # 'ts' + llamadas + exógenas
-        df_hist_tmo_only=df_tmo_hist_only,        # TMO puro (para lags/MA)
+        df_hist_joined=dfh,
+        df_hist_tmo_only=df_tmo_hist_only,
         horizon_days=horizonte_dias,
         holidays_set=holidays_set
     )
 
-    # 7) Alertas de clima (si usas ese módulo)
     try:
         from src.inferencia.alertas_clima import generar_alertas
         generar_alertas(df_hourly[["calls"]])
@@ -146,3 +139,4 @@ if __name__ == "__main__":
     ap.add_argument("--horizonte", type=int, default=120)
     args = ap.parse_args()
     main(args.horizonte)
+
