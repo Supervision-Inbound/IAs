@@ -39,10 +39,29 @@ def _series_is_holiday(idx: pd.DatetimeIndex, holidays_set: set) -> pd.Series:
         as_local = idx.tz_localize(TIMEZONE)
     else:
         as_local = idx.tz_convert(TIMEZONE)
-    # ndarray de datetime.date -> envolver en Index para usar .isin
     dates_idx = pd.Index(as_local.date, name="date")
     mask = dates_idx.isin(holidays_set)
     return pd.Series(mask.astype(int), index=idx)
+
+
+def _assert_no_climate_features(cols_tmo: list[str]):
+    """Falla explícitamente si los artefactos del TMO esperan columnas de clima/anomalías."""
+    bad_prefixes = (
+        "anomalia_",           # columnas de anomalies climáticas del entrenamiento viejo
+        "temperatura", "precipitacion", "lluvia",
+        "rain", "snow", "temp_", "wind_", "uv_", "humedad", "humidity",
+    )
+    bad_cols = [c for c in cols_tmo if any(c.startswith(p) for p in bad_prefixes)]
+    if bad_cols:
+        msg = (
+            "[ERROR] Los artefactos del TMO requieren clima/anomalías, pero has pedido un TMO 100% clima-free.\n"
+            "Columnas no permitidas detectadas en training_columns_tmo.json:\n"
+            f"  - {bad_cols[:30]}\n"
+            "Soluciones:\n"
+            "  1) Sube al release los artefactos AR del TMO entrenados SIN clima (solo calendario, llamadas como exógena y lags/MA del TMO).\n"
+            "  2) O re-entrena el TMO AR excluyendo clima y vuelve a publicar modelo_tmo.keras, scaler_tmo.pkl y training_columns_tmo.json.\n"
+        )
+        raise RuntimeError(msg)
 
 
 def forecast_120d(df_hist_joined: pd.DataFrame,
@@ -54,6 +73,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     - Planner: predice CALLS (misma lógica, mismos artefactos).
     - TMO: autoregresivo usando SOLO lags/MA de la serie TMO proveniente del archivo TMO.
       (las llamadas se usan como exógena; NUNCA alimentan el histórico TMO).
+    - No hay NINGUNA dependencia de clima.
     - Luego calcula agentes (Erlang) y escribe JSONs.
     """
 
@@ -65,6 +85,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     m_tmo = tf.keras.models.load_model(TMO_MODEL)
     sc_tmo = joblib.load(TMO_SCALER)
     cols_tmo = _load_json_cols(TMO_COLS)
+
+    # Guard: rechazar modelos TMO que esperen clima
+    _assert_no_climate_features(cols_tmo)
 
     # === 1) Histórico exógenas/llamadas ===
     hist = ensure_ts(df_hist_joined.copy()).sort_index()
@@ -79,7 +102,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     tmo_base = ensure_ts(df_hist_tmo_only.copy()).sort_index()
 
     # === 3) DF de trabajo ===
-    # Partimos de hist (exógenas + calls). Quitamos cualquier TMO accidental y unimos el TMO puro.
     dfp = hist.copy()
     if TARGET_TMO in dfp.columns:
         dfp = dfp.drop(columns=[TARGET_TMO])
@@ -92,8 +114,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         if col in tmo_base.columns and col not in dfp.columns:
             dfp = dfp.join(tmo_base[[col]], how="left")
 
-    # === 3.1) Semilla & saneamiento del TMO para evitar 0.0 por ausencia de lags ===
-    # (A) Derivar tmo_general si no vino pero hay componentes
+    # === 3.1) Semilla & saneamiento del TMO (evitar valores nulos en los lags) ===
     if TARGET_TMO not in dfp.columns:
         has_all = all(c in dfp.columns for c in [
             "tmo_comercial", "tmo_tecnico", "q_llamadas_comercial", "q_llamadas_tecnico"
@@ -109,18 +130,14 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         else:
             dfp[TARGET_TMO] = np.nan
 
-    # (B) Semilla: usa el último TMO observado; si no hay ninguno, 180s
     dfp[TARGET_TMO] = pd.to_numeric(dfp[TARGET_TMO], errors="coerce")
     if dfp[TARGET_TMO].notna().any():
         last_val = dfp[TARGET_TMO].dropna().iloc[-1]
-        dfp[TARGET_TMO] = dfp[TARGET_TMO].ffill()
+        dfp[TARGET_TMO] = dfp[TARGET_TMO].interpolate(limit_direction="both").ffill().bfill()
         if np.isnan(dfp[TARGET_TMO].iloc[-1]):
             dfp[TARGET_TMO].iloc[-1] = last_val
     else:
         dfp[TARGET_TMO] = 180.0
-
-    # (C) Eliminar vacíos en ventana de lags (interpolate/ffill/bfill)
-    dfp[TARGET_TMO] = dfp[TARGET_TMO].interpolate(limit_direction="both").ffill().bfill()
 
     # === 4) Horizonte horario ===
     last_ts = dfp.index.max()
@@ -140,11 +157,12 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         return tmp_df
 
     # === 6) Iteración: primero CALLS (planner), luego TMO (AR) ===
+    debug_once = True
     for ts in future_idx:
         if ts not in dfp.index:
             dfp.loc[ts, :] = np.nan
 
-        tmp = dfp.loc[:ts].tail(24 * 200)  # ventana razonable
+        tmp = dfp.loc[:ts].tail(24 * 200)
         tmp = _ensure_calendar(tmp)
 
         # Lags/MA de llamadas (planner)
@@ -158,24 +176,35 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         yhat_calls = max(0.0, yhat_calls)
         dfp.at[ts, TARGET_CALLS] = yhat_calls
 
-        # 6.2) TMO AR: construir lags/MA SOLO desde la serie TMO (y llamadas como exógena)
+        # 6.2) TMO AR: lags/MA SOLO desde la serie TMO (y llamadas como exógena)
         tmp.loc[ts, TARGET_CALLS] = yhat_calls
         for lag in [24, 48, 72, 168]:
             tmp[f'lag_tmo_{lag}'] = tmp[TARGET_TMO].shift(lag)
         for window in [24, 72, 168]:
             tmp[f'ma_tmo_{window}'] = tmp[TARGET_TMO].rolling(window, min_periods=1).mean()
 
-        if "precipitacion" in tmp.columns:
-            tmp["es_dia_habil"] = ((tmp["dow"].isin([0, 1, 2, 3, 4])) & (tmp["feriados"] == 0)).astype(int)
-            tmp["precipitacion_x_dia_habil"] = tmp["precipitacion"] * tmp["es_dia_habil"]
-
+        # Construir features finales TMO
         row_tmo = tmp.tail(1)
         X_tmo = dummies_and_reindex(row_tmo, cols_tmo, dummies_cols=['dow', 'month', 'hour'])
+
+        # Debug puntual: chequear faltantes/extras
+        if debug_once:
+            exp = set(cols_tmo)
+            got = set(X_tmo.columns)
+            faltan = sorted(list(exp - got))
+            extras = sorted(list(got - exp))
+            print(f"[DEBUG TMO] esperadas={len(exp)} presentes={len(got)} faltan={len(faltan)} extras={len(extras)}")
+            if faltan:
+                print("[DEBUG TMO] FALTAN (primeras 30):", faltan[:30])
+            if extras:
+                print("[DEBUG TMO] EXTRAS  (primeras 30):", extras[:30])
+            debug_once = False
+
         X_tmo_s = sc_tmo.transform(X_tmo)
 
         yhat_tmo = float(m_tmo.predict(X_tmo_s, verbose=0).flatten()[0])
-        # Piso mínimo sano para evitar 0.0 por ruido numérico extremo
-        yhat_tmo = max(10.0, yhat_tmo)
+        # Piso SUAVE solo para evitar 0.0 por ruido numérico.
+        yhat_tmo = max(1.0, yhat_tmo)
         dfp.at[ts, TARGET_TMO] = yhat_tmo
 
     # === 7) Salida: Erlang + JSONs ===
@@ -200,3 +229,4 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
                      df_hourly, "calls", "tmo_s")
 
     return df_hourly
+
