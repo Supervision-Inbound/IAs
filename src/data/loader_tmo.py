@@ -1,45 +1,71 @@
 # src/data/loader_tmo.py
 import pandas as pd
 
-# Este loader asume el esquema del entrenamiento:
-# CSV delimitado por ';' con columnas: FECHA, HORA, TMO_COMERCIAL, Q_LLAMADAS_COMERCIAL,
-#                                      TMO_TECNICO, Q_LLAMADAS_TECNICO, TMO_GENERAL,
-#                                      Q_LLAMADAS_GENERAL
-# Devuelve un DataFrame indexado por 'ts' en America/Santiago y nombres normalizados.
-
 TIMEZONE = "America/Santiago"
 
-def load_historico_tmo(path_csv: str) -> pd.DataFrame:
-    # intenta ; luego ,
+
+def _read_csv_smart(path_csv: str) -> pd.DataFrame:
+    """Lee CSV probando ';' y luego ',' si es necesario."""
     try:
         df = pd.read_csv(path_csv, delimiter=';', low_memory=False)
+        # Si quedó todo en una sola columna, probar con coma
         if df.shape[1] == 1:
             df = pd.read_csv(path_csv, delimiter=',', low_memory=False)
+        return df
     except Exception:
-        df = pd.read_csv(path_csv, delimiter=',', low_memory=False)
+        # Fallback simple
+        return pd.read_csv(path_csv, delimiter=',', low_memory=False)
 
-    # normaliza nombres a minúsculas con _
-    cols_norm = {c: c.lower().strip().replace("  "," ").replace(" ","_") for c in df.columns}
+
+def load_historico_tmo(path_csv: str) -> pd.DataFrame:
+    """
+    Carga el histórico puro de TMO (el mismo con el que se entrenó el modelo autoregresivo).
+    - Acepta separador ';' o ','.
+    - Asegura columna 'ts' (a partir de 'fecha' + 'hora').
+    - Normaliza nombres y deriva 'tmo_general' si no está (ponderación por llamadas).
+    - Calcula proporciones 'proporcion_comercial'/'proporcion_tecnica' si existe q_llamadas_general.
+    """
+    df = _read_csv_smart(path_csv)
+
+    # normalización básica de nombres
+    cols_norm = {
+        c: c.lower().strip()
+            .replace("  ", " ")
+            .replace(" ", "_")
+            .replace("é", "e")
+            .replace("á", "a")
+            .replace("í", "i")
+            .replace("ó", "o")
+            .replace("ú", "u")
+            .replace("ñ", "n")
+        for c in df.columns
+    }
     df = df.rename(columns=cols_norm)
 
-    # alias razonables
-    # fecha + hora (pueden venir como strings tipo 2024-01-01 y 08:00)
+    # detectar fecha y hora
     fecha_col = next((c for c in df.columns if "fecha" in c), None)
     hora_col  = next((c for c in df.columns if "hora"  in c), None)
     if not fecha_col or not hora_col:
-        raise ValueError("El archivo TMO requiere columnas de fecha y hora.")
+        raise ValueError("El archivo TMO requiere columnas separadas de 'fecha' y 'hora'.")
 
-    df["ts"] = pd.to_datetime(df[fecha_col].astype(str) + " " + df[hora_col].astype(str),
-                              errors="coerce", dayfirst=True)
+    # construir ts
+    df["ts"] = pd.to_datetime(
+        df[fecha_col].astype(str) + " " + df[hora_col].astype(str),
+        errors="coerce",
+        dayfirst=True
+    )
     df = df.dropna(subset=["ts"]).sort_values("ts")
-    # fija tz
-    if df["ts"].dt.tz is None:
+
+    # localización de zona horaria
+    if getattr(df["ts"].dt, "tz", None) is None:
         df["ts"] = df["ts"].dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT")
     else:
         df["ts"] = df["ts"].dt.tz_convert(TIMEZONE)
 
-    # mapeo de columnas de interés
-    rename_map = {
+    df = df.set_index("ts")
+
+    # asegurar nombres claves (si vinieron con variaciones)
+    rename_candidates = {
         "tmo_comercial": "tmo_comercial",
         "q_llamadas_comercial": "q_llamadas_comercial",
         "tmo_tecnico": "tmo_tecnico",
@@ -47,23 +73,36 @@ def load_historico_tmo(path_csv: str) -> pd.DataFrame:
         "tmo_general": "tmo_general",
         "q_llamadas_general": "q_llamadas_general",
     }
-    # Asegura que existan (si vienen con acentos o variaciones)
-    for k in list(rename_map.keys()):
-        if k not in df.columns:
-            # buscar alternativa con acentos
-            alt = next((c for c in df.columns if c.replace("é","e").replace("á","a") == k), None)
+    for tgt in list(rename_candidates.keys()):
+        if tgt not in df.columns:
+            # intentar encontrar columnas equivalentes ya normalizadas
+            alt = next((c for c in df.columns if c == tgt), None)
             if alt:
-                df = df.rename(columns={alt: k})
+                df = df.rename(columns={alt: tgt})
 
-    keep_cols = ["ts"] + [c for c in rename_map.keys() if c in df.columns]
-    df = df[keep_cols].set_index("ts")
+    # convertir numéricos relevantes
+    for c in ["tmo_comercial", "tmo_tecnico", "q_llamadas_comercial", "q_llamadas_tecnico", "q_llamadas_general", "tmo_general"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    # calcula proporciones si es posible
+    # derivar tmo_general si no existe: ponderación por llamadas contestadas
+    if "tmo_general" not in df.columns:
+        qc = df.get("q_llamadas_comercial")
+        qt = df.get("q_llamadas_tecnico")
+        tc = df.get("tmo_comercial")
+        tt = df.get("tmo_tecnico")
+        if qc is not None and qt is not None and tc is not None and tt is not None:
+            den = (qc.fillna(0) + qt.fillna(0)).replace(0, pd.NA)
+            num = (tc.fillna(0) * qc.fillna(0)) + (tt.fillna(0) * qt.fillna(0))
+            df["tmo_general"] = (num / den).astype("float64")
+
+    # proporciones opcionales (features útiles)
     if "q_llamadas_general" in df.columns:
-        qg = df["q_llamadas_general"].astype(float).replace(0, pd.NA)
+        qg = df["q_llamadas_general"].replace(0, pd.NA)
         if "q_llamadas_comercial" in df.columns:
-            df["proporcion_comercial"] = (df["q_llamadas_comercial"].astype(float) / qg).fillna(0.0)
+            df["proporcion_comercial"] = (df["q_llamadas_comercial"] / qg).fillna(0.0)
         if "q_llamadas_tecnico" in df.columns:
-            df["proporcion_tecnica"] = (df["q_llamadas_tecnico"].astype(float) / qg).fillna(0.0)
+            df["proporcion_tecnica"] = (df["q_llamadas_tecnico"] / qg).fillna(0.0)
 
     return df
+
