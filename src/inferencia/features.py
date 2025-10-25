@@ -1,101 +1,125 @@
 # src/inferencia/features.py
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 TIMEZONE = "America/Santiago"
 
+
 def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Construye columna temporal 'ts' a partir de:
-      A) 'ts' si existe (se parsea y normaliza a TZ)
-      B) 'fecha' + 'hora' (robusto, dayfirst=True y HORA estricta a HH:MM, formato fijo)
-      C) 'datatime'/'datetime' como fallback
-    - No mira ningún otro archivo (solo el CSV histórico).
-    - Normaliza TZ a America/Santiago.
-    - Devuelve df.set_index('ts').sort_index()
+    Crea 'ts' y devuelve df.set_index('ts').sort_index() normalizado a America/Santiago.
+    Acepta:
+      - 'ts' directo (cualquier capitalización)
+      - 'fecha' + 'hora' (cualquier variante razonable de nombre/caso)
+      - una sola columna tipo datetime: 'datetime','datatime','timestamp','fechahora','fecha_hora','fecha y hora'
+      - autodetección: si alguna columna se parsea mayoritariamente como datetime
     """
-    d = df.copy()
-    cols = {c.lower().strip(): c for c in d.columns}
+    if df is None or df.empty:
+        raise ValueError("DataFrame vacío.")
 
-    def has(name): return name in cols
-    def col(name): return cols[name]
+    # mapa normalizado -> original
+    norm = {c.lower().strip().replace("  ", " ").replace(" ", "_"): c for c in df.columns}
+    def has(name): return name in norm
+    def col(name): return df[norm[name]]
 
-    # A) 'ts' directo
-    if has('ts'):
-        ts = pd.to_datetime(d[col('ts')], errors='coerce', dayfirst=True, infer_datetime_format=True)
-        if getattr(ts.dt, "tz", None) is None:
-            ts = ts.dt.tz_localize(TIMEZONE, ambiguous='NaT', nonexistent='NaT')
-        else:
-            ts = ts.dt.tz_convert(TIMEZONE)
-        d['ts'] = ts
+    # 1) 'ts' directo
+    if has("ts"):
+        out = df.copy()
+        out["ts"] = pd.to_datetime(col("ts"), errors="coerce", dayfirst=True)
+        out = out.dropna(subset=["ts"]).sort_values("ts")
+        ts = out["ts"]
+        out["ts"] = ts.dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT") if ts.dt.tz is None else ts.dt.tz_convert(TIMEZONE)
+        return out.set_index("ts")
 
-    # B) 'fecha' + 'hora' (estilo original)
-    elif any(h in cols for h in ['fecha','date']) and any(h in cols for h in ['hora','hour','hora numero','hora_número','h']):
-        fecha_col = next(cols[k] for k in ['fecha','date'] if k in cols)
-        hora_col  = next(cols[k] for k in ['hora','hour','hora numero','hora_número','h'] if k in cols)
+    # 2) 'fecha' + 'hora'
+    fecha_like = next((k for k in norm.keys() if k.startswith("fecha")), None)
+    hora_like  = next((k for k in norm.keys() if k.startswith("hora")), None)
+    if fecha_like and hora_like:
+        out = df.copy()
+        out["ts"] = pd.to_datetime(
+            df[norm[fecha_like]].astype(str) + " " + df[norm[hora_like]].astype(str),
+            errors="coerce", dayfirst=True
+        )
+        out = out.dropna(subset=["ts"]).sort_values("ts")
+        ts = out["ts"]
+        out["ts"] = ts.dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT") if ts.dt.tz is None else ts.dt.tz_convert(TIMEZONE)
+        return out.set_index("ts")
 
-        # Fecha D/M/Y → dayfirst=True
-        fecha_dt = pd.to_datetime(d[fecha_col], errors='coerce', dayfirst=True)
+    # 3) candidatos single-datetime
+    singles = ["datetime","datatime","timestamp","fecha_hora","fechahora","fecha_y_hora","date_time","datehour","date_hour"]
+    for s in singles:
+        if has(s):
+            out = df.copy()
+            out["ts"] = pd.to_datetime(col(s), errors="coerce", dayfirst=True)
+            out = out.dropna(subset=["ts"]).sort_values("ts")
+            ts = out["ts"]
+            out["ts"] = ts.dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT") if ts.dt.tz is None else ts.dt.tz_convert(TIMEZONE)
+            return out.set_index("ts")
 
-        # Hora estricta HH:MM (corta basura tipo "8", "8.0", "8:0", etc.)
-        hora_str = d[hora_col].astype(str).str.strip().str.replace('.', ':', regex=False)
-        hora_str = hora_str.str.slice(0, 5)  # HH:MM
+    # 4) autodetección: columna con >80% parseable
+    rates = []
+    for c in df.columns:
+        parsed = pd.to_datetime(df[c], errors="coerce", dayfirst=True)
+        rate = 1.0 - parsed.isna().mean()
+        rates.append((c, rate))
+    rates.sort(key=lambda x: x[1], reverse=True)
+    if rates and rates[0][1] >= 0.8:
+        c = rates[0][0]
+        out = df.copy()
+        out["ts"] = pd.to_datetime(out[c], errors="coerce", dayfirst=True)
+        out = out.dropna(subset=["ts"]).sort_values("ts")
+        ts = out["ts"]
+        out["ts"] = ts.dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT") if ts.dt.tz is None else ts.dt.tz_convert(TIMEZONE)
+        return out.set_index("ts")
 
-        # Formato fijo evita ambigüedades
-        ts = pd.to_datetime(fecha_dt.astype(str) + " " + hora_str,
-                            errors='coerce', format="%Y-%m-%d %H:%M")
-        ts = ts.dt.tz_localize(TIMEZONE, ambiguous='NaT', nonexistent='NaT')
-        d['ts'] = ts
-
-    # C) 'datatime'/'datetime' fallback
-    else:
-        dt_col = None
-        for k in ['datatime', 'datetime', 'fecha_hora', 'fecha y hora']:
-            if k in cols:
-                dt_col = cols[k]
-                break
-        if dt_col is None:
-            raise ValueError("Se requiere 'ts' o ('fecha' + 'hora') o 'datatime' en el CSV.")
-        ts = pd.to_datetime(d[dt_col], errors='coerce', dayfirst=True, infer_datetime_format=True)
-        if getattr(ts.dt, "tz", None) is None:
-            ts = ts.dt.tz_localize(TIMEZONE, ambiguous='NaT', nonexistent='NaT')
-        else:
-            ts = ts.dt.tz_convert(TIMEZONE)
-        d['ts'] = ts
-
-    d = d.dropna(subset=['ts']).sort_values('ts').set_index('ts')
-    return d
+    raise ValueError(
+        "No se encontró columna temporal. Aporta 'ts', o ('fecha'+'hora'), "
+        "o una columna tipo 'datetime'/'timestamp'."
+    )
 
 
 def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
-    d = df.copy()
-    idx = d.index
-    d['dow'] = idx.dayofweek
-    d['month'] = idx.month
-    d['hour'] = idx.hour
-    d['day'] = idx.day
-    d['sin_hour'] = np.sin(2 * np.pi * d['hour'] / 24)
-    d['cos_hour'] = np.cos(2 * np.pi * d['hour'] / 24)
-    d['sin_dow']  = np.sin(2 * np.pi * d['dow'] / 7)
-    d['cos_dow']  = np.cos(2 * np.pi * d['dow'] / 7)
-    return d
+    """Agrega partes de tiempo (usa columna 'ts' si existe, si no intenta 'index')."""
+    work = df.copy()
+    if "ts" in work.columns:
+        ts = pd.to_datetime(work["ts"], errors="coerce")
+    else:
+        ts = pd.to_datetime(work.index, errors="coerce")
+        work = work.reset_index().rename(columns={"index": "ts"})
+    ts = ts.dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT") if ts.dt.tz is None else ts.dt.tz_convert(TIMEZONE)
+    work["ts"] = ts
+    work["dow"] = work["ts"].dt.dayofweek
+    work["month"] = work["ts"].dt.month
+    work["hour"] = work["ts"].dt.hour
+    work["day"] = work["ts"].dt.day
+    work["sin_hour"] = np.sin(2 * np.pi * work["hour"] / 24.0)
+    work["cos_hour"] = np.cos(2 * np.pi * work["hour"] / 24.0)
+    work["sin_dow"] = np.sin(2 * np.pi * work["dow"] / 7.0)
+    work["cos_dow"] = np.cos(2 * np.pi * work["dow"] / 7.0)
+    return work
 
 
-def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
-    d = df.copy()
-    for lag in [24, 48, 72, 168]:
-        d[f'lag_{lag}'] = d[target_col].shift(lag)
-    for window in [24, 72, 168]:
-        d[f'ma_{window}'] = d[target_col].rolling(window, min_periods=1).mean()
-    return d
+def add_lags_mas(df: pd.DataFrame, target_col: str,
+                 lags=(24, 48, 72, 168), mas=(24, 72, 168)) -> pd.DataFrame:
+    work = df.copy()
+    for lag in lags:
+        work[f"lag_{lag}"] = work[target_col].shift(lag)
+    for w in mas:
+        work[f"ma_{w}"] = work[target_col].rolling(w, min_periods=1).mean()
+    return work
 
 
-def dummies_and_reindex(df_row: pd.DataFrame, training_cols: list) -> pd.DataFrame:
-    d = df_row.copy()
-    d = pd.get_dummies(d, columns=['dow', 'month', 'hour'], drop_first=False)
-    # ensure training columns
-    for c in training_cols:
-        if c not in d.columns:
-            d[c] = 0
-    return d.reindex(columns=training_cols, fill_value=0)
+def dummies_and_reindex(df_row: pd.DataFrame, cols_expected,
+                        dummies_cols=('dow','month','hour')) -> pd.DataFrame:
+    """
+    One-hot de columnas categóricas y reindex a columnas esperadas por el modelo.
+    """
+    X = pd.get_dummies(df_row.copy(), columns=list(dummies_cols), drop_first=False)
+    # Por si el modelo esperaba columnas que no están en esta fila
+    missing = [c for c in cols_expected if c not in X.columns]
+    for c in missing:
+        X[c] = 0
+    # Y por si esta fila trae columnas que el modelo no tenía
+    X = X.reindex(columns=cols_expected, fill_value=0)
+    return X
 
