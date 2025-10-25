@@ -235,10 +235,10 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
     df = df.dropna(subset=[TARGET_CALLS]) # (v1, línea 243)
     
     # (v1, líneas 246-249)
-    # Este bucle ffills TARGET_TMO_NEW (si existe), replicando v1
-    for c in [TARGET_TMO_NEW, "feriados", "es_dia_de_pago",
+    # --- ¡¡¡ESTA ES LA LÍNEA CORREGIDA!!! ---
+    for c in [TARGET_TMO, "feriados", "es_dia_de_pago",
               "proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
-        if c in df.columns: # <-- solo TARGET_TMO_NEW será True
+        if c in df.columns: # <-- solo TARGET_TMO será True
             df[c] = df[c].ffill()
 
     last_ts = df.index.max()
