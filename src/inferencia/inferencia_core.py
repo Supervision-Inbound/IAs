@@ -112,7 +112,12 @@ def compute_holiday_factors(df_hist, holidays_set,
 
     # Límites (más permisivo en llamadas, para no cortar picos reales)
     factors_calls_by_hour = {h: float(np.clip(v, 0.10, 1.60)) for h, v in factors_calls_by_hour.items()}
-    factors_tmo_by_hour   = {h: float(np.clip(v, 0.70, 1.50)) for h, v in factors_tmo_by_hour.items()}
+    
+    # === INICIO DE CAMBIO ===
+    # TMO es más estable, usamos un clip más conservador (antes 0.70, 1.50)
+    factors_tmo_by_hour   = {h: float(np.clip(v, 0.85, 1.25)) for h, v in factors_tmo_by_hour.items()}
+    # === FIN DE CAMBIO ===
+
 
     # ---- NEW: factores del DÍA POST-FERIADO por hora ----
     dfh = dfh.copy()
@@ -515,7 +520,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         df_hourly = apply_outlier_cap(
             df_hourly, base_mad, holidays_set,
             col_calls_future="calls",
-            k_weekday=K_WEEKDAY, k_weekend=K_WEEKEND # Corregido (original tenía K_WEEKEND 2 veces)
+            k_weekday=K_WEEKDAY, k_weekend=K_WEEKEND 
         )
 
     # ===== Erlang por hora =====
