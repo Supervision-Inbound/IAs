@@ -12,7 +12,7 @@ from .utils_io import write_daily_json, write_hourly_json
 TIMEZONE = "America/Santiago"
 PUBLIC_DIR = "public"
 
-# Artefactos entrenados
+# Artefactos entrenados (planner + tmo)
 PLANNER_MODEL = "models/modelo_planner.keras"
 PLANNER_SCALER = "models/scaler_planner.pkl"
 PLANNER_COLS = "models/training_columns_planner.json"
@@ -41,13 +41,10 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
                   holidays_set: set | None = None) -> pd.DataFrame:
     """
     Genera pronóstico horario para 'horizon_days' días.
-    - Predice CALLS con planner (sin tocar su lógica).
-    - Predice TMO en forma AUTORREGRESIVA usando SOLO lags/MA provenientes del archivo de TMO.
-      (las llamadas se usan SOLO como exógenas en X_tmo; nunca como fuente del TMO histórico).
-    - Calcula agentes (Erlang) y escribe JSONs.
-
-    df_hist_joined: histórico con 'ts', llamadas (TARGET_CALLS) y exógenas (feriados, clima, etc.)
-    df_hist_tmo_only: histórico puro de TMO (mismo esquema de entrenamiento), con 'ts' y columnas TMO.
+    - Planner: predice CALLS (misma lógica, mismos artefactos).
+    - TMO: autoregresivo usando SOLO lags/MA de la serie TMO proveniente del archivo TMO.
+      (las llamadas solo son exógenas en X_tmo; nunca se usan como fuente del TMO histórico).
+    - Luego calcula agentes (Erlang) y escribe JSONs.
     """
 
     # === 0) Artefactos ===
@@ -59,30 +56,30 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     sc_tmo = joblib.load(TMO_SCALER)
     cols_tmo = _load_json_cols(TMO_COLS)
 
-    # === 1) Base histórica de exógenas/llamadas ===
+    # === 1) Histórico de exógenas/llamadas ===
     hist = ensure_ts(df_hist_joined.copy()).sort_index()
     if TARGET_CALLS not in hist.columns:
         raise ValueError(f"'{TARGET_CALLS}' no está en el histórico.")
     if "feriados" not in hist.columns:
         hist["feriados"] = 0
 
-    # === 2) Base TMO pura ===
+    # === 2) Histórico TMO puro ===
     if df_hist_tmo_only is None or df_hist_tmo_only.empty:
         raise ValueError("Se requiere df_hist_tmo_only con el histórico TMO puro (archivo TMO).")
     tmo_base = ensure_ts(df_hist_tmo_only.copy()).sort_index()
 
     # Armamos DF de trabajo con:
-    # - columnas exógenas + llamadas desde 'hist'
-    # - columna TMO únicamente desde 'tmo_base'
+    # - exógenas + llamadas desde 'hist'
+    # - TMO únicamente desde 'tmo_base'
     dfp = hist.copy()
-    # quitamos cualquier TMO que venga del histórico principal (para evitar contaminación)
+    # quitamos cualquier TMO accidental del histórico principal (para evitar contaminación)
     if TARGET_TMO in dfp.columns:
         dfp = dfp.drop(columns=[TARGET_TMO])
-    # agregamos el TMO puro (no tocar)
+    # agregamos el TMO puro (clave)
     if TARGET_TMO in tmo_base.columns:
         dfp = dfp.join(tmo_base[[TARGET_TMO]], how="left")
 
-    # proporciones (si base TMO las trae, también las anexamos; no son obligatorias)
+    # sumamos proporciones y tmos desagregados si existen (no obligatorio)
     for col in ["proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico",
                 "q_llamadas_general", "q_llamadas_comercial", "q_llamadas_tecnico"]:
         if col in tmo_base.columns and col not in dfp.columns:
@@ -92,7 +89,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     future_idx = pd.date_range(start=last_ts + pd.Timedelta(hours=1),
                                periods=horizon_days * 24, freq="H")
 
-    # === 3) Función calendario ===
+    # === 3) Calendario ===
     def _ensure_calendar(tmp_df):
         tmp_df = add_time_parts(tmp_df.reset_index().rename(columns={"index": "ts"}))
         tmp_df = tmp_df.set_index("ts")
@@ -103,18 +100,18 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
             tmp_df["feriados"] = tmp_df.get("feriados", 0).fillna(0).astype(int)
         return tmp_df
 
-    # === 4) Iteración CALLS -> TMO (TMO AR con lags del archivo TMO) ===
+    # === 4) Iteración CALLS -> TMO (AR solo con histórico TMO) ===
     for ts in future_idx:
         if ts not in dfp.index:
             dfp.loc[ts, :] = np.nan
 
-        tmp = dfp.loc[:ts].tail(24 * 200)    # ventana razonable
+        tmp = dfp.loc[:ts].tail(24 * 200)
         tmp = _ensure_calendar(tmp)
 
-        # Lags/MA de llamadas (para planner)
+        # Lags/MA de llamadas (planner)
         tmp_calls = add_lags_mas(tmp, TARGET_CALLS)
 
-        # 1) Predicción de llamadas (planner)
+        # 1) Predicción CALLS (planner)
         row_pl = tmp_calls.tail(1)
         X_pl = dummies_and_reindex(row_pl, cols_pl, dummies_cols=['dow', 'month', 'hour'])
         X_pl_s = sc_pl.transform(X_pl)
@@ -122,9 +119,8 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         yhat_calls = max(0.0, yhat_calls)
         dfp.at[ts, TARGET_CALLS] = yhat_calls
 
-        # 2) Preparar lags/MA de TMO ÚNICAMENTE desde la serie TMO en dfp (que proviene del archivo TMO)
+        # 2) TMO AR: construir lags/MA SOLO desde la serie TMO ya unida desde tmo_base
         tmp.loc[ts, TARGET_CALLS] = yhat_calls  # llamadas como exógena
-
         for lag in [24, 48, 72, 168]:
             tmp[f'lag_tmo_{lag}'] = tmp[TARGET_TMO].shift(lag)
         for window in [24, 72, 168]:
@@ -138,7 +134,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         X_tmo = dummies_and_reindex(row_tmo, cols_tmo, dummies_cols=['dow', 'month', 'hour'])
         X_tmo_s = sc_tmo.transform(X_tmo)
 
-        # 3) Predicción TMO (autoregresivo, lags de la propia serie TMO)
+        # 3) Predicción TMO (autoregresivo)
         yhat_tmo = float(m_tmo.predict(X_tmo_s, verbose=0).flatten()[0])
         yhat_tmo = max(0.0, yhat_tmo)
         dfp.at[ts, TARGET_TMO] = yhat_tmo
