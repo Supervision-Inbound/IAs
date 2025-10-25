@@ -8,123 +8,108 @@ from src.inferencia.inferencia_core import forecast_120d
 from src.inferencia.features import ensure_ts
 from src.data.loader_tmo import load_historico_tmo
 
-DATA_FILE = "data/historical_data.csv"
-HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
-TMO_HIST_FILE = "data/HISTORICO_TMO.csv"
+# Rutas de datos (ajústalas si tu repo usa otras)
+DATA_FILE = "data/historical_data.csv"         # histórico ya unido (calls + feriados + clima si aplica)
+HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"    # feriados
+TMO_HIST_FILE = "data/HISTORICO_TMO.csv"       # histórico TMO puro (para AR)
 
 TARGET_CALLS_NEW = "recibidos_nacional"
 TARGET_TMO_NEW = "tmo_general"
-TZ = "America/Santiago"
 
-def smart_read_historical(path: str) -> pd.DataFrame:
-    try:
-        df = pd.read_csv(path, low_memory=False)
-        if df.shape[1] > 1:
-            return df
-    except Exception:
-        pass
-    return pd.read_csv(path, delimiter=';', low_memory=False)
 
 def parse_tmo_to_seconds(val):
-    if pd.isna(val): return np.nan
+    """Permite leer TMO como 'mm:ss', 'hh:mm:ss' o float."""
+    if pd.isna(val):
+        return np.nan
     s = str(val).strip().replace(",", ".")
+    # Número simple
     if s.replace(".", "", 1).isdigit():
-        try: return float(s)
-        except: return np.nan
+        try:
+            return float(s)
+        except Exception:
+            return np.nan
+    # Formato mm:ss o hh:mm:ss
     parts = s.split(":")
     try:
-        if len(parts) == 3: return float(parts[0])*3600 + float(parts[1])*60 + float(parts[2])
-        if len(parts) == 2: return float(parts[0])*60 + float(parts[1])
+        if len(parts) == 3:
+            return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+        if len(parts) == 2:
+            return float(parts[0]) * 60 + float(parts[1])
         return float(s)
-    except:
+    except Exception:
         return np.nan
 
-def load_holidays(csv_path: str) -> set:
-    if not os.path.exists(csv_path): return set()
-    fer = pd.read_csv(csv_path)
-    cols_map = {c.lower().strip(): c for c in fer.columns}
-    fecha_col = None
-    for cand in ["fecha", "date", "dia", "día"]:
-        if cand in cols_map:
-            fecha_col = cols_map[cand]; break
-    if not fecha_col: return set()
-    fechas = pd.to_datetime(fer[fecha_col].astype(str), dayfirst=True, errors="coerce").dropna().dt.date
-    return set(fechas)
 
-def mark_holidays_index(dt_index, holidays_set: set) -> pd.Series:
-    tz = getattr(dt_index, "tz", None)
-    idx_dates = dt_index.tz_convert(TZ).date if tz is not None else dt_index.date
-    return pd.Series([d in holidays_set for d in idx_dates], index=dt_index, dtype=int, name="feriados")
+def load_holidays(file_path):
+    """Devuelve un set de fechas (YYYY-MM-DD) feriadas."""
+    if not os.path.exists(file_path):
+        return set()
+    dfh = pd.read_csv(file_path)
+    # Detecta posibles columnas comunes
+    cols = [c for c in dfh.columns if "fecha" in c.lower() or "date" in c.lower()]
+    if not cols:
+        return set()
+    col = cols[0]
+    s = pd.to_datetime(dfh[col], errors="coerce").dt.date
+    return set(d for d in s.dropna().tolist())
 
-def add_es_dia_de_pago(df_idx: pd.DataFrame) -> pd.Series:
-    dias = [1,2,15,16,29,30,31]
-    return pd.Series(df_idx.index.day.isin(dias).astype(int), index=df_idx.index, name="es_dia_de_pago")
 
-def main(horizonte_dias: int):
-    os.makedirs("public", exist_ok=True)
+def main(horizonte_dias: int = 120):
+    # 1) Cargar histórico principal
+    if not os.path.exists(DATA_FILE):
+        raise FileNotFoundError(f"No se encontró {DATA_FILE}")
 
-    # 1) Leer histórico principal (llamadas)
-    dfh = smart_read_historical(DATA_FILE)
-    dfh.columns = dfh.columns.str.strip()
-
+    dfh = pd.read_csv(DATA_FILE, low_memory=False)
+    dfh = ensure_ts(dfh)  # crea 'ts' y ordena
+    dfh = dfh.set_index("ts")
     if TARGET_CALLS_NEW not in dfh.columns:
-        for cand in ["recibidos_nacional", "recibidos", "total_llamadas", "llamadas"]:
-            if cand in dfh.columns:
-                dfh = dfh.rename(columns={cand: TARGET_CALLS_NEW})
-                break
+        # buscar 'recibidos' y renombrar
+        if "recibidos" in dfh.columns:
+            dfh = dfh.rename(columns={"recibidos": TARGET_CALLS_NEW})
+        else:
+            raise ValueError(f"No se encontró columna de llamadas '{TARGET_CALLS_NEW}' ni 'recibidos'.")
 
-    if TARGET_TMO_NEW not in dfh.columns:
-        tmo_source = None
-        for cand in ["tmo (segundos)", "tmo_seg", "tmo", "tmo_general"]:
-            if cand in dfh.columns:
-                tmo_source = cand; break
-        if tmo_source:
-            dfh[TARGET_TMO_NEW] = dfh[tmo_source].apply(parse_tmo_to_seconds)
+    # 2) Normalizar TMO si ya viniera en el histórico (opcional)
+    if TARGET_TMO_NEW in dfh.columns:
+        dfh[TARGET_TMO_NEW] = dfh[TARGET_TMO_NEW].apply(parse_tmo_to_seconds)
 
-    dfh = ensure_ts(dfh)
-
-    # 2) Fusionar HISTORICO_TMO.csv (alineado por ts)
-    df_tmo_hist_only = None  # <-- NUEVA LÍNEA: Variable para TMO puro
-    if os.path.exists(TMO_HIST_FILE):
-        df_tmo = load_historico_tmo(TMO_HIST_FILE)  # index ts
-        df_tmo_hist_only = df_tmo.copy()  # <-- NUEVA LÍNEA: Guardamos la data pura
-        
-        # left-join sobre dfh (mantiene las horas que usa el planner)
-        dfh = dfh.join(df_tmo, how="left")
-        # si tmo_general llegó desde TMO_HIST, úsalo como autoridad
-        if "tmo_general" in dfh.columns:
-            dfh[TARGET_TMO_NEW] = dfh["tmo_general"].combine_first(dfh[TARGET_TMO_NEW])
-
-    # 3) Derivar calendario para el histórico
+    # 3) Cargar feriados
     holidays_set = load_holidays(HOLIDAYS_FILE)
-    if "feriados" not in dfh.columns:
-        dfh["feriados"] = mark_holidays_index(dfh.index, holidays_set).values
-    dfh["feriados"] = pd.to_numeric(dfh["feriados"], errors="coerce").fillna(0).astype(int)
-    if "es_dia_de_pago" not in dfh.columns:
-        dfh["es_dia_de_pago"] = add_es_dia_de_pago(dfh).values
 
-    # 4) ffill de columnas clave para evitar NaN en el borde
-    for c in [TARGET_TMO_NEW, "feriados", "es_dia_de_pago",
-              "proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
-        if c in dfh.columns:
-            dfh[c] = dfh[c].ffill()
+    # 4) Cargar HISTÓRICO TMO puro (para AR de TMO)
+    df_tmo_hist_only = None
+    if os.path.exists(TMO_HIST_FILE):
+        # loader propio del repo – asegura schema correcto y ts index
+        df_tmo = load_historico_tmo(TMO_HIST_FILE)  # debe retornar index=ts y columnas tmo/proporciones
+        # parsear a segundos por robustez (si tu loader ya lo hace, esto no afecta)
+        if "tmo_general" in df_tmo.columns:
+            df_tmo["tmo_general"] = df_tmo["tmo_general"].apply(parse_tmo_to_seconds)
+        df_tmo_hist_only = df_tmo.copy()
 
-    # 5) Forecast (le pasamos feriados y el DF de TMO puro)
+        # merge no destructivo sobre dfh (para completar huecos)
+        dfh = dfh.join(df_tmo, how="left")
+        if TARGET_TMO_NEW in dfh.columns and "tmo_general" in dfh.columns:
+            dfh[TARGET_TMO_NEW] = dfh[TARGET_TMO_NEW].combine_first(dfh["tmo_general"])
+
+    # 5) Ejecutar inferencia (con AR de TMO) – SIN tocar la lógica de llamadas
     df_hourly = forecast_120d(
-        dfh.reset_index(),
-        # <-- INICIO BLOQUE MODIFICADO -->
-        df_tmo_hist_only.reset_index() if df_tmo_hist_only is not None else None,
-        # <-- FIN BLOQUE MODIFICADO -->
+        df_hist_joined=dfh.reset_index(),
+        df_hist_tmo_only=df_tmo_hist_only.reset_index() if df_tmo_hist_only is not None else None,
         horizon_days=horizonte_dias,
         holidays_set=holidays_set
     )
 
-    # 6) Alertas clima (usa la curva del planner)
-    from src.inferencia.alertas_clima import generar_alertas
-    generar_alertas(df_hourly[["calls"]])
+    # 6) Alertas de clima basadas en la curva del planner (si tu módulo lo usa)
+    try:
+        from src.inferencia.alertas_clima import generar_alertas
+        generar_alertas(df_hourly[["calls"]])
+    except Exception as e:
+        print(f"[WARN] Alertas de clima no generadas: {e}")
+
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--horizonte", type=int, default=120)
     args = ap.parse_args()
     main(args.horizonte)
+
