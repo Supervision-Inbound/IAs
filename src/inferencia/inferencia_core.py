@@ -149,7 +149,6 @@ def apply_holiday_adjustment(df_future, holidays_set,
     out = df_future.copy()
     mask = is_hol.values
     
-    # El ajuste de llamadas se mantiene (funciona "perfecto" según el usuario)
     out.loc[mask, col_calls_future] = np.round(out.loc[mask, col_calls_future].astype(float) * call_f[mask]).astype(int)
     
     # El ajuste de TMO se DESACTIVA (se comenta la línea) porque el modelo ya lo aprendió (v10)
@@ -252,13 +251,10 @@ def _is_payday(ts) -> int:
 # --- ¡¡¡INICIO FUNCIÓN MODIFICADA!!! ---
 def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame | None, horizon_days: int = 120, holidays_set: set | None = None):
     """
-    Versión Autorregresiva (v11 - Perfil Cíclico de Proporciones)
-    - Planner (Llamadas) iterativo usando df_hist_joined.
-    - TMO (TMO) iterativo usando df_hist_tmo_only como fuente de historia.
-    - 'es_dia_de_pago' se calcula correctamente.
-    - Ajuste de feriados de TMO (post-proc) DESACTIVADO.
-    - *** NUEVO: Las proporciones (features clave de TMO) ya no son estáticas, 
-      sino que usan un perfil cíclico (dow, hour) ***
+    Versión Autorregresiva (v12 - Amortiguación de Predicción)
+    - v11: Perfil Cíclico de Proporciones.
+    - *** NUEVO: Se aplica amortiguación (dampening) a la predicción
+      iterativa de TMO para evitar bucles de retroalimentación. ***
     """
     # === Artefactos ===
     m_pl = tf.keras.models.load_model(PLANNER_MODEL, compile=False)
@@ -293,10 +289,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         df_recent_calls = df_calls.copy()
 
     # === Base histórica TMO (Analista) ===
-    # === INICIO CAMBIO: Alinear features con Training v7 ===
-    # El script v7 NO usa tmo_comercial/tmo_tecnico como features
     tmo_proportion_features = {"proporcion_comercial", "proporcion_tecnica"}
-    # === FIN CAMBIO ===
     df_tmo = None
 
     if df_hist_tmo_only is not None and not df_hist_tmo_only.empty:
@@ -333,10 +326,8 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
     if df_recent_tmo.empty:
         df_recent_tmo = df_tmo.copy()
 
-    # === INICIO CAMBIO: Calcular Perfil de Proporciones (dow, hour) ===
-    # En lugar de una mediana estática, creamos un perfil por (dow, hour)
+    # === Perfil Cíclico de Proporciones (dow, hour) (v11) ===
     df_for_tmo_features = add_time_parts(df_tmo.ffill())
-    
     features_to_agg = list(tmo_proportion_features.intersection(df_for_tmo_features.columns))
     
     if not features_to_agg or df_for_tmo_features[features_to_agg].isnull().all().all():
@@ -355,7 +346,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         baseline_proportions = baseline_proportions.fillna(0.0)
 
     print("INFO: Perfil de proporciones TMO por (dow, hour) calculado.")
-    # === FIN CAMBIO ===
 
     # ===== Horizonte futuro =====
     last_ts = max(last_ts_calls, last_ts_tmo)
@@ -377,7 +367,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
             
     dfp_calls = df_recent_calls[cols_iter_calls].copy()
     
-    # dfp_tmo (DataFrame de predicción de TMO)
     cols_iter_tmo = [TARGET_TMO] + list(tmo_proportion_features)
     dfp_tmo = df_recent_tmo[cols_iter_tmo].copy()
 
@@ -388,7 +377,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
     if "es_dia_de_pago" not in dfp_full.columns and "es_dia_de_pago" in df_calls.columns:
         dfp_full["es_dia_de_pago"] = df_calls["es_dia_de_pago"]
 
-    # Rellenar proporciones históricas
     for c in tmo_proportion_features:
         if c not in dfp_full.columns:
             dfp_full[c] = np.nan
@@ -407,7 +395,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         tmp[TARGET_CALLS] = tmp[TARGET_CALLS].ffill()
         tmp[TARGET_TMO] = tmp[TARGET_TMO].ffill()
         
-        # === INICIO CAMBIO: Usar Perfil Cíclico para Proporciones ===
         current_dow = ts.dayofweek
         current_hour = ts.hour
         
@@ -419,7 +406,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
             fallback_props = baseline_proportions.median()
             for c in tmo_proportion_features:
                 tmp.loc[ts, c] = fallback_props[c]
-        # === FIN CAMBIO ===
         
         if "feriados" in tmp.columns:
             tmp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
@@ -427,7 +413,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         if "es_dia_de_pago" in tmp.columns:
             tmp.loc[ts, "es_dia_de_pago"] = _is_payday(ts)
 
-        # 3. Crear TODOS los features (Lags, MAs, Tiempo)
         tmp_with_feats = add_lags_mas(tmp, TARGET_CALLS) 
         
         for lag in [24, 48, 72, 168]:
@@ -437,7 +422,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         
         tmp_with_feats = add_time_parts(tmp_with_feats)
         
-        # 4. PREDECIR LLAMADAS (PLANNER)
         current_row = tmp_with_feats.tail(1)
         
         X_pl = dummies_and_reindex(current_row, cols_pl)
@@ -446,16 +430,21 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         
         dfp_full.loc[ts, TARGET_CALLS] = yhat_calls
         
-        # 5. PREDECIR TMO (ANALISTA)
         current_row.loc[ts, TARGET_CALLS] = yhat_calls 
         
         X_tmo = dummies_and_reindex(current_row, cols_tmo)
         yhat_tmo = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
         yhat_tmo = max(0.0, yhat_tmo)
         
-        dfp_full.loc[ts, TARGET_TMO] = yhat_tmo
+        # === INICIO CAMBIO: Amortiguación de Predicción (v12) ===
+        # Mezclamos la nueva predicción con el valor anterior para evitar "explosiones".
+        last_known_tmo = tmp_with_feats[TARGET_TMO].iloc[-2] # Valor de la hora anterior
+        dampening_factor = 0.80 # 80% nueva predicción, 20% valor anterior
+        yhat_tmo_dampened = (yhat_tmo * dampening_factor) + (last_known_tmo * (1.0 - dampening_factor))
         
-        # 6. Guardar feriado/dia_pago (ya hecho)
+        dfp_full.loc[ts, TARGET_TMO] = yhat_tmo_dampened
+        # === FIN CAMBIO ===
+        
         if "feriados" in dfp_full.columns:
             dfp_full.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
         if "es_dia_de_pago" in dfp_full.columns:
@@ -475,7 +464,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
             df_calls, holidays_set, col_calls=TARGET_CALLS, col_tmo="col_tmo_fake"
         )
 
-        # TMO post-proc desactivado (v10)
         f_tmo_by_hour = {int(h): 1.0 for h in range(24)}
         
         df_hourly = apply_holiday_adjustment(
