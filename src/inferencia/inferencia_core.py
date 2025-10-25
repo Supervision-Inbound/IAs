@@ -31,9 +31,8 @@ ENABLE_OUTLIER_CAP = True   # <- ponlo en False si quieres desactivarlo
 K_WEEKDAY = 6.0             # techos +K*MAD en lun-vie
 K_WEEKEND = 7.0             # techos +K*MAD en sáb-dom
 
-# === INICIO CAMBIO: Días de pago (para alinear con entrenamiento) ===
+# === Días de pago (para alinear con entrenamiento) ===
 DIAS_DE_PAGO = {1, 2, 15, 16, 29, 30, 31}
-# === FIN CAMBIO ===
 
 def _load_cols(path: str):
     with open(path, "r") as f:
@@ -60,7 +59,6 @@ def compute_holiday_factors(df_hist, holidays_set,
     """
     Calcula factores por HORA (mediana feriado vs normal) + factores globales,
     y además factores para el DÍA POST-FERIADO por hora.
-    Basado en tu forecast3m.py.
     """
     cols = []
     if col_calls in df_hist.columns:
@@ -68,14 +66,13 @@ def compute_holiday_factors(df_hist, holidays_set,
     if col_tmo in df_hist.columns:
         cols.append(col_tmo)
     
-    if not cols: # Si ninguna columna objetivo está, retornar defaults
+    if not cols: 
         factors_default = {int(h): 1.0 for h in range(24)}
         return (factors_default, factors_default, 1.0, 1.0, factors_default)
 
     dfh = add_time_parts(df_hist[cols].copy())
     dfh["is_holiday"] = _series_is_holiday(dfh.index, holidays_set)
 
-    # Medianas por hora (feriado vs normal)
     med_hol_calls = dfh[dfh["is_holiday"]].groupby("hour")[col_calls].median() if col_calls in dfh.columns else pd.Series(dtype=float)
     med_nor_calls = dfh[~dfh["is_holiday"]].groupby("hour")[col_calls].median() if col_calls in dfh.columns else pd.Series(dtype=float)
 
@@ -94,7 +91,7 @@ def compute_holiday_factors(df_hist, holidays_set,
         g_nor_calls = dfh[~dfh["is_holiday"]][col_calls].median()
         global_calls_factor = _safe_ratio(g_hol_calls, g_nor_calls, fallback=0.75)
     else:
-        global_calls_factor = 1.00 # Fallback si no hay datos de llamadas
+        global_calls_factor = 1.00
 
     factors_calls_by_hour = {
         int(h): _safe_ratio(med_hol_calls.get(h, np.nan),
@@ -113,14 +110,9 @@ def compute_holiday_factors(df_hist, holidays_set,
     else:
         factors_tmo_by_hour = {int(h): 1.0 for h in range(24)}
 
-    # Límites (más permisivo en llamadas, para no cortar picos reales)
     factors_calls_by_hour = {h: float(np.clip(v, 0.10, 1.60)) for h, v in factors_calls_by_hour.items()}
-    
-    # TMO es más estable, usamos un clip más conservador (este es el que ajustamos antes)
     factors_tmo_by_hour   = {h: float(np.clip(v, 0.85, 1.25)) for h, v in factors_tmo_by_hour.items()}
 
-
-    # ---- NEW: factores del DÍA POST-FERIADO por hora ----
     dfh = dfh.copy()
     dfh["is_post_hol"] = (~dfh["is_holiday"]) & (dfh["is_holiday"].shift(1).fillna(False))
     
@@ -129,13 +121,12 @@ def compute_holiday_factors(df_hist, holidays_set,
         post_calls_by_hour = {
             int(h): _safe_ratio(med_post_calls.get(h, np.nan),
                                 med_nor_calls.get(h, np.nan),
-                                fallback=1.05)  # leve alza por defecto
+                                fallback=1.05)
             for h in range(24)
         }
     else:
-        post_calls_by_hour = {int(h): 1.0 for h in range(24)} # Fallback
+        post_calls_by_hour = {int(h): 1.0 for h in range(24)}
 
-    # Más margen en horas punta del rebote
     post_calls_by_hour = {h: float(np.clip(v, 0.90, 1.80)) for h, v in post_calls_by_hour.items()}
 
     return (factors_calls_by_hour, factors_tmo_by_hour,
@@ -146,7 +137,7 @@ def apply_holiday_adjustment(df_future, holidays_set,
                              factors_calls_by_hour, factors_tmo_by_hour,
                              col_calls_future="calls", col_tmo_future="tmo_s"):
     """
-    Aplica factores por hora SOLO en horas/fechas feriado (idéntico al original).
+    Aplica factores por hora SOLO en horas/fechas feriado.
     """
     d = add_time_parts(df_future.copy())
     is_hol = _series_is_holiday(d.index, holidays_set)
@@ -161,10 +152,8 @@ def apply_holiday_adjustment(df_future, holidays_set,
     # El ajuste de llamadas se mantiene (funciona "perfecto" según el usuario)
     out.loc[mask, col_calls_future] = np.round(out.loc[mask, col_calls_future].astype(float) * call_f[mask]).astype(int)
     
-    # === INICIO CAMBIO ===
-    # El ajuste de TMO se DESACTIVA (se comenta la línea) porque el modelo ya lo aprendió
+    # El ajuste de TMO se DESACTIVA (se comenta la línea) porque el modelo ya lo aprendió (v10)
     # out.loc[mask, col_tmo_future]   = np.round(out.loc[mask, col_tmo_future].astype(float)   * tmo_f[mask]).astype(int)
-    # === FIN CAMBIO ===
     
     return out
 
@@ -194,40 +183,30 @@ def apply_post_holiday_adjustment(df_future, holidays_set, post_calls_by_hour,
     out = df_future.copy()
     mask = is_post.values
     
-    # El ajuste post-feriado (solo para llamadas) se mantiene
     out.loc[mask, col_calls_future] = np.round(out.loc[mask, col_calls_future].astype(float) * ph_f[mask]).astype(int)
     return out
 # ===========================================================
 
 # ========= NUEVO: Guardrail de outliers por (dow,hour) ======
 def _baseline_median_mad(df_hist, col=TARGET_CALLS):
-    """
-    Baseline robusto por (dow,hour): mediana y MAD.
-    """
     d = add_time_parts(df_hist[[col]].copy())
     g = d.groupby(["dow", "hour"])[col]
     base = g.median().rename("med").to_frame()
     mad = g.apply(lambda x: np.median(np.abs(x - np.median(x)))).rename("mad")
     base = base.join(mad)
-    # fallback si alguna combinación no tiene MAD
     if base["mad"].isna().all():
         base["mad"] = 0
     base["mad"] = base["mad"].replace(0, base["mad"].median() if not np.isnan(base["mad"].median()) else 1.0)
-    return base.reset_index()  # columnas: dow, hour, med, mad
+    return base.reset_index()
 
 
 def apply_outlier_cap(df_future, base_median_mad, holidays_set,
                       col_calls_future="calls",
                       k_weekday=K_WEEKDAY, k_weekend=K_WEEKEND):
-    """
-    Capa picos: pred <= mediana + K*MAD (K diferente en finde).
-    No actúa en feriados ni post-feriados.
-    """
     if df_future.empty:
         return df_future
 
     d = add_time_parts(df_future.copy())
-    # flags feriado/post-feriado
     prev_idx = (d.index - pd.Timedelta(days=1))
     try:
         curr_dates = d.index.tz_convert(TIMEZONE).date
@@ -239,20 +218,15 @@ def apply_outlier_cap(df_future, base_median_mad, holidays_set,
     is_prev_hol = pd.Series([dt in holidays_set for dt in prev_dates], index=d.index, dtype=bool) if holidays_set else pd.Series(False, index=d.index)
     is_post_hol = (~is_hol) & (is_prev_hol)
 
-    # merge (dow,hour) -> med, mad
     base = base_median_mad.copy()
     capped = d.merge(base, on=["dow","hour"], how="left")
     capped["mad"] = capped["mad"].fillna(capped["mad"].median() if not np.isnan(capped["mad"].median()) else 1.0)
     capped["med"] = capped["med"].fillna(capped["med"].median() if not np.isnan(capped["med"].median()) else 0.0)
 
-    # K por día de semana
     is_weekend = capped["dow"].isin([5,6]).values
     K = np.where(is_weekend, k_weekend, k_weekday).astype(float)
-
-    # techo
     upper = capped["med"].values + K * capped["mad"].values
 
-    # máscara: solo cuando NO es feriado ni post-feriado
     mask = (~is_hol.values) & (~is_post_hol.values) & (capped[col_calls_future].astype(float).values > upper)
     capped.loc[mask, col_calls_future] = np.round(upper[mask]).astype(int)
 
@@ -271,21 +245,20 @@ def _is_holiday(ts, holidays_set: set) -> int:
         d = ts.date()
     return 1 if d in holidays_set else 0
 
-# === INICIO CAMBIO: Helper para `es_dia_de_pago` ===
 def _is_payday(ts) -> int:
     return 1 if ts.day in DIAS_DE_PAGO else 0
-# === FIN CAMBIO ===
 
 
 # --- ¡¡¡INICIO FUNCIÓN MODIFICADA!!! ---
 def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame | None, horizon_days: int = 120, holidays_set: set | None = None):
     """
-    Versión Autorregresiva (v10 - Alineada 100% con Training)
+    Versión Autorregresiva (v11 - Perfil Cíclico de Proporciones)
     - Planner (Llamadas) iterativo usando df_hist_joined.
     - TMO (TMO) iterativo usando df_hist_tmo_only como fuente de historia.
     - 'es_dia_de_pago' se calcula correctamente.
-    - Ajuste de feriados de TMO (post-proc) DESACTIVADO para evitar double-dipping.
-    - Ajuste de feriados de Llamadas (post-proc) MANTENIDO.
+    - Ajuste de feriados de TMO (post-proc) DESACTIVADO.
+    - *** NUEVO: Las proporciones (features clave de TMO) ya no son estáticas, 
+      sino que usan un perfil cíclico (dow, hour) ***
     """
     # === Artefactos ===
     m_pl = tf.keras.models.load_model(PLANNER_MODEL, compile=False)
@@ -302,13 +275,10 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
     if TARGET_CALLS not in df_calls.columns:
         raise ValueError(f"Falta columna {TARGET_CALLS} en historical_data.csv")
     
-    # === INICIO CAMBIO: Calcular 'es_dia_de_pago' correctamente ===
     if "es_dia_de_pago" not in df_calls.columns:
         df_calls['day'] = df_calls.index.day
         df_calls['es_dia_de_pago'] = df_calls['day'].isin(DIAS_DE_PAGO).astype(int)
-    # === FIN CAMBIO ===
     
-    # ffill final para llamadas
     cols_to_ffill_calls = [TARGET_CALLS, "feriados", "es_dia_de_pago"]
     for c in cols_to_ffill_calls:
         if c in df_calls.columns:
@@ -323,7 +293,10 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         df_recent_calls = df_calls.copy()
 
     # === Base histórica TMO (Analista) ===
-    tmo_static_features = {"proporcion_comercial","proporcion_tecnica","tmo_comercial","tmo_tecnico"}
+    # === INICIO CAMBIO: Alinear features con Training v7 ===
+    # El script v7 NO usa tmo_comercial/tmo_tecnico como features
+    tmo_proportion_features = {"proporcion_comercial", "proporcion_tecnica"}
+    # === FIN CAMBIO ===
     df_tmo = None
 
     if df_hist_tmo_only is not None and not df_hist_tmo_only.empty:
@@ -340,11 +313,11 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
 
     if TARGET_TMO not in df_tmo.columns:
         df_tmo[TARGET_TMO] = np.nan
-    for c in tmo_static_features:
+    for c in tmo_proportion_features:
         if c not in df_tmo.columns:
             df_tmo[c] = np.nan
     
-    cols_to_ffill_tmo = [TARGET_TMO] + list(tmo_static_features)
+    cols_to_ffill_tmo = [TARGET_TMO] + list(tmo_proportion_features)
     for c in cols_to_ffill_tmo:
         if c in df_tmo.columns:
             df_tmo[c] = df_tmo[c].ffill()
@@ -360,29 +333,29 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
     if df_recent_tmo.empty:
         df_recent_tmo = df_tmo.copy()
 
-
-    # === Valores Estáticos (Mediana Robusta) ===
-    df_for_tmo_features = df_tmo.ffill() 
+    # === INICIO CAMBIO: Calcular Perfil de Proporciones (dow, hour) ===
+    # En lugar de una mediana estática, creamos un perfil por (dow, hour)
+    df_for_tmo_features = add_time_parts(df_tmo.ffill())
     
-    last_ts_features = df_for_tmo_features.index.max()
-    recent_data = df_for_tmo_features.loc[
-        (df_for_tmo_features.index >= last_ts_features - pd.Timedelta(days=14)) &
-        (df_for_tmo_features.index.hour >= 8) &
-        (df_for_tmo_features.index.hour <= 20)
-    ]
-    features_to_agg = list(tmo_static_features.intersection(df_for_tmo_features.columns))
+    features_to_agg = list(tmo_proportion_features.intersection(df_for_tmo_features.columns))
     
-    if recent_data.empty or not features_to_agg or recent_data[features_to_agg].isnull().all().all():
-        print("WARN: No se encontraron datos TMO robustos. Usando iloc[-1].")
-        last_vals_agg = df_for_tmo_features.iloc[[-1]]
+    if not features_to_agg or df_for_tmo_features[features_to_agg].isnull().all().all():
+        print("WARN: No se encontraron datos de proporciones TMO. Usando 0.0.")
+        dow_hour_index = pd.MultiIndex.from_product(
+            [range(7), range(24)], names=['dow', 'hour']
+        )
+        baseline_proportions = pd.DataFrame(0.0, index=dow_hour_index, columns=features_to_agg)
+        if 'proporcion_comercial' in baseline_proportions.columns:
+            baseline_proportions['proporcion_comercial'] = 0.5
+        if 'proporcion_tecnica' in baseline_proportions.columns:
+            baseline_proportions['proporcion_tecnica'] = 0.5
     else:
-        last_vals_agg_series = recent_data[features_to_agg].median()
-        last_vals_agg = pd.DataFrame(last_vals_agg_series).T
-        print(f"INFO: Usando valores TMO robustos (mediana 14d): {last_vals_agg.to_dict('records')[0]}")
-    
-    static_tmo_cols_dict = {}
-    for c in tmo_static_features:
-        static_tmo_cols_dict[c] = float(last_vals_agg[c].iloc[0]) if c in last_vals_agg.columns and not pd.isna(last_vals_agg[c].iloc[0]) else 0.0
+        baseline_proportions = df_for_tmo_features.groupby(['dow', 'hour'])[features_to_agg].median()
+        baseline_proportions = baseline_proportions.fillna(df_for_tmo_features[features_to_agg].median())
+        baseline_proportions = baseline_proportions.fillna(0.0)
+
+    print("INFO: Perfil de proporciones TMO por (dow, hour) calculado.")
+    # === FIN CAMBIO ===
 
     # ===== Horizonte futuro =====
     last_ts = max(last_ts_calls, last_ts_tmo)
@@ -396,7 +369,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
 
     # ===== Bucle Iterativo (Llamadas + TMO) =====
     
-    # dfp_calls (DataFrame de predicción de llamadas)
     cols_iter_calls = [TARGET_CALLS]
     if "feriados" in df_recent_calls.columns:
         cols_iter_calls.append("feriados")
@@ -406,10 +378,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
     dfp_calls = df_recent_calls[cols_iter_calls].copy()
     
     # dfp_tmo (DataFrame de predicción de TMO)
-    cols_iter_tmo = [TARGET_TMO] + list(tmo_static_features)
+    cols_iter_tmo = [TARGET_TMO] + list(tmo_proportion_features)
     dfp_tmo = df_recent_tmo[cols_iter_tmo].copy()
 
-    # dfp_full (DataFrame para la iteración)
     dfp_full = dfp_calls.join(dfp_tmo, how='outer')
 
     if "feriados" not in dfp_full.columns and "feriados" in df_calls.columns:
@@ -417,39 +388,44 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
     if "es_dia_de_pago" not in dfp_full.columns and "es_dia_de_pago" in df_calls.columns:
         dfp_full["es_dia_de_pago"] = df_calls["es_dia_de_pago"]
 
-    for c, val in static_tmo_cols_dict.items():
+    # Rellenar proporciones históricas
+    for c in tmo_proportion_features:
         if c not in dfp_full.columns:
-            dfp_full[c] = val
-        else:
-            dfp_full[c] = dfp_full[c].fillna(val)
+            dfp_full[c] = np.nan
+        dfp_full[c] = dfp_full[c].ffill()
 
-    # Rellenar los targets (ffill)
     dfp_full[TARGET_CALLS] = dfp_full[TARGET_CALLS].ffill().fillna(0.0)
     dfp_full[TARGET_TMO] = dfp_full[TARGET_TMO].ffill().fillna(0.0)
     
-    # === INICIO CAMBIO: Asegurar que 'es_dia_de_pago' esté lleno ===
     if "es_dia_de_pago" in dfp_full.columns:
          dfp_full["es_dia_de_pago"] = dfp_full["es_dia_de_pago"].ffill().fillna(0)
-    # === FIN CAMBIO ===
 
     print("Iniciando predicción iterativa (Llamadas + TMO)...")
     for ts in future_ts:
-        # 1. Crear el 'slice' temporal para esta hora (historia + 'ts' vacío)
         tmp = pd.concat([dfp_full, pd.DataFrame(index=[ts])])
         
-        # 2. ffill de los targets y features estáticas
         tmp[TARGET_CALLS] = tmp[TARGET_CALLS].ffill()
         tmp[TARGET_TMO] = tmp[TARGET_TMO].ffill()
-        for c in static_tmo_cols_dict.keys():
-            tmp.loc[ts, c] = static_tmo_cols_dict[c] # Propagar valor estático
+        
+        # === INICIO CAMBIO: Usar Perfil Cíclico para Proporciones ===
+        current_dow = ts.dayofweek
+        current_hour = ts.hour
+        
+        try:
+            props_now = baseline_proportions.loc[(current_dow, current_hour)]
+            for c in tmo_proportion_features:
+                tmp.loc[ts, c] = props_now[c]
+        except KeyError:
+            fallback_props = baseline_proportions.median()
+            for c in tmo_proportion_features:
+                tmp.loc[ts, c] = fallback_props[c]
+        # === FIN CAMBIO ===
         
         if "feriados" in tmp.columns:
             tmp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
         
-        # === INICIO CAMBIO: Calcular 'es_dia_de_pago' para el futuro ===
         if "es_dia_de_pago" in tmp.columns:
             tmp.loc[ts, "es_dia_de_pago"] = _is_payday(ts)
-        # === FIN CAMBIO ===
 
         # 3. Crear TODOS los features (Lags, MAs, Tiempo)
         tmp_with_feats = add_lags_mas(tmp, TARGET_CALLS) 
@@ -495,24 +471,18 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
     # ===== AJUSTE POR FERIADOS =====
     if holidays_set and len(holidays_set) > 0:
         
-        # Factores de Llamadas (usa la historia de llamadas: df_calls)
-        (f_calls_by_hour, f_tmo_by_hour_calc, _, _, post_calls_by_hour) = compute_holiday_factors(
+        (f_calls_by_hour, _, _, _, post_calls_by_hour) = compute_holiday_factors(
             df_calls, holidays_set, col_calls=TARGET_CALLS, col_tmo="col_tmo_fake"
         )
 
-        # === INICIO CAMBIO: Desactivar 'double-dipping' para TMO ===
-        # El modelo de TMO ya fue entrenado con 'feriados', no necesita un 2do ajuste.
-        # El modelo de LLAMADAS (que funciona "perfecto") SÍ MANTIENE su ajuste.
-        print("INFO: Ajuste TMO post-proc DESACTIVADO (modelo ya entrenado con 'feriados').")
-        f_tmo_by_hour = {int(h): 1.0 for h in range(24)} # Forzar factor a 1.0
-        # === FIN CAMBIO ===
+        # TMO post-proc desactivado (v10)
+        f_tmo_by_hour = {int(h): 1.0 for h in range(24)}
         
         df_hourly = apply_holiday_adjustment(
             df_hourly, holidays_set,
-            f_calls_by_hour, f_tmo_by_hour, # Pasamos los factores de TMO en 1.0
+            f_calls_by_hour, f_tmo_by_hour,
             col_calls_future="calls", col_tmo_future="tmo_s"
         )
-        # El ajuste post-feriado (solo para llamadas) se mantiene
         df_hourly = apply_post_holiday_adjustment(
             df_hourly, holidays_set, post_calls_by_hour,
             col_calls_future="calls"
