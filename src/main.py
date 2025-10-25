@@ -2,14 +2,12 @@
 """
 main.py
 Orquestación de la inferencia v7:
-- Llama a inferencia_core para:
-  * Cargar artefactos (planner, risk, tmo)
-  * Normalizar históricos (hosting y TMO)
-  * Construir futuro horario
-  * Predecir llamadas (planner) sin tocar su lógica original
-  * Predecir TMO AUTORREGRESIVO (desacoplado del clima)
-  * Generar JSON horaria, diaria y (opcional) alertas climáticas
-Requiere: models/*.keras, *.pkl, *.json y data/*.csv
+- Carga artefactos (planner, risk, tmo)
+- Normaliza históricos (hosting y TMO)
+- Construye futuro horario
+- Predice llamadas (planner) sin tocar su lógica original
+- Predice TMO AUTORREGRESIVO (desacoplado del clima)
+- Genera JSON horaria y diaria (y alertas si el módulo existe)
 """
 
 import os
@@ -35,7 +33,6 @@ from inferencia.inferencia_core import (
     predict_risk,
 )
 
-# Si tienes un generador de alertas aparte, úsalo:
 try:
     from alertas_clima import generate_alerts_json as gen_alertas
 except Exception:
@@ -43,38 +40,26 @@ except Exception:
 
 warnings.filterwarnings("ignore")
 
-# --- Paths base
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 DATA_DIR = os.path.join(ROOT_DIR, "data")
 MODEL_DIR = os.path.join(ROOT_DIR, "models")
 PUBLIC_DIR = os.path.join(ROOT_DIR, "public")
 
-# --- Archivos de datos
-HOSTING_FILE = os.path.join(DATA_DIR, "historical_data.csv")  # llamadas históricas
-TMO_FILE = os.path.join(DATA_DIR, "TMO_HISTORICO.csv")        # TMO histórico puro
+HOSTING_FILE = os.path.join(DATA_DIR, "historical_data.csv")
+TMO_FILE = os.path.join(DATA_DIR, "TMO_HISTORICO.csv")
 FERIADOS_FILE = os.path.join(DATA_DIR, "Feriados_Chilev2.csv")
-CLIMA_HIST_FILE = os.path.join(DATA_DIR, "historico_clima.csv")  # si no existe, se simula
+CLIMA_HIST_FILE = os.path.join(DATA_DIR, "historico_clima.csv")
 
-# --- Targets / nombres estándar entrenados
 TARGET_CALLS = "recibidos_nacional"
 TARGET_TMO = "tmo_general"
 
 
 def _cargar_feriados():
-    """
-    Devuelve un set() de fechas de feriados (date).
-    Si no se encuentra el CSV, retorna set() vacío.
-    """
     try:
         df_fer = read_data(FERIADOS_FILE)
-        # Se espera columna "Fecha" en dd-mm-YYYY
-        if "Fecha" in df_fer.columns:
-            fechas = pd.to_datetime(df_fer["Fecha"], format="%d-%m-%Y", errors="coerce").dt.date
-        else:
-            # fallback: intenta parsear primer col
-            first_col = df_fer.columns[0]
-            fechas = pd.to_datetime(df_fer[first_col], errors="coerce").dt.date
+        col = "Fecha" if "Fecha" in df_fer.columns else df_fer.columns[0]
+        fechas = pd.to_datetime(df_fer[col], format="%d-%m-%Y", errors="coerce").dt.date
         return set(fechas.dropna())
     except Exception as e:
         print(f"[Adv] No se pudo cargar feriados ({FERIADOS_FILE}): {e}. Se asume 0.")
@@ -82,28 +67,16 @@ def _cargar_feriados():
 
 
 def _map_calls_column(dfh: pd.DataFrame) -> pd.DataFrame:
-    """
-    Garantiza que exista la columna TARGET_CALLS:
-    - Si viene 'recibidos', la renombra
-    - Si viene con headers mal separados por ';', read_data ya intenta corregir
-    """
     dfh = dfh.copy()
-    cols_lower = [c.lower() for c in dfh.columns]
-    # directos
     if TARGET_CALLS in dfh.columns:
         return dfh
     if "recibidos" in dfh.columns:
-        dfh = dfh.rename(columns={"recibidos": TARGET_CALLS})
-        return dfh
-
-    # alias frecuentes
-    alias = ["llamadas", "llamadas_recibidas", "recibidos_total"]
-    for a in alias:
-        if a in cols_lower:
-            real = dfh.columns[cols_lower.index(a)]
-            dfh = dfh.rename(columns={real: TARGET_CALLS})
-            return dfh
-
+        return dfh.rename(columns={"recibidos": TARGET_CALLS})
+    lowers = [c.lower() for c in dfh.columns]
+    for a in ["llamadas", "llamadas_recibidas", "recibidos_total"]:
+        if a in lowers:
+            real = dfh.columns[lowers.index(a)]
+            return dfh.rename(columns={real: TARGET_CALLS})
     raise ValueError(
         f"No se encontró columna de llamadas '{TARGET_CALLS}' ni alias comunes. "
         f"Columnas disponibles: {list(dfh.columns)}"
@@ -111,98 +84,77 @@ def _map_calls_column(dfh: pd.DataFrame) -> pd.DataFrame:
 
 
 def _prepara_hosting(dfh_raw: pd.DataFrame, feriados_set: set) -> pd.DataFrame:
-    """
-    Normaliza el histórico de llamadas:
-    - crea/ajusta ts y TZ
-    - mapea columna de llamadas a TARGET_CALLS
-    - rellena 'feriados'
-    - agrega features temporales
-    - agrupa por ts (sum llam, max feriados)
-    """
     dfh = ensure_ts_and_tz(dfh_raw)
     dfh = _map_calls_column(dfh)
-
-    # feriados
     if "feriados" not in dfh.columns:
         dfh["feriados"] = dfh["ts"].dt.date.isin(feriados_set).astype(int)
     else:
         dfh["feriados"] = pd.to_numeric(dfh["feriados"], errors="coerce").fillna(0).astype(int)
-
-    # Agregación
     dfh = dfh.groupby("ts").agg({TARGET_CALLS: "sum", "feriados": "max"}).reset_index()
-
-    # Partes temporales (dow, month, hour, etc.)
     dfh = add_time_parts(dfh)
     return dfh
 
 
-def _prepara_tmo_hist(df_tmo: pd.DataFrame) -> pd.DataFrame:
-    """
-    Normaliza TMO_HISTORICO:
-    - crea ts y TZ
-    - asegura TARGET_TMO
-    - deriva proporciones si es posible
-    """
-    dft = ensure_ts_and_tz(df_tmo)
+def _prepara_tmo_hist(dft_raw: pd.DataFrame) -> pd.DataFrame:
+    dft = ensure_ts_and_tz(dft_raw)
     dft.columns = [c.lower().strip().replace(" ", "_") for c in dft.columns]
-
-    # nombre estándar del objetivo
     if TARGET_TMO not in dft.columns:
-        # intentar construir ponderado si están disponibles
         if all(c in dft.columns for c in ["tmo_comercial", "q_llamadas_comercial", "tmo_tecnico", "q_llamadas_tecnico", "q_llamadas_general"]):
             dft[TARGET_TMO] = (
                 dft["tmo_comercial"] * dft["q_llamadas_comercial"]
                 + dft["tmo_tecnico"] * dft["q_llamadas_tecnico"]
             ) / (dft["q_llamadas_general"] + 1e-6)
+        elif "tmo_(segundos)" in dft.columns:
+            dft[TARGET_TMO] = pd.to_numeric(dft["tmo_(segundos)"], errors="coerce")
+        elif "tmo_(segundos);hora" in dft.columns:
+            dft[TARGET_TMO] = pd.to_numeric(dft["tmo_(segundos);hora"], errors="coerce")
+        elif "tmo_(segundos);hora_numero" in dft.columns:
+            dft[TARGET_TMO] = pd.to_numeric(dft["tmo_(segundos);hora_numero"], errors="coerce")
+        elif "tmo_(segundos);tmo_general" in dft.columns:
+            dft[TARGET_TMO] = pd.to_numeric(dft["tmo_(segundos);tmo_general"], errors="coerce")
         elif "tmo (segundos)" in dft.columns:
             dft[TARGET_TMO] = pd.to_numeric(dft["tmo (segundos)"], errors="coerce")
         else:
-            raise ValueError(f"No se encontró '{TARGET_TMO}' ni columnas para ponderarlo.")
-
-    # proporciones operacionales si existen
+            raise ValueError(f"No se encontró '{TARGET_TMO}' ni columnas para construirlo.")
+    # proporciones si existen
     if "q_llamadas_comercial" in dft.columns and "q_llamadas_general" in dft.columns:
         dft["proporcion_comercial"] = dft["q_llamadas_comercial"] / (dft["q_llamadas_general"] + 1e-6)
     else:
         dft["proporcion_comercial"] = 0.0
-
     if "q_llamadas_tecnico" in dft.columns and "q_llamadas_general" in dft.columns:
         dft["proporcion_tecnica"] = dft["q_llamadas_tecnico"] / (dft["q_llamadas_general"] + 1e-6)
     else:
         dft["proporcion_tecnica"] = 0.0
-
-    # mantener columnas clave si existen
     for c in ["tmo_comercial", "tmo_tecnico"]:
         if c not in dft.columns:
             dft[c] = 0.0
-
-    # ordenar
     return dft.sort_values("ts").reset_index(drop=True)
 
 
 def main(horizonte_dias: int):
     print("=" * 70)
-    print(f"PIPELINE INFERENCIA v7  |  TZ={TZ}  |  Horizonte={horizonte_dias} días")
+    print(f"PIPELINE INFERENCIA v7 | TZ={TZ} | Horizonte={horizonte_dias} días")
     print("=" * 70)
 
     os.makedirs(PUBLIC_DIR, exist_ok=True)
 
-    # --- 1) Cargar artefactos (planner, risk, tmo)
+    # 1) Artefactos
     print("\n[Fase 1] Cargando artefactos...")
     planner = load_artifacts(MODEL_DIR, "planner")
-    risk = load_artifacts(MODEL_DIR, "risk")
+    risk = load_artifacts(MODEL_DIR, "riesgos")  # nombre entrenado: modelo_riesgos
     tmo_art = load_artifacts(MODEL_DIR, "tmo")
 
-    # Para planner, indicamos la columna objetivo estándar
+    # planner necesita saber el target de llamadas
     planner["target_calls"] = TARGET_CALLS
 
-    # Baselines clima (si existen)
+    # baselines clima (si existen)
     try:
         baselines_clima = joblib.load(os.path.join(MODEL_DIR, "baselines_clima.pkl"))
     except Exception:
         baselines_clima = pd.DataFrame()
 
-    # --- 2) Cargar históricos
-    print("\n[Fase 2] Cargando históricos (hosting y TMO)...")
+    # 2) Históricos
+    print("\n[Fase 2] Cargando históricos...")
     feriados_set = _cargar_feriados()
 
     dfh_raw = read_data(HOSTING_FILE)
@@ -215,14 +167,13 @@ def main(horizonte_dias: int):
     last_tmo_ts = df_tmo_hist["ts"].max()
     print(f"  Última hora histórica (TMO):      {last_tmo_ts}")
 
-    # --- 3) Construir futuro horario base
-    print("\n[Fase 3] Construyendo esqueleto futuro...")
+    # 3) Futuro base
+    print("\n[Fase 3] Construyendo futuro...")
     df_future_base = build_future_frame(last_ts, horizonte_dias, feriados_set)
-    print(f"  Futuro desde {df_future_base['ts'].min()} hasta {df_future_base['ts'].max()}")
+    print(f"  Futuro: {df_future_base['ts'].min()} -> {df_future_base['ts'].max()}")
 
-    # --- 4) Llamadas + Riesgo (clima solo para riesgo/alertas)
+    # 4) Llamadas + Riesgo (clima solo para riesgo)
     print("\n[Fase 4] Predicción de llamadas y riesgo...")
-    # forecast_120d: aplica clima->anomalías->riesgo y llamadas (planner)
     try:
         clima_hist_df = read_data(CLIMA_HIST_FILE)
     except FileNotFoundError:
@@ -237,12 +188,9 @@ def main(horizonte_dias: int):
         clima_hist_df=clima_hist_df,
         baselines_clima=baselines_clima,
     )
-    # Asegurar columna llamadas_hora existe
-    if "llamadas_hora" not in df_future_calls.columns:
-        df_future_calls["llamadas_hora"] = 0
 
-    # --- 5) TMO AUTORREGRESIVO (sin clima)
-    print("\n[Fase 5] Predicción de TMO (autoregresivo, desacoplado del clima)...")
+    # 5) TMO autoregresivo (sin clima)
+    print("\n[Fase 5] Predicción de TMO (autoregresivo, sin clima)...")
     df_tmo_pred = predict_tmo_autoregressive(
         df_future=df_future_calls[["ts", "dow", "month", "hour", "feriados", "llamadas_hora"]].copy(),
         df_tmo_hist=df_tmo_hist,
@@ -251,75 +199,75 @@ def main(horizonte_dias: int):
         cols_tmo=tmo_art["cols"],
         target_calls_col="llamadas_hora",
         target_tmo=TARGET_TMO,
-        force_zero_anomalias=True,   # <- CLAVE: TMO sin clima
+        force_zero_anomalias=True,
     )
-    # Merge TMO
+
+    # Merge
     df_future = pd.merge(df_future_calls, df_tmo_pred, on="ts", how="left")
     df_future["tmo_hora"] = pd.to_numeric(df_future["tmo_hora"], errors="coerce").fillna(0).clip(lower=0)
 
-    # --- 6) Agentes requeridos
-    print("\n[Fase 6] Cálculo de agentes (Erlang Aprox.)...")
-    df_future["agentes_requeridos"] = calculate_erlang_agents(
-        df_future["llamadas_hora"], df_future["tmo_hora"]
-    )
+    # 6) Erlang
+    print("\n[Fase 6] Agentes requeridos...")
+    df_future["agentes_requeridos"] = calculate_erlang_agents(df_future["llamadas_hora"], df_future["tmo_hora"])
 
-    # --- 7) JSON horaria
-    print("\n[Fase 7] Exportando JSON horaria...")
-    df_horaria = df_future[["ts", "llamadas_hora", "tmo_hora", "agentes_requeridos"]].copy()
-    df_horaria["ts"] = df_horaria["ts"].dt.strftime("%Y-%m-%d %H:%M:%S")
-    out_horaria = os.path.join(PUBLIC_DIR, "prediccion_horaria.json")
-    df_horaria.to_json(out_horaria, orient="records", indent=2, force_ascii=False)
-    print(f"  OK -> {out_horaria}")
+    # 7) JSON horaria
+    print("\n[Fase 7] JSON horaria...")
+    os.makedirs(PUBLIC_DIR, exist_ok=True)
+    out_h = os.path.join(PUBLIC_DIR, "prediccion_horaria.json")
+    df_h = df_future[["ts", "llamadas_hora", "tmo_hora", "agentes_requeridos"]].copy()
+    df_h["ts"] = df_h["ts"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    df_h.to_json(out_h, orient="records", indent=2, force_ascii=False)
+    print(f"  OK -> {out_h}")
 
-    # --- 8) JSON diaria (TMO ponderado por llamadas)
-    print("\n[Fase 8] Exportando JSON diario (ponderado por llamadas)...")
+    # 8) JSON diaria ponderada
+    print("\n[Fase 8] JSON diaria ponderada...")
     tmp = df_future.copy()
     tmp["fecha"] = tmp["ts"].dt.date
     tmp["tmo_num"] = tmp["tmo_hora"] * tmp["llamadas_hora"]
-    df_d = tmp.groupby("fecha").agg(
+    d = tmp.groupby("fecha").agg(
         llamadas_totales_dia=("llamadas_hora", "sum"),
         tmo_ponderado_num=("tmo_num", "sum"),
     )
-    df_d["tmo_promedio_diario"] = df_d["tmo_ponderado_num"] / (df_d["llamadas_totales_dia"] + 1e-6)
+    d["tmo_promedio_diario"] = d["tmo_ponderado_num"] / (d["llamadas_totales_dia"] + 1e-6)
     # fallback si hay días con 0 llamadas
-    if (df_d["llamadas_totales_dia"] == 0).any():
+    if (d["llamadas_totales_dia"] == 0).any():
         tmo_simple = tmp.groupby("fecha")["tmo_hora"].mean().fillna(0)
-        df_d["tmo_promedio_diario"] = df_d["tmo_promedio_diario"].where(
-            df_d["llamadas_totales_dia"] > 0, tmo_simple
-        ).fillna(0)
-    df_d = df_d.reset_index()[["fecha", "llamadas_totales_dia", "tmo_promedio_diario"]]
-    df_d["fecha"] = df_d["fecha"].astype(str)
-    df_d["llamadas_totales_dia"] = df_d["llamadas_totales_dia"].astype(int)
+        d["tmo_promedio_diario"] = d["tmo_promedio_diario"].where(d["llamadas_totales_dia"] > 0, tmo_simple).fillna(0)
+    d = d.reset_index()[["fecha", "llamadas_totales_dia", "tmo_promedio_diario"]]
+    d["fecha"] = d["fecha"].astype(str)
+    d["llamadas_totales_dia"] = d["llamadas_totales_dia"].astype(int)
+    out_d = os.path.join(PUBLIC_DIR, "Predicion_daria.json")
+    d.to_json(out_d, orient="records", indent=2, force_ascii=False)
+    print(f"  OK -> {out_d}")
 
-    out_diaria = os.path.join(PUBLIC_DIR, "Predicion_daria.json")
-    df_d.to_json(out_diaria, orient="records", indent=2, force_ascii=False)
-    print(f"  OK -> {out_diaria}")
-
-    # --- 9) Alertas (opcional)
+    # 9) Alertas (si el módulo existe)
     if gen_alertas is not None:
-        print("\n[Fase 9] Generando alertas climáticas...")
-        # Para generar alertas necesitamos anomalías por comuna + proba de riesgo
-        # Reutilizamos simulación/processing ya hecho:
+        print("\n[Fase 9] Alertas climáticas...")
+        # Reusar simulación para sacar anomalías por comuna
         df_weather_future = simulate_future_weather(
             clima_hist_df if isinstance(clima_hist_df, pd.DataFrame) else pd.DataFrame(),
             df_future_base["ts"].min(),
             df_future_base["ts"].max(),
         )
-        df_agg_anoms, df_per_comuna_anoms = process_future_climate(
+        df_agg_anoms = process_future_climate(
             df_weather_future, baselines_clima if isinstance(baselines_clima, pd.DataFrame) else pd.DataFrame()
         )
+        # riesgo por ts
         df_tmp = pd.merge(df_future_base[["ts"]], df_agg_anoms, on="ts", how="left").fillna(0)
-        # riesgo
         df_tmp["risk_proba"] = predict_risk(df_tmp, risk["model"], risk["scaler"], risk["cols"])
         df_risk_out = df_tmp[["ts", "risk_proba"]].copy()
 
-        alertas = gen_alertas(df_per_comuna_anoms, df_risk_out, proba_threshold=0.5, impact_factor=100)
-        out_alertas = os.path.join(PUBLIC_DIR, "alertas_climaticas.json")
-        with open(out_alertas, "w", encoding="utf-8") as f:
-            json.dump(alertas, f, indent=2, ensure_ascii=False)
-        print(f"  OK -> {out_alertas}")
+        # si tu función gen_alertas requiere por-comuna, adapta aquí
+        try:
+            alertas = gen_alertas(df_weather_future, df_risk_out, proba_threshold=0.5, impact_factor=100)
+            out_alert = os.path.join(PUBLIC_DIR, "alertas_climaticas.json")
+            with open(out_alert, "w", encoding="utf-8") as f:
+                json.dump(alertas, f, indent=2, ensure_ascii=False)
+            print(f"  OK -> {out_alert}")
+        except Exception as e:
+            print(f"  [Adv] No se pudieron generar alertas: {e}")
     else:
-        print("\n[Fase 9] Alertas climáticas deshabilitadas (módulo no disponible).")
+        print("\n[Fase 9] Alertas deshabilitadas (módulo no disponible).")
 
     print("\n" + "=" * 70)
     print("PIPELINE COMPLETADO CON ÉXITO")
@@ -327,8 +275,9 @@ def main(horizonte_dias: int):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Inferencia IA: llamadas y TMO autoregresivo.")
-    parser.add_argument("--horizonte", type=int, default=120, help="Horizonte en días (futuro).")
+    parser = argparse.ArgumentParser(description="Inferencia IA: llamadas + TMO autoregresivo.")
+    parser.add_argument("--horizonte", type=int, default=120, help="Horizonte en días.")
     args = parser.parse_args()
     main(args.horizonte)
+
 
