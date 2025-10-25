@@ -30,9 +30,20 @@ def _load_json_cols(path):
         return json.load(f)
 
 
-def _series_is_holiday(idx, holidays_set):
-    as_local = idx.tz_localize("UTC").tz_convert(TIMEZONE) if idx.tz is None else idx.tz_convert(TIMEZONE)
-    return as_local.date.astype("object").isin(holidays_set).astype(int)
+def _series_is_holiday(idx: pd.DatetimeIndex, holidays_set: set) -> pd.Series:
+    """
+    Devuelve una Series (0/1) indexada por idx indicando si cada fecha es feriado.
+    Soporta idx con o sin tz; normaliza todo a TIMEZONE.
+    """
+    # Asegurar tz en TIMEZONE
+    if idx.tz is None:
+        as_local = idx.tz_localize(TIMEZONE)
+    else:
+        as_local = idx.tz_convert(TIMEZONE)
+    # DatetimeIndex.date -> ndarray de datetime.date; envolver en Index para usar .isin
+    dates_idx = pd.Index(as_local.date, name="date")
+    mask = dates_idx.isin(holidays_set)  # boolean np.ndarray-like
+    return pd.Series(mask.astype(int), index=idx)
 
 
 def forecast_120d(df_hist_joined: pd.DataFrame,
@@ -43,7 +54,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     Genera pronóstico horario para 'horizon_days' días.
     - Planner: predice CALLS (misma lógica, mismos artefactos).
     - TMO: autoregresivo usando SOLO lags/MA de la serie TMO proveniente del archivo TMO.
-      (las llamadas solo son exógenas en X_tmo; nunca se usan como fuente del TMO histórico).
+      (las llamadas solo se usan como exógena; NUNCA alimentan el histórico TMO).
     - Luego calcula agentes (Erlang) y escribe JSONs.
     """
 
@@ -86,8 +97,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
             dfp = dfp.join(tmo_base[[col]], how="left")
 
     last_ts = dfp.index.max()
+    # 'h' en vez de 'H' para evitar FutureWarning
     future_idx = pd.date_range(start=last_ts + pd.Timedelta(hours=1),
-                               periods=horizon_days * 24, freq="H")
+                               periods=horizon_days * 24, freq="h")
 
     # === 3) Calendario ===
     def _ensure_calendar(tmp_df):
@@ -95,7 +107,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         tmp_df = tmp_df.set_index("ts")
         tmp_df["es_dia_de_pago"] = tmp_df["day"].isin([1, 2, 15, 16, 29, 30, 31]).astype(int)
         if holidays_set:
-            tmp_df["feriados"] = _series_is_holiday(tmp_df.index, holidays_set)
+            fer = _series_is_holiday(tmp_df.index, holidays_set)
+            # Reindex por seguridad (aunque ya coincide)
+            tmp_df["feriados"] = fer.reindex(tmp_df.index, fill_value=0).astype(int)
         else:
             tmp_df["feriados"] = tmp_df.get("feriados", 0).fillna(0).astype(int)
         return tmp_df
