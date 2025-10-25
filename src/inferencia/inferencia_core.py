@@ -251,10 +251,10 @@ def _is_payday(ts) -> int:
 # --- ¡¡¡INICIO FUNCIÓN MODIFICADA!!! ---
 def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame | None, horizon_days: int = 120, holidays_set: set | None = None):
     """
-    Versión Autorregresiva (v12 - Amortiguación de Predicción)
+    Versión Autorregresiva (v13 - Anclaje Estacional)
     - v11: Perfil Cíclico de Proporciones.
-    - *** NUEVO: Se aplica amortiguación (dampening) a la predicción
-      iterativa de TMO para evitar bucles de retroalimentación. ***
+    - *** NUEVO: Se aplica Anclaje Estacional (lag 168) a la predicción
+      iterativa de TMO para evitar la deriva (drift). ***
     """
     # === Artefactos ===
     m_pl = tf.keras.models.load_model(PLANNER_MODEL, compile=False)
@@ -436,13 +436,27 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         yhat_tmo = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
         yhat_tmo = max(0.0, yhat_tmo)
         
-        # === INICIO CAMBIO: Amortiguación de Predicción (v12) ===
-        # Mezclamos la nueva predicción con el valor anterior para evitar "explosiones".
-        last_known_tmo = tmp_with_feats[TARGET_TMO].iloc[-2] # Valor de la hora anterior
-        dampening_factor = 0.80 # 80% nueva predicción, 20% valor anterior
-        yhat_tmo_dampened = (yhat_tmo * dampening_factor) + (last_known_tmo * (1.0 - dampening_factor))
+        # === INICIO CAMBIO: Anclaje Estacional (v13) ===
+        # El TMO se "escapa" (deriva) si solo se ancla a la hora anterior (v12).
+        # Lo anclamos a su valor de la semana pasada (lag 168), que es la feature autorregresiva más fuerte.
         
-        dfp_full.loc[ts, TARGET_TMO] = yhat_tmo_dampened
+        try:
+            # Obtenemos el TMO de la semana pasada (ya calculado para el modelo)
+            # Usamos .iloc[0] porque current_row es un DataFrame de 1 fila
+            tmo_lag_168 = current_row['tmo_lag_168'].iloc[0]
+            if pd.isna(tmo_lag_168) or tmo_lag_168 == 0:
+                # Fallback si el lag 168 no existe o es 0 (ej. al inicio del bucle)
+                tmo_lag_168 = tmp_with_feats[TARGET_TMO].iloc[-2] # Usar la hora anterior
+        except (KeyError, IndexError):
+            # Fallback si la columna no existe o iloc[-2] falla
+            tmo_lag_168 = yhat_tmo # Usar la predicción pura si no hay ancla
+
+        # Factor de estabilización: 50% predicción, 50% ancla estacional
+        stabilization_factor = 0.5 
+        
+        yhat_tmo_stabilized = (yhat_tmo * stabilization_factor) + (tmo_lag_168 * (1.0 - stabilization_factor))
+        
+        dfp_full.loc[ts, TARGET_TMO] = yhat_tmo_stabilized
         # === FIN CAMBIO ===
         
         if "feriados" in dfp_full.columns:
