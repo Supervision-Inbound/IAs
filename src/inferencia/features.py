@@ -98,3 +98,4 @@ def dummies_and_reindex(df_row: pd.DataFrame, training_cols: list) -> pd.DataFra
         if c not in d.columns:
             d[c] = 0
     return d.reindex(columns=training_cols, fill_value=0)
+
