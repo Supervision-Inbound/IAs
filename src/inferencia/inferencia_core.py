@@ -251,13 +251,13 @@ def _is_payday(ts) -> int:
 # --- ¡¡¡INICIO FUNCIÓN MODIFICADA!!! ---
 def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame | None, horizon_days: int = 120, holidays_set: set | None = None):
     """
-    Versión (v14 - Lógica Prototipo v7)
-    - INCONVENIENTE: El TMO usaba un bucle autorregresivo (v10-v13)
-      que no coincidía con el prototipo v_main (vectorizado).
+    Versión (v14.1 - Lógica Prototipo v7 + Fix TypeError)
     - SOLUCIÓN:
         - 1. LLAMADAS: Se mantiene el bucle autorregresivo (funciona bien).
         - 2. TMO: Se elimina el bucle. Se usa la lógica VECTORIZADA
           del prototipo 'v_main' Fase 6.
+    - FIX (v14.1): Se cambia 'tmo_static_features' de set a list
+      para evitar TypeError en pandas.
     """
     # === Artefactos ===
     m_pl = tf.keras.models.load_model(PLANNER_MODEL, compile=False)
@@ -292,21 +292,29 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         df_recent_calls = df_calls.copy()
 
     # === Base histórica TMO (Analista) ===
-    # === INICIO CAMBIO: Replicar features ESTÁTICAS de v_main (Fase 6) ===
-    # El prototipo v_main usaba estas 4 columnas como estáticas.
-    tmo_static_features = {"proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"}
+    
+    # === INICIO CAMBIO (v14.1): Corregir TypeError cambiando set {} por list [] ===
+    tmo_static_features = ["proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]
     # === FIN CAMBIO ===
     
     df_tmo = None
+    is_fallback = False # Flag para saber si usamos la data mala
 
     if df_hist_tmo_only is not None and not df_hist_tmo_only.empty:
         try:
             df_tmo = ensure_ts(df_hist_tmo_only)
             # --- Carga de features TMO desde el loader ---
-            if "proporcion_comercial" not in df_tmo.columns and "loader_tmo.py" in globals().get('__file__', ''):
-                print("INFO: Cargando proporciones desde loader_tmo...")
-                from src.data.loader_tmo import calcular_proporciones_tmo
-                df_tmo = calcular_proporciones_tmo(df_tmo)
+            # (Asumimos que loader_tmo.py ya se ejecutó en main.py y las columnas están)
+            if "proporcion_comercial" not in df_tmo.columns:
+                 print("WARN: 'proporcion_comercial' no encontrada en df_tmo_hist_only. Calculando...")
+                 # Lógica de fallback del loader
+                 if 'q_llamadas_comercial' in df_tmo.columns and 'q_llamadas_general' in df_tmo.columns:
+                     df_tmo['proporcion_comercial'] = df_tmo['q_llamadas_comercial'] / (df_tmo['q_llamadas_general'] + 1e-6)
+                     df_tmo['proporcion_tecnica'] = df_tmo['q_llamadas_tecnico'] / (df_tmo['q_llamadas_general'] + 1e-6)
+                 else:
+                     df_tmo['proporcion_comercial'] = 0.0
+                     df_tmo['proporcion_tecnica'] = 0.0
+
             print("INFO: Usando HISTORICO_TMO.csv como base para TMO.")
         except Exception as e:
             print(f"WARN: Error procesando df_hist_tmo_only ({e}), usando fallback).")
@@ -314,17 +322,22 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
 
     if df_tmo is None:
         print("WARN: HISTORICO_TMO.csv no disponible. Usando fallback de TMO desde historical_data.csv")
-        df_tmo = df_calls.copy() 
+        df_tmo = df_calls.copy() # Usar la base de llamadas como fallback
+        is_fallback = True
 
     # Asegurar que existan todas las columnas TMO
     if TARGET_TMO not in df_tmo.columns:
         df_tmo[TARGET_TMO] = np.nan
     for c in tmo_static_features:
         if c not in df_tmo.columns:
+            # Si es el fallback, es posible que no tenga estas columnas
+            # (ej. tmo_comercial no está en historical_data.csv)
+            if is_fallback:
+                print(f"WARN: Columna estática '{c}' no encontrada en fallback. Rellenando con 0.")
             df_tmo[c] = np.nan
     
     # ffill de la historia TMO
-    cols_to_ffill_tmo = [TARGET_TMO] + list(tmo_static_features)
+    cols_to_ffill_tmo = [TARGET_TMO] + tmo_static_features
     for c in cols_to_ffill_tmo:
         if c in df_tmo.columns:
             df_tmo[c] = df_tmo[c].ffill()
@@ -334,15 +347,21 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         print("WARN: No hay datos históricos de TMO. Usando 0.0 para features estáticas.")
         last_tmo_data_static = {c: 0.0 for c in tmo_static_features}
     else:
-        last_tmo_data_static = df_tmo.iloc[-1][tmo_static_features].to_dict()
-        # Reemplazar NaNs por 0
-        for k, v in last_tmo_data_static.items():
-            if pd.isna(v):
-                last_tmo_data_static[k] = 0.0
+        # === INICIO CAMBIO (v14.1): Asegurar que todas las columnas existan antes de indexar ===
+        # El fallback (df_calls) podría no tener 'tmo_comercial', etc.
+        valid_static_features = [c for c in tmo_static_features if c in df_tmo.columns]
+        last_tmo_data_static = df_tmo.iloc[-1][valid_static_features].to_dict()
+        
+        # Añadir las que faltaron (si alguna) con 0.0
+        for c in tmo_static_features:
+            if c not in last_tmo_data_static:
+                last_tmo_data_static[c] = 0.0
+            elif pd.isna(last_tmo_data_static[c]):
+                last_tmo_data_static[c] = 0.0
+        # === FIN CAMBIO ===
                 
     print(f"INFO: Usando valores TMO estáticos (prototipo v_main): {last_tmo_data_static}")
             
-    # Asegurar 'feriados' en df_tmo para el cálculo de factores (aunque no se use)
     if "feriados" not in df_tmo.columns and holidays_set:
          df_tmo["feriados"] = _series_is_holiday(df_tmo.index, holidays_set).astype(int)
     elif "feriados" not in df_tmo.columns:
@@ -368,7 +387,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
             
     dfp_calls = df_recent_calls[cols_iter_calls].copy()
     
-    # dfp_full solo contiene historia de llamadas
     dfp_full = dfp_calls.copy()
     
     dfp_full[TARGET_CALLS] = dfp_full[TARGET_CALLS].ffill().fillna(0.0)
@@ -377,10 +395,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
 
     print("Iniciando predicción iterativa (SÓLO Llamadas)...")
     for ts in future_ts:
-        # 1. Crear el 'slice' temporal para esta hora
         tmp = pd.concat([dfp_full, pd.DataFrame(index=[ts])])
-        
-        # 2. ffill de los targets
         tmp[TARGET_CALLS] = tmp[TARGET_CALLS].ffill()
         
         if "feriados" in tmp.columns:
@@ -389,22 +404,17 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         if "es_dia_de_pago" in tmp.columns:
             tmp.loc[ts, "es_dia_de_pago"] = _is_payday(ts)
 
-        # 3. Crear features (Lags, MAs, Tiempo)
-        # (SOLO se calculan lags de LLAMADAS)
         tmp_with_feats = add_lags_mas(tmp, TARGET_CALLS) 
         tmp_with_feats = add_time_parts(tmp_with_feats)
         
-        # 4. PREDECIR LLAMADAS (PLANNER)
         current_row = tmp_with_feats.tail(1)
         
         X_pl = dummies_and_reindex(current_row, cols_pl)
         yhat_calls = float(m_pl.predict(sc_pl.transform(X_pl), verbose=0).flatten()[0])
         yhat_calls = max(0.0, yhat_calls)
         
-        # Guardar predicción de llamadas en dfp_full
         dfp_full.loc[ts, TARGET_CALLS] = yhat_calls
         
-        # 6. Guardar feriado/dia_pago (ya hecho)
         if "feriados" in dfp_full.columns:
             dfp_full.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
         if "es_dia_de_pago" in dfp_full.columns:
@@ -416,29 +426,18 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
     
     print("Iniciando predicción vectorizada (TMO)...")
     
-    # 1. Crear el DataFrame futuro con las predicciones de llamadas
     df_future = dfp_full.loc[future_ts].copy()
-    
-    # 2. Añadir features de tiempo (necesarias para dummies)
     df_future_tmo_features = add_time_parts(df_future)
-    
-    # 3. Renombrar la predicción de llamadas a la feature que espera el modelo TMO
     df_future_tmo_features[TARGET_CALLS] = df_future_tmo_features[TARGET_CALLS]
 
-    # 4. Añadir las features ESTÁTICAS (lógica v_main)
     for col_name, static_value in last_tmo_data_static.items():
         df_future_tmo_features[col_name] = static_value
         
-    # 5. Dummies y Reindex
-    # Esto creará las columnas autorregresivas (lag_tmo_...) y las rellenará con 0
-    # COINCIDIENDO EXACTAMENTE con la lógica del prototipo v_main.
     X_tmo = dummies_and_reindex(df_future_tmo_features, cols_tmo)
     
-    # 6. Escalar y Predecir (en un solo paso)
     X_tmo_s = sc_tmo.transform(X_tmo)
     yhat_tmo_vector = m_tmo.predict(X_tmo_s, verbose=0).flatten()
 
-    # 7. Guardar en el DataFrame final
     df_hourly = pd.DataFrame(index=future_ts)
     df_hourly["calls"] = np.round(df_future[TARGET_CALLS]).astype(int)
     df_hourly["tmo_s"] = np.round(np.clip(yhat_tmo_vector, 0, None)).astype(int)
