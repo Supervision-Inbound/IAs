@@ -1,283 +1,257 @@
-# -*- coding: utf-8 -*-
-"""
-main.py
-Orquestación de la inferencia v7:
-- Carga artefactos (planner, risk, tmo)
-- Normaliza históricos (hosting y TMO)
-- Construye futuro horario
-- Predice llamadas (planner) sin tocar su lógica original
-- Predice TMO AUTORREGRESIVO (desacoplado del clima)
-- Genera JSON horaria y diaria (y alertas si el módulo existe)
-"""
-
-import os
-import json
+# src/main.py (Original v1)
 import argparse
-import warnings
-import pandas as pd
+import os
 import numpy as np
-import joblib
+import pandas as pd
 
-from inferencia.inferencia_core import (
-    TZ,
-    read_data,
-    ensure_ts_and_tz,
-    add_time_parts,
-    build_future_frame,
-    forecast_120d,
-    load_artifacts,
-    predict_tmo_autoregressive,
-    calculate_erlang_agents,
-    simulate_future_weather,
-    process_future_climate,
-    predict_risk,
-)
+from src.inferencia.inferencia_core import forecast_120d # <-- Llama a la función única
+from src.inferencia.features import ensure_ts
+from src.data.loader_tmo import load_historico_tmo
 
-try:
-    from alertas_clima import generate_alerts_json as gen_alertas
-except Exception:
-    gen_alertas = None
+DATA_FILE = "data/historical_data.csv"
+HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
+TMO_HIST_FILE = "data/HISTORICO_TMO.csv"
 
-warnings.filterwarnings("ignore")
+TARGET_CALLS_NEW = "recibidos_nacional"
+TARGET_TMO_NEW = "tmo_general"
+TZ = "America/Santiago"
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.dirname(BASE_DIR)
-DATA_DIR = os.path.join(ROOT_DIR, "data")
-MODEL_DIR = os.path.join(ROOT_DIR, "models")
-PUBLIC_DIR = os.path.join(ROOT_DIR, "public")
-
-HOSTING_FILE = os.path.join(DATA_DIR, "historical_data.csv")
-TMO_FILE = os.path.join(DATA_DIR, "TMO_HISTORICO.csv")
-FERIADOS_FILE = os.path.join(DATA_DIR, "Feriados_Chilev2.csv")
-CLIMA_HIST_FILE = os.path.join(DATA_DIR, "historico_clima.csv")
-
-TARGET_CALLS = "recibidos_nacional"
-TARGET_TMO = "tmo_general"
-
-
-def _cargar_feriados():
+def smart_read_historical(path: str) -> pd.DataFrame:
     try:
-        df_fer = read_data(FERIADOS_FILE)
-        col = "Fecha" if "Fecha" in df_fer.columns else df_fer.columns[0]
-        fechas = pd.to_datetime(df_fer[col], format="%d-%m-%Y", errors="coerce").dt.date
-        return set(fechas.dropna())
+        df = pd.read_csv(path, low_memory=False)
+        if df.shape[1] > 1:
+            return df
+    except Exception:
+        pass
+    # Añadir manejo explícito para delimitador ;
+    try:
+        return pd.read_csv(path, delimiter=';', low_memory=False)
     except Exception as e:
-        print(f"[Adv] No se pudo cargar feriados ({FERIADOS_FILE}): {e}. Se asume 0.")
+        print(f"ERROR: No se pudo leer {path} con ',' ni ';'. Error: {e}")
+        raise
+
+def parse_tmo_to_seconds(val):
+    if pd.isna(val): return np.nan
+    s = str(val).strip().replace(",", ".")
+    if ':' in s: # Manejar formato mm:ss o hh:mm:ss
+        parts = s.split(":")
+        try:
+            if len(parts) == 3: return float(parts[0])*3600 + float(parts[1])*60 + float(parts[2])
+            if len(parts) == 2: return float(parts[0])*60 + float(parts[1])
+        except ValueError: return np.nan # Si las partes no son números
+    try: # Intentar convertir directamente si no hay ':'
+        return float(s)
+    except ValueError: return np.nan
+
+def load_holidays(csv_path: str) -> set:
+    if not os.path.exists(csv_path):
+        print(f"WARN: Archivo de feriados no encontrado en {csv_path}")
+        return set()
+    try: # Intentar leer con ambos delimitadores
+        try: fer = pd.read_csv(csv_path)
+        except (pd.errors.ParserError, UnicodeDecodeError): fer = pd.read_csv(csv_path, delimiter=';')
+    except Exception as e:
+        print(f"WARN: No se pudo leer el archivo de feriados {csv_path}. Error: {e}")
         return set()
 
+    cols_map = {c.lower().strip(): c for c in fer.columns}
+    fecha_col = None
+    for cand in ["fecha", "date", "dia", "día"]:
+        if cand in cols_map:
+            fecha_col = cols_map[cand]; break
+    if not fecha_col:
+        print(f"WARN: No se encontró columna de fecha en {csv_path}.")
+        return set()
+    try:
+        # Usar dayfirst=True y errors='coerce'
+        fechas = pd.to_datetime(fer[fecha_col].astype(str), dayfirst=True, errors="coerce").dropna().dt.date
+    except Exception as e:
+        print(f"WARN: Error parseando fechas de feriados: {e}")
+        return set()
+    print(f"INFO: Cargados {len(fechas)} feriados desde {csv_path}")
+    return set(fechas)
 
-def _map_calls_column(dfh: pd.DataFrame) -> pd.DataFrame:
-    dfh = dfh.copy()
-    if TARGET_CALLS in dfh.columns:
-        return dfh
-    if "recibidos" in dfh.columns:
-        return dfh.rename(columns={"recibidos": TARGET_CALLS})
-    lowers = [c.lower() for c in dfh.columns]
-    for a in ["llamadas", "llamadas_recibidas", "recibidos_total"]:
-        if a in lowers:
-            real = dfh.columns[lowers.index(a)]
-            return dfh.rename(columns={real: TARGET_CALLS})
-    raise ValueError(
-        f"No se encontró columna de llamadas '{TARGET_CALLS}' ni alias comunes. "
-        f"Columnas disponibles: {list(dfh.columns)}"
-    )
+def mark_holidays_index(dt_index, holidays_set: set) -> pd.Series:
+     # Asegurar índice datetime
+    if not isinstance(dt_index, pd.DatetimeIndex):
+        try: dt_index = pd.to_datetime(dt_index)
+        except Exception: return pd.Series(0, index=dt_index, dtype=int, name="feriados") # Fallback
 
+    tz = getattr(dt_index, "tz", None)
+    try:
+        idx_dates = dt_index.tz_convert(TZ).date if tz is not None else dt_index.date
+    except Exception: # Fallback si falla conversión TZ
+        idx_dates = dt_index.date
 
-def _prepara_hosting(dfh_raw: pd.DataFrame, feriados_set: set) -> pd.DataFrame:
-    dfh = ensure_ts_and_tz(dfh_raw)
-    dfh = _map_calls_column(dfh)
-    if "feriados" not in dfh.columns:
-        dfh["feriados"] = dfh["ts"].dt.date.isin(feriados_set).astype(int)
-    else:
-        dfh["feriados"] = pd.to_numeric(dfh["feriados"], errors="coerce").fillna(0).astype(int)
-    dfh = dfh.groupby("ts").agg({TARGET_CALLS: "sum", "feriados": "max"}).reset_index()
-    dfh = add_time_parts(dfh)
-    return dfh
+    return pd.Series([d in holidays_set for d in idx_dates], index=dt_index, dtype=int, name="feriados")
 
+def add_es_dia_de_pago(df_idx: pd.DataFrame | pd.Index) -> pd.Series:
+     # Asegurar índice datetime
+    idx = df_idx if isinstance(df_idx, pd.Index) else df_idx.index
+    if not isinstance(idx, pd.DatetimeIndex):
+        try: idx = pd.to_datetime(idx)
+        except Exception: return pd.Series(0, index=idx, dtype=int, name="es_dia_de_pago") # Fallback
 
-def _prepara_tmo_hist(dft_raw: pd.DataFrame) -> pd.DataFrame:
-    dft = ensure_ts_and_tz(dft_raw)
-    dft.columns = [c.lower().strip().replace(" ", "_") for c in dft.columns]
-    if TARGET_TMO not in dft.columns:
-        if all(c in dft.columns for c in ["tmo_comercial", "q_llamadas_comercial", "tmo_tecnico", "q_llamadas_tecnico", "q_llamadas_general"]):
-            dft[TARGET_TMO] = (
-                dft["tmo_comercial"] * dft["q_llamadas_comercial"]
-                + dft["tmo_tecnico"] * dft["q_llamadas_tecnico"]
-            ) / (dft["q_llamadas_general"] + 1e-6)
-        elif "tmo_(segundos)" in dft.columns:
-            dft[TARGET_TMO] = pd.to_numeric(dft["tmo_(segundos)"], errors="coerce")
-        elif "tmo_(segundos);hora" in dft.columns:
-            dft[TARGET_TMO] = pd.to_numeric(dft["tmo_(segundos);hora"], errors="coerce")
-        elif "tmo_(segundos);hora_numero" in dft.columns:
-            dft[TARGET_TMO] = pd.to_numeric(dft["tmo_(segundos);hora_numero"], errors="coerce")
-        elif "tmo_(segundos);tmo_general" in dft.columns:
-            dft[TARGET_TMO] = pd.to_numeric(dft["tmo_(segundos);tmo_general"], errors="coerce")
-        elif "tmo (segundos)" in dft.columns:
-            dft[TARGET_TMO] = pd.to_numeric(dft["tmo (segundos)"], errors="coerce")
-        else:
-            raise ValueError(f"No se encontró '{TARGET_TMO}' ni columnas para construirlo.")
-    # proporciones si existen
-    if "q_llamadas_comercial" in dft.columns and "q_llamadas_general" in dft.columns:
-        dft["proporcion_comercial"] = dft["q_llamadas_comercial"] / (dft["q_llamadas_general"] + 1e-6)
-    else:
-        dft["proporcion_comercial"] = 0.0
-    if "q_llamadas_tecnico" in dft.columns and "q_llamadas_general" in dft.columns:
-        dft["proporcion_tecnica"] = dft["q_llamadas_tecnico"] / (dft["q_llamadas_general"] + 1e-6)
-    else:
-        dft["proporcion_tecnica"] = 0.0
-    for c in ["tmo_comercial", "tmo_tecnico"]:
-        if c not in dft.columns:
-            dft[c] = 0.0
-    return dft.sort_values("ts").reset_index(drop=True)
-
+    dias = [1,2,15,16,29,30,31]
+    return pd.Series(idx.day.isin(dias).astype(int), index=idx, name="es_dia_de_pago")
 
 def main(horizonte_dias: int):
-    print("=" * 70)
-    print(f"PIPELINE INFERENCIA v7 | TZ={TZ} | Horizonte={horizonte_dias} días")
-    print("=" * 70)
+    os.makedirs("public", exist_ok=True)
+    print(f"INFO: Directorio 'public' asegurado.")
 
-    os.makedirs(PUBLIC_DIR, exist_ok=True)
+    # 1) Leer histórico principal (llamadas)
+    print(f"INFO: Cargando datos históricos desde {DATA_FILE}...")
+    dfh = smart_read_historical(DATA_FILE)
+    dfh.columns = dfh.columns.str.strip()
+    print(f"INFO: {DATA_FILE} cargado. Columnas: {list(dfh.columns)}")
 
-    # 1) Artefactos
-    print("\n[Fase 1] Cargando artefactos...")
-    planner = load_artifacts(MODEL_DIR, "planner")
-    risk = load_artifacts(MODEL_DIR, "riesgos")  # nombre entrenado: modelo_riesgos
-    tmo_art = load_artifacts(MODEL_DIR, "tmo")
-
-    # planner necesita saber el target de llamadas
-    planner["target_calls"] = TARGET_CALLS
-
-    # baselines clima (si existen)
-    try:
-        baselines_clima = joblib.load(os.path.join(MODEL_DIR, "baselines_clima.pkl"))
-    except Exception:
-        baselines_clima = pd.DataFrame()
-
-    # 2) Históricos
-    print("\n[Fase 2] Cargando históricos...")
-    feriados_set = _cargar_feriados()
-
-    dfh_raw = read_data(HOSTING_FILE)
-    df_hosting_proc = _prepara_hosting(dfh_raw, feriados_set)
-    last_ts = df_hosting_proc["ts"].max()
-    print(f"  Última hora histórica (llamadas): {last_ts}")
-
-    dft_raw = read_data(TMO_FILE)
-    df_tmo_hist = _prepara_tmo_hist(dft_raw)
-    last_tmo_ts = df_tmo_hist["ts"].max()
-    print(f"  Última hora histórica (TMO):      {last_tmo_ts}")
-
-    # 3) Futuro base
-    print("\n[Fase 3] Construyendo futuro...")
-    df_future_base = build_future_frame(last_ts, horizonte_dias, feriados_set)
-    print(f"  Futuro: {df_future_base['ts'].min()} -> {df_future_base['ts'].max()}")
-
-    # 4) Llamadas + Riesgo (clima solo para riesgo)
-    print("\n[Fase 4] Predicción de llamadas y riesgo...")
-    try:
-        clima_hist_df = read_data(CLIMA_HIST_FILE)
-    except FileNotFoundError:
-        clima_hist_df = pd.DataFrame()
-
-    df_future_calls = forecast_120d(
-        df_hosting_proc=df_hosting_proc,
-        df_future_base=df_future_base,
-        holidays_set=feriados_set,
-        planner_artifacts=planner,
-        risk_artifacts={"model": risk["model"], "scaler": risk["scaler"], "cols": risk["cols"]},
-        clima_hist_df=clima_hist_df,
-        baselines_clima=baselines_clima,
-    )
-
-    # 5) TMO autoregresivo (sin clima)
-    print("\n[Fase 5] Predicción de TMO (autoregresivo, sin clima)...")
-    df_tmo_pred = predict_tmo_autoregressive(
-        df_future=df_future_calls[["ts", "dow", "month", "hour", "feriados", "llamadas_hora"]].copy(),
-        df_tmo_hist=df_tmo_hist,
-        model=tmo_art["model"],
-        scaler=tmo_art["scaler"],
-        cols_tmo=tmo_art["cols"],
-        target_calls_col="llamadas_hora",
-        target_tmo=TARGET_TMO,
-        force_zero_anomalias=True,
-    )
-
-    # Merge
-    df_future = pd.merge(df_future_calls, df_tmo_pred, on="ts", how="left")
-    df_future["tmo_hora"] = pd.to_numeric(df_future["tmo_hora"], errors="coerce").fillna(0).clip(lower=0)
-
-    # 6) Erlang
-    print("\n[Fase 6] Agentes requeridos...")
-    df_future["agentes_requeridos"] = calculate_erlang_agents(df_future["llamadas_hora"], df_future["tmo_hora"])
-
-    # 7) JSON horaria
-    print("\n[Fase 7] JSON horaria...")
-    os.makedirs(PUBLIC_DIR, exist_ok=True)
-    out_h = os.path.join(PUBLIC_DIR, "prediccion_horaria.json")
-    df_h = df_future[["ts", "llamadas_hora", "tmo_hora", "agentes_requeridos"]].copy()
-    df_h["ts"] = df_h["ts"].dt.strftime("%Y-%m-%d %H:%M:%S")
-    df_h.to_json(out_h, orient="records", indent=2, force_ascii=False)
-    print(f"  OK -> {out_h}")
-
-    # 8) JSON diaria ponderada
-    print("\n[Fase 8] JSON diaria ponderada...")
-    tmp = df_future.copy()
-    tmp["fecha"] = tmp["ts"].dt.date
-    tmp["tmo_num"] = tmp["tmo_hora"] * tmp["llamadas_hora"]
-    d = tmp.groupby("fecha").agg(
-        llamadas_totales_dia=("llamadas_hora", "sum"),
-        tmo_ponderado_num=("tmo_num", "sum"),
-    )
-    d["tmo_promedio_diario"] = d["tmo_ponderado_num"] / (d["llamadas_totales_dia"] + 1e-6)
-    # fallback si hay días con 0 llamadas
-    if (d["llamadas_totales_dia"] == 0).any():
-        tmo_simple = tmp.groupby("fecha")["tmo_hora"].mean().fillna(0)
-        d["tmo_promedio_diario"] = d["tmo_promedio_diario"].where(d["llamadas_totales_dia"] > 0, tmo_simple).fillna(0)
-    d = d.reset_index()[["fecha", "llamadas_totales_dia", "tmo_promedio_diario"]]
-    d["fecha"] = d["fecha"].astype(str)
-    d["llamadas_totales_dia"] = d["llamadas_totales_dia"].astype(int)
-    out_d = os.path.join(PUBLIC_DIR, "Predicion_daria.json")
-    d.to_json(out_d, orient="records", indent=2, force_ascii=False)
-    print(f"  OK -> {out_d}")
-
-    # 9) Alertas (si el módulo existe)
-    if gen_alertas is not None:
-        print("\n[Fase 9] Alertas climáticas...")
-        # Reusar simulación para sacar anomalías por comuna
-        df_weather_future = simulate_future_weather(
-            clima_hist_df if isinstance(clima_hist_df, pd.DataFrame) else pd.DataFrame(),
-            df_future_base["ts"].min(),
-            df_future_base["ts"].max(),
-        )
-        df_agg_anoms = process_future_climate(
-            df_weather_future, baselines_clima if isinstance(baselines_clima, pd.DataFrame) else pd.DataFrame()
-        )
-        # riesgo por ts
-        df_tmp = pd.merge(df_future_base[["ts"]], df_agg_anoms, on="ts", how="left").fillna(0)
-        df_tmp["risk_proba"] = predict_risk(df_tmp, risk["model"], risk["scaler"], risk["cols"])
-        df_risk_out = df_tmp[["ts", "risk_proba"]].copy()
-
-        # si tu función gen_alertas requiere por-comuna, adapta aquí
-        try:
-            alertas = gen_alertas(df_weather_future, df_risk_out, proba_threshold=0.5, impact_factor=100)
-            out_alert = os.path.join(PUBLIC_DIR, "alertas_climaticas.json")
-            with open(out_alert, "w", encoding="utf-8") as f:
-                json.dump(alertas, f, indent=2, ensure_ascii=False)
-            print(f"  OK -> {out_alert}")
-        except Exception as e:
-            print(f"  [Adv] No se pudieron generar alertas: {e}")
+    target_calls_found = False
+    if TARGET_CALLS_NEW in dfh.columns:
+        target_calls_found = True
     else:
-        print("\n[Fase 9] Alertas deshabilitadas (módulo no disponible).")
+        for cand in ["recibidos_nacional", "recibidos", "total_llamadas", "llamadas"]:
+            if cand in dfh.columns:
+                print(f"INFO: Renombrando columna '{cand}' a '{TARGET_CALLS_NEW}'.")
+                dfh = dfh.rename(columns={cand: TARGET_CALLS_NEW})
+                target_calls_found = True
+                break
+    if not target_calls_found:
+         raise ValueError(f"ERROR: No se encontró la columna target de llamadas ('{TARGET_CALLS_NEW}' o alternativas) en {DATA_FILE}")
 
-    print("\n" + "=" * 70)
-    print("PIPELINE COMPLETADO CON ÉXITO")
-    print("=" * 70)
+    target_tmo_found = False
+    if TARGET_TMO_NEW in dfh.columns:
+         print(f"INFO: Columna TMO '{TARGET_TMO_NEW}' encontrada en {DATA_FILE}. Parseando a segundos...")
+         dfh[TARGET_TMO_NEW] = dfh[TARGET_TMO_NEW].apply(parse_tmo_to_seconds)
+         target_tmo_found = True
+    else:
+        tmo_source = None
+        for cand in ["tmo (segundos)", "tmo_seg", "tmo", "tmo_general"]:
+            if cand in dfh.columns:
+                tmo_source = cand; break
+        if tmo_source:
+            print(f"INFO: Usando columna '{tmo_source}' como TMO desde {DATA_FILE} y renombrando a '{TARGET_TMO_NEW}'.")
+            dfh[TARGET_TMO_NEW] = dfh[tmo_source].apply(parse_tmo_to_seconds)
+            if tmo_source != TARGET_TMO_NEW:
+                 # Intentar eliminar la columna original si existe
+                 try: dfh = dfh.drop(columns=[tmo_source])
+                 except KeyError: pass # Ignorar si ya no existe
+            target_tmo_found = True
+
+    try:
+        dfh = ensure_ts(dfh)
+        print(f"INFO: Timestamps procesados para {DATA_FILE}. Rango: {dfh.index.min()} a {dfh.index.max()}")
+    except ValueError as e:
+        print(f"ERROR: Falló ensure_ts para {DATA_FILE}: {e}")
+        return # Detener si no se pueden procesar timestamps
+
+    # 2) Fusionar HISTORICO_TMO.csv (alineado por ts)
+    df_tmo_hist_only = None
+    if os.path.exists(TMO_HIST_FILE):
+        try:
+            print(f"INFO: Cargando y uniendo {TMO_HIST_FILE}...")
+            df_tmo = load_historico_tmo(TMO_HIST_FILE)
+            df_tmo_hist_only = df_tmo.copy() # Guardar copia para pasar a forecast_120d (v1)
+
+            # Asegurarse que TARGET_TMO_NEW exista antes de combine_first
+            if TARGET_TMO_NEW not in dfh.columns:
+                 dfh[TARGET_TMO_NEW] = np.nan
+
+            dfh = dfh.join(df_tmo, how="left", lsuffix='_hist', rsuffix='_tmo') # Añadir sufijos para evitar colisiones
+
+            # Priorizar TMO de TMO_HISTORICO si existe
+            tmo_col_from_tmo_hist = TARGET_TMO_NEW # Nombre estándar esperado de load_historico_tmo
+            if tmo_col_from_tmo_hist in df_tmo.columns: # Verificar si load_historico_tmo lo devolvió
+                 # El join crea _tmo si ya existía en dfh
+                 tmo_col_joined = tmo_col_from_tmo_hist + '_tmo' if tmo_col_from_tmo_hist+'_hist' in dfh.columns else tmo_col_from_tmo_hist
+                 if tmo_col_joined in dfh.columns:
+                     print(f"INFO: Priorizando TMO desde {TMO_HIST_FILE} (columna '{tmo_col_joined}').")
+                     # La columna original (si existía) podría ser '_hist'
+                     tmo_col_original = tmo_col_from_tmo_hist + '_hist' if tmo_col_joined != tmo_col_from_tmo_hist else tmo_col_from_tmo_hist
+                     dfh[TARGET_TMO_NEW] = dfh[tmo_col_joined].combine_first(dfh[tmo_col_original])
+                     target_tmo_found = True # Marcar como encontrado/priorizado
+                     # Limpiar columnas auxiliares del join
+                     cols_to_drop = [c for c in [tmo_col_joined, tmo_col_original] if c != TARGET_TMO_NEW and c in dfh.columns]
+                     if cols_to_drop: dfh = dfh.drop(columns=cols_to_drop)
+                 else:
+                      print(f"WARN: Se esperaba la columna '{tmo_col_joined}' después del join con TMO_HIST, pero no se encontró.")
+            elif target_tmo_found:
+                 print(f"INFO: TMO ya presente desde {DATA_FILE}, no se sobrescribió.")
+            else:
+                 print(f"WARN: No se encontró TMO en {TMO_HIST_FILE} para priorizar.")
+
+        except Exception as e:
+            print(f"WARN: No se pudo cargar o unir {TMO_HIST_FILE}. Error: {e}")
+    else:
+         print(f"INFO: Archivo {TMO_HIST_FILE} no encontrado, se usarán datos de TMO (si existen) de {DATA_FILE}.")
+
+
+    # Asegurar que la columna TMO exista después de todos los intentos, antes de ffill
+    if not target_tmo_found:
+        print(f"WARN: No se encontró columna TMO ('{TARGET_TMO_NEW}' o alternativas) en ningún archivo. Se usará NaN antes de inferencia.")
+        dfh[TARGET_TMO_NEW] = np.nan # Dejar NaN para que la lógica v1 de inferencia lo maneje
+    else:
+         # Asegurar que TMO sea numérico (los NaNs se mantienen para lógica v1)
+         dfh[TARGET_TMO_NEW] = pd.to_numeric(dfh[TARGET_TMO_NEW], errors='coerce')
+
+
+    # 3) Derivar calendario para el histórico
+    holidays_set = load_holidays(HOLIDAYS_FILE)
+    if "feriados" not in dfh.columns:
+        print("INFO: Generando columna 'feriados'...")
+        dfh["feriados"] = mark_holidays_index(dfh.index, holidays_set).values
+    dfh["feriados"] = pd.to_numeric(dfh["feriados"], errors="coerce").fillna(0).astype(int)
+    if "es_dia_de_pago" not in dfh.columns:
+        print("INFO: Generando columna 'es_dia_de_pago'...")
+        dfh["es_dia_de_pago"] = add_es_dia_de_pago(dfh.index).values # Pasar índice directamente
+    dfh["es_dia_de_pago"] = pd.to_numeric(dfh["es_dia_de_pago"], errors="coerce").fillna(0).astype(int)
+    print(f"INFO: Columnas de calendario procesadas. Feriados encontrados: {dfh['feriados'].sum()}")
+
+
+    # 4) ffill de columnas clave (LÓGICA v1 - EXCLUYE TMO)
+    print("INFO: Aplicando ffill a columnas auxiliares (excluyendo TMO)...")
+    ffill_cols_v1 = ["feriados", "es_dia_de_pago",
+                     "proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]
+    for c in ffill_cols_v1:
+        if c in dfh.columns:
+            # Rellenar solo si la columna no es completamente NaN
+            if not dfh[c].isnull().all():
+                 print(f"  - Rellenando NaNs en '{c}'...")
+                 dfh[c] = dfh[c].ffill()
+            else:
+                 print(f"  - Columna '{c}' es completamente NaN, no se rellena.")
+        #else: # Descomentar si quieres verbosidad sobre columnas faltantes
+        #    print(f"  - Columna '{c}' no encontrada para ffill.")
+
+
+    # 5) Forecast (Llamada original v1)
+    print("\nINFO: Iniciando forecast_120d...")
+    df_hourly = forecast_120d(
+        dfh.reset_index(), # Pasar dfh preparado con lógica v1
+        df_tmo_hist_only.reset_index() if df_tmo_hist_only is not None else None, # Se pasa, aunque v31 lo ignore
+        horizon_days=horizonte_dias,
+        holidays_set=holidays_set
+    )
+    print("INFO: forecast_120d completado.")
+
+
+    # 6) Alertas clima
+    try:
+        from src.inferencia.alertas_clima import generar_alertas
+        print("INFO: Generando alertas de clima...")
+        # Pasar copia de df_hourly por si generar_alertas lo modifica
+        generar_alertas(df_hourly[["calls"]].copy())
+        print("INFO: Alertas de clima generadas.")
+    except ImportError:
+        print("WARN: Módulo 'alertas_clima' no encontrado. Saltando generación de alertas.")
+    except Exception as e:
+         print(f"ERROR: Falló la generación de alertas de clima: {e}")
+
+    print("--- Proceso Principal Finalizado ---")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Inferencia IA: llamadas + TMO autoregresivo.")
-    parser.add_argument("--horizonte", type=int, default=120, help="Horizonte en días.")
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--horizonte", type=int, default=120, help="Número de días a predecir.")
+    args = ap.parse_args()
+    print(f"INFO: Ejecutando main con horizonte = {args.horizonte} días.")
     main(args.horizonte)
-
-
