@@ -10,19 +10,18 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     Crea 'ts' y devuelve df.set_index('ts').sort_index() normalizado a America/Santiago.
     Acepta:
       - 'ts' directo (cualquier capitalización)
-      - 'fecha' + 'hora' (cualquier variante razonable de nombre/caso)
+      - 'fecha' + 'hora' (cualquier variante de nombre/caso)
       - una sola columna tipo datetime: 'datetime','datatime','timestamp','fechahora','fecha_hora','fecha y hora'
-      - autodetección: si alguna columna se parsea mayoritariamente como datetime
+      - autodetección: columna con >80% parseable como datetime
     """
     if df is None or df.empty:
         raise ValueError("DataFrame vacío.")
 
-    # mapa normalizado -> original
     norm = {c.lower().strip().replace("  ", " ").replace(" ", "_"): c for c in df.columns}
     def has(name): return name in norm
     def col(name): return df[norm[name]]
 
-    # 1) 'ts' directo
+    # 1) ts directo
     if has("ts"):
         out = df.copy()
         out["ts"] = pd.to_datetime(col("ts"), errors="coerce", dayfirst=True)
@@ -31,7 +30,7 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
         out["ts"] = ts.dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT") if ts.dt.tz is None else ts.dt.tz_convert(TIMEZONE)
         return out.set_index("ts")
 
-    # 2) 'fecha' + 'hora'
+    # 2) fecha + hora
     fecha_like = next((k for k in norm.keys() if k.startswith("fecha")), None)
     hora_like  = next((k for k in norm.keys() if k.startswith("hora")), None)
     if fecha_like and hora_like:
@@ -45,7 +44,7 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
         out["ts"] = ts.dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT") if ts.dt.tz is None else ts.dt.tz_convert(TIMEZONE)
         return out.set_index("ts")
 
-    # 3) candidatos single-datetime
+    # 3) single datetime
     singles = ["datetime","datatime","timestamp","fecha_hora","fechahora","fecha_y_hora","date_time","datehour","date_hour"]
     for s in singles:
         if has(s):
@@ -56,7 +55,7 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
             out["ts"] = ts.dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT") if ts.dt.tz is None else ts.dt.tz_convert(TIMEZONE)
             return out.set_index("ts")
 
-    # 4) autodetección: columna con >80% parseable
+    # 4) autodetección
     rates = []
     for c in df.columns:
         parsed = pd.to_datetime(df[c], errors="coerce", dayfirst=True)
@@ -79,7 +78,7 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
-    """Agrega partes de tiempo (usa columna 'ts' si existe, si no intenta 'index')."""
+    """Agrega partes de tiempo (usa 'ts' si existe; si no, infiere desde el índice)."""
     work = df.copy()
     if "ts" in work.columns:
         ts = pd.to_datetime(work["ts"], errors="coerce")
@@ -111,15 +110,11 @@ def add_lags_mas(df: pd.DataFrame, target_col: str,
 
 def dummies_and_reindex(df_row: pd.DataFrame, cols_expected,
                         dummies_cols=('dow','month','hour')) -> pd.DataFrame:
-    """
-    One-hot de columnas categóricas y reindex a columnas esperadas por el modelo.
-    """
+    """One-hot de cols categóricas y reindex a columnas esperadas por el modelo."""
     X = pd.get_dummies(df_row.copy(), columns=list(dummies_cols), drop_first=False)
-    # Por si el modelo esperaba columnas que no están en esta fila
     missing = [c for c in cols_expected if c not in X.columns]
     for c in missing:
         X[c] = 0
-    # Y por si esta fila trae columnas que el modelo no tenía
     X = X.reindex(columns=cols_expected, fill_value=0)
     return X
 
