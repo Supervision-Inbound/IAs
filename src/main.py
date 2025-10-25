@@ -10,8 +10,8 @@ from src.data.loader_tmo import load_historico_tmo
 
 DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
-TMO_HIST_FILE = "data/HISTORICO_TMO.csv"
 
+# Nombre estándar de llamadas y TMO dentro del flujo/modelos
 TARGET_CALLS = "recibidos_nacional"
 TARGET_TMO = "tmo_general"
 
@@ -68,6 +68,7 @@ def normalize_time_columns(dfh: pd.DataFrame) -> pd.DataFrame:
 
     fecha_like = next((c for c in dfh.columns if "fecha" in c.lower()), None)
     hora_like  = next((c for c in dfh.columns if "hora"  in c.lower()), None)
+    # Deben ser columnas distintas
     if fecha_like and hora_like and fecha_like != hora_like and "ts" not in dfh.columns:
         dfh["ts"] = pd.to_datetime(
             dfh[fecha_like].astype(str) + " " + dfh[hora_like].astype(str),
@@ -93,33 +94,60 @@ def map_calls_column(dfh: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def resolve_tmo_path() -> str:
+    """
+    Intenta resolver la ruta del archivo TMO histórico.
+    Prioridad:
+      1) Variable de entorno TMO_FILE
+      2) data/HISTORICO_TMO.csv
+      3) data/TMO_HISTORICO.csv
+    """
+    candidates = []
+    env_override = os.environ.get("TMO_FILE")
+    if env_override:
+        candidates.append(env_override)
+    candidates += [
+        "data/HISTORICO_TMO.csv",
+        "data/TMO_HISTORICO.csv",
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError(
+        "No se encontró archivo histórico de TMO. "
+        f"Probé estas rutas: {candidates}. "
+        "Puedes definir TMO_FILE en variables de entorno apuntando al archivo correcto."
+    )
+
+
 def main(horizonte_dias: int = 120):
     if not os.path.exists(DATA_FILE):
         raise FileNotFoundError(f"No se encontró {DATA_FILE}")
 
-    # LECTURA ROBUSTA (clave para tu caso)
+    # LECTURA ROBUSTA (coma/semicolón)
     dfh = read_csv_smart(DATA_FILE)
     dfh = normalize_time_columns(dfh)
     dfh = ensure_ts(dfh).reset_index()
 
+    # Planner de llamadas
     dfh = map_calls_column(dfh)
 
+    # Si hubiera una columna TMO aquí, no la usamos como fuente; pero la normalizamos por si aparece
     if TARGET_TMO in dfh.columns:
         dfh[TARGET_TMO] = dfh[TARGET_TMO].apply(parse_tmo_to_seconds)
 
     holidays_set = load_holidays(HOLIDAYS_FILE)
 
-    if not os.path.exists(TMO_HIST_FILE):
-        raise FileNotFoundError(
-            f"No se encontró {TMO_HIST_FILE}. El TMO autoregresivo requiere el histórico TMO puro."
-        )
+    # Resolver ruta del TMO histórico (flexible)
+    tmo_hist_path = resolve_tmo_path()
 
-    df_tmo = load_historico_tmo(TMO_HIST_FILE)
+    # Cargar TMO puro (mismo esquema del entrenamiento)
+    df_tmo = load_historico_tmo(tmo_hist_path)
     if TARGET_TMO in df_tmo.columns:
         df_tmo[TARGET_TMO] = df_tmo[TARGET_TMO].apply(parse_tmo_to_seconds)
     df_tmo_hist_only = df_tmo.copy().reset_index()
 
-    # OJO: no fusionamos TMO al histórico principal; el core usa solo df_tmo_hist_only
+    # NO fusionamos TMO al histórico principal; el core usa solo df_tmo_hist_only
     df_hourly = forecast_120d(
         df_hist_joined=dfh,
         df_hist_tmo_only=df_tmo_hist_only,
@@ -127,6 +155,7 @@ def main(horizonte_dias: int = 120):
         holidays_set=holidays_set
     )
 
+    # Alertas (opcional)
     try:
         from src.inferencia.alertas_clima import generar_alertas
         generar_alertas(df_hourly[["calls"]])
