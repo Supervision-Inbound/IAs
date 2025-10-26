@@ -222,12 +222,19 @@ def forecast_120d(
     feriados_df: pd.DataFrame | None,     # opcional (por hora o diario; se mapea)
     models_dir: str | Path = "models",
     horizonte_dias: int = 120,
+    horizon_days: int | None = None,      # <-- alias para compatibilidad con src/main.py
     exportar_json: bool = True,
 ) -> pd.DataFrame:
     """
     Devuelve un DataFrame horario con: calls, tmo_s, agents_prod, agents_sched.
     Exporta los JSON si exportar_json=True.
     """
+    # Compatibilidad: si llega horizon_days, tiene prioridad.
+    if horizon_days is not None:
+        try:
+            horizonte_dias = int(horizon_days)
+        except Exception:
+            pass
 
     # 0) Normalizar insumos
     df_calls_hist = historico_llamadas.copy()
@@ -347,4 +354,3 @@ def forecast_120d(
 #     df_fer   = pd.read_csv("data/Feriados_Chilev2.csv")          # ts, feriados
 #     res = forecast_120d(df_calls, df_tmo, df_fer, models_dir="models", horizonte_dias=120, exportar_json=True)
 #     print(res.head())
-
