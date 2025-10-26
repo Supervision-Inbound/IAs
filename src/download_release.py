@@ -14,12 +14,30 @@ def download_latest_assets(owner: str, repo: str, out_dir: str = "models", token
         raise RuntimeError(f"No assets in latest release: {rel}")
 
     target_names = {
-        "modelo_planner.keras","scaler_planner.pkl","training_columns_planner.json",
-        "modelo_tmo.keras","scaler_tmo.pkl","training_columns_tmo.json",
-        "modelo_riesgos.keras","scaler_riesgos.pkl","training_columns_riesgos.json",
+        "modelo_planner.keras",
+        "scaler_planner.pkl",
+        "training_columns_planner.json",
+
+        # --- TMO Antiguo (se mantiene por si acaso) ---
+        # "modelo_tmo.keras",
+        # "scaler_tmo.pkl",
+        # "training_columns_tmo.json",
+        
+        # --- TMO NUEVO (Basado en features de llamadas) ---
+        "modelo_tmo.keras",             # Asumimos que se sobreescribe
+        "scaler_tmo.pkl",               # Asumimos que se sobreescribe
+        "training_columns_tmo.json",    # Asumimos que se sobreescribe
+        "tmo_baseline_dow_hour.csv",    # <--- NUEVO
+        "tmo_residual_meta.json",     # <--- NUEVO
+
+        "modelo_riesgos.keras",
+        "scaler_riesgos.pkl",
+        "training_columns_riesgos.json",
         "baselines_clima.pkl"
     }
 
+    print("Buscando assets para descargar...")
+    assets_found = 0
     for a in rel["assets"]:
         name = a.get("name","")
         if name in target_names:
@@ -29,13 +47,18 @@ def download_latest_assets(owner: str, repo: str, out_dir: str = "models", token
             r.raise_for_status()
             with open(os.path.join(out_dir, name), "wb") as f:
                 f.write(r.content)
-    print("✔ Assets descargados en", out_dir)
+            assets_found += 1
+    
+    if assets_found > 0:
+        print(f"✔ {assets_found} assets descargados en", out_dir)
+    else:
+        print("X No se encontraron assets nuevos en el release.")
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--owner", required=True)
-    ap.add_argument("--repo", required=True)
-    ap.add_argument("--out", default="models")
-    args = ap.parse_args()
-    download_latest_assets(args.owner, args.repo, args.out)
-
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repo", default=os.getenv("GITHUB_REPOSITORY", "org/repo"))
+    parser.add_argument("--out_dir", default="models")
+    args = parser.parse_args()
+    
+    owner, repo_name = args.repo.split("/")
+    download_latest_assets(owner, repo_name, args.out_dir)
