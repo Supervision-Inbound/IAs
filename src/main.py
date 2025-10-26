@@ -15,7 +15,7 @@ HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
 # <--- MODIFICADO: Eliminada la referencia al TMO_HIST_FILE
 # TMO_HIST_FILE = "data/HISTORICO_TMO.csv" 
 
-TARGET_CALLS_NEW = "recibidos_nacional"
+TARGET_CALLS_NEW = "contestados"
 TARGET_TMO_NEW = "tmo (segundos)" # <--- MODIFICADO: Usamos el TMO del CSV principal
 TZ = "America/Santiago"
 
