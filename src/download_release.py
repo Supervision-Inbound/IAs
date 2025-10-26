@@ -18,17 +18,12 @@ def download_latest_assets(owner: str, repo: str, out_dir: str = "models", token
         "scaler_planner.pkl",
         "training_columns_planner.json",
 
-        # --- TMO Antiguo (se mantiene por si acaso) ---
-        # "modelo_tmo.keras",
-        # "scaler_tmo.pkl",
-        # "training_columns_tmo.json",
-        
         # --- TMO NUEVO (Basado en features de llamadas) ---
         "modelo_tmo.keras",             # Asumimos que se sobreescribe
         "scaler_tmo.pkl",               # Asumimos que se sobreescribe
         "training_columns_tmo.json",    # Asumimos que se sobreescribe
-        "tmo_baseline_dow_hour.csv",    # <--- NUEVO
-        "tmo_residual_meta.json",     # <--- NUEVO
+        "tmo_baseline_dow_hour.csv",    # <--- MODIFICADO: Nuevo artefacto
+        "tmo_residual_meta.json",       # <--- MODIFICADO: Nuevo artefacto
 
         "modelo_riesgos.keras",
         "scaler_riesgos.pkl",
@@ -56,9 +51,14 @@ def download_latest_assets(owner: str, repo: str, out_dir: str = "models", token
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    # <--- MODIFICADO: Cambiado para soportar el formato 'owner/repo'
     parser.add_argument("--repo", default=os.getenv("GITHUB_REPOSITORY", "org/repo"))
     parser.add_argument("--out_dir", default="models")
     args = parser.parse_args()
     
-    owner, repo_name = args.repo.split("/")
+    if '/' not in args.repo:
+        print("ERROR: El argumento --repo debe ser 'owner/repo'.", file=sys.stderr)
+        sys.exit(1)
+        
+    owner, repo_name = args.repo.split("/", 1)
     download_latest_assets(owner, repo_name, args.out_dir)
