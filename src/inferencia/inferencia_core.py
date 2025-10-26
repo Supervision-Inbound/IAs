@@ -31,11 +31,6 @@ ENABLE_OUTLIER_CAP = True   # <- ponlo en False si quieres desactivarlo
 K_WEEKDAY = 6.0             # techos +K*MAD en lun-vie
 K_WEEKEND = 7.0             # techos +K*MAD en sáb-dom
 
-# Guardrail específico para TMO (usa distribución histórica)
-ENABLE_TMO_CAP = True
-TMO_CAP_K = 6.0             # +K*MAD por (dow,hour)
-TMO_CAP_P95_FACTOR = 1.10   # 110% del p95 horario como límite adicional
-
 # === Días de pago (para alinear con entrenamiento) ===
 DIAS_DE_PAGO = {1, 2, 15, 16, 29, 30, 31}
 
@@ -240,82 +235,6 @@ def apply_outlier_cap(df_future, base_median_mad, holidays_set,
 # ===========================================================
 
 
-def _baseline_tmo_guardrail(df_hist, col=TARGET_TMO):
-    if df_hist is None or df_hist.empty or col not in df_hist.columns:
-        return None
-
-    d = df_hist[[col]].dropna().copy()
-    if d.empty:
-        return None
-
-    d = add_time_parts(d)
-    g = d.groupby(["dow", "hour"])[col]
-
-    med = g.median().rename("med")
-    mad = g.apply(lambda x: float(np.median(np.abs(x - np.median(x)))))
-    p95 = g.quantile(0.95).rename("p95")
-
-    base = pd.concat([med, mad.rename("mad"), p95], axis=1)
-
-    fallback_med = float(d[col].median())
-    fallback_mad = float(np.median(np.abs(d[col] - fallback_med)))
-    if np.isnan(fallback_mad) or fallback_mad <= 0:
-        fallback_mad = 1.0
-    fallback_p95 = float(d[col].quantile(0.95))
-    if np.isnan(fallback_p95) or fallback_p95 <= 0:
-        fallback_p95 = fallback_med
-
-    base["mad"] = base["mad"].replace(0, np.nan).fillna(fallback_mad)
-    base["med"] = base["med"].fillna(fallback_med)
-    base["p95"] = base["p95"].fillna(fallback_p95)
-
-    base = base.reset_index()
-    return {
-        "by_dow_hour": base,
-        "fallback_med": fallback_med,
-        "fallback_mad": fallback_mad,
-        "fallback_p95": fallback_p95,
-    }
-
-
-def apply_tmo_guardrail(df_future, guardrail_data, col_tmo_future="tmo_s",
-                        k=TMO_CAP_K, p95_factor=TMO_CAP_P95_FACTOR):
-    if guardrail_data is None or df_future.empty or col_tmo_future not in df_future.columns:
-        return df_future
-
-    base = guardrail_data.get("by_dow_hour")
-    if base is None or base.empty:
-        return df_future
-
-    fallback_med = guardrail_data.get("fallback_med", 0.0)
-    fallback_mad = guardrail_data.get("fallback_mad", 1.0)
-    fallback_p95 = guardrail_data.get("fallback_p95", fallback_med)
-
-    fallback_mad = float(fallback_mad) if not np.isnan(fallback_mad) and fallback_mad > 0 else 1.0
-    fallback_med = float(fallback_med) if not np.isnan(fallback_med) else 0.0
-    fallback_p95 = float(fallback_p95) if not np.isnan(fallback_p95) and fallback_p95 > 0 else fallback_med
-
-    d = add_time_parts(df_future.copy())
-    merged = d.merge(base[["dow", "hour", "med", "mad", "p95"]], on=["dow", "hour"], how="left")
-
-    merged["med"] = merged["med"].fillna(fallback_med)
-    merged["mad"] = merged["mad"].replace(0, np.nan).fillna(fallback_mad)
-    merged["p95"] = merged["p95"].fillna(fallback_p95)
-
-    caps = np.minimum(merged["med"].values + k * merged["mad"].values,
-                      merged["p95"].values * p95_factor)
-    global_cap = min(fallback_med + k * fallback_mad, fallback_p95 * p95_factor)
-    caps = np.where(np.isnan(caps), global_cap, caps)
-
-    out = df_future.copy()
-    values = out[col_tmo_future].astype(float).values
-    mask = values > caps
-    if np.any(mask):
-        capped_vals = np.round(caps[mask]).astype(int)
-        out.loc[out.index[mask], col_tmo_future] = capped_vals
-    return out
-
-
 def _is_holiday(ts, holidays_set: set) -> int:
     if not holidays_set:
         return 0
@@ -332,11 +251,11 @@ def _is_payday(ts) -> int:
 # --- ¡¡¡INICIO FUNCIÓN MODIFICADA!!! ---
 def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame | None, horizon_days: int = 120, holidays_set: set | None = None):
     """
-    Versión (v14.1 - Lógica Prototipo v7 + Fix TypeError)
+    Versión (v14.1 - Fusión de Lógicas + Fix TypeError)
     - SOLUCIÓN:
-        - 1. LLAMADAS: Se mantiene el bucle autorregresivo (funciona bien).
+        - 1. LLAMADAS: Se mantiene el bucle autorregresivo (tu lógica "perfecta").
         - 2. TMO: Se elimina el bucle. Se usa la lógica VECTORIZADA
-          del prototipo 'v_main' Fase 6.
+          del prototipo 'v_main' Fase 6 (la "que funcionaba").
     - FIX (v14.1): Se cambia 'tmo_static_features' de set a list
       para evitar TypeError en pandas.
     """
@@ -375,25 +294,25 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
     # === Base histórica TMO (Analista) ===
     
     # === INICIO CAMBIO (v14.1): Corregir TypeError cambiando set {} por list [] ===
+    # Estas son las columnas que tu prototipo 'v_main' usaba como estáticas
     tmo_static_features = ["proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]
     # === FIN CAMBIO ===
     
     df_tmo = None
     is_fallback = False # Flag para saber si usamos la data mala
-    tmo_guardrail_data = None
 
     if df_hist_tmo_only is not None and not df_hist_tmo_only.empty:
         try:
             df_tmo = ensure_ts(df_hist_tmo_only)
-            # --- Carga de features TMO desde el loader ---
-            # (Asumimos que loader_tmo.py ya se ejecutó en main.py y las columnas están)
+            
+            # --- Asegurar que las proporciones existan (lógica de loader_tmo.py) ---
             if "proporcion_comercial" not in df_tmo.columns:
                  print("WARN: 'proporcion_comercial' no encontrada en df_tmo_hist_only. Calculando...")
-                 # Lógica de fallback del loader
                  if 'q_llamadas_comercial' in df_tmo.columns and 'q_llamadas_general' in df_tmo.columns:
                      df_tmo['proporcion_comercial'] = df_tmo['q_llamadas_comercial'] / (df_tmo['q_llamadas_general'] + 1e-6)
                      df_tmo['proporcion_tecnica'] = df_tmo['q_llamadas_tecnico'] / (df_tmo['q_llamadas_general'] + 1e-6)
                  else:
+                     # Si no puede calcularlas, las pone en 0 para que no falle
                      df_tmo['proporcion_comercial'] = 0.0
                      df_tmo['proporcion_tecnica'] = 0.0
 
@@ -412,8 +331,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         df_tmo[TARGET_TMO] = np.nan
     for c in tmo_static_features:
         if c not in df_tmo.columns:
-            # Si es el fallback, es posible que no tenga estas columnas
-            # (ej. tmo_comercial no está en historical_data.csv)
             if is_fallback:
                 print(f"WARN: Columna estática '{c}' no encontrada en fallback. Rellenando con 0.")
             df_tmo[c] = np.nan
@@ -423,17 +340,13 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
     for c in cols_to_ffill_tmo:
         if c in df_tmo.columns:
             df_tmo[c] = df_tmo[c].ffill()
-
-    if not is_fallback:
-        tmo_guardrail_data = _baseline_tmo_guardrail(df_tmo, col=TARGET_TMO)
-
+    
     # Usar el ÚLTIMO valor histórico como estático (lógica v_main)
     if df_tmo.empty:
         print("WARN: No hay datos históricos de TMO. Usando 0.0 para features estáticas.")
         last_tmo_data_static = {c: 0.0 for c in tmo_static_features}
     else:
         # === INICIO CAMBIO (v14.1): Asegurar que todas las columnas existan antes de indexar ===
-        # El fallback (df_calls) podría no tener 'tmo_comercial', etc.
         valid_static_features = [c for c in tmo_static_features if c in df_tmo.columns]
         last_tmo_data_static = df_tmo.iloc[-1][valid_static_features].to_dict()
         
@@ -453,7 +366,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         df_tmo["feriados"] = 0
 
     # ===== Horizonte futuro =====
-    last_ts = last_ts_calls # El TMO histórico ya no importa para el start
+    last_ts = last_ts_calls
     
     future_ts = pd.date_range(
         last_ts + pd.Timedelta(hours=1),
@@ -554,15 +467,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         df_hourly = apply_outlier_cap(
             df_hourly, base_mad, holidays_set,
             col_calls_future="calls",
-            k_weekday=K_WEEKDAY, k_weekend=K_WEEKEND
-        )
-
-    if ENABLE_TMO_CAP and not is_fallback and tmo_guardrail_data is not None:
-        df_hourly = apply_tmo_guardrail(
-            df_hourly, tmo_guardrail_data,
-            col_tmo_future="tmo_s",
-            k=TMO_CAP_K,
-            p95_factor=TMO_CAP_P95_FACTOR
+            k_weekday=K_WEEKDAY, k_weekend=K_WEEKEND 
         )
 
     # ===== Erlang por hora =====
