@@ -24,7 +24,7 @@ TMO_COLS = "models/training_columns_tmo.json"
 TMO_BASELINE = "models/tmo_baseline_dow_hour.csv" # <--- NUEVO
 TMO_META = "models/tmo_residual_meta.json"       # <--- NUEVO
 
-TARGET_CALLS = "recibidos_nacional"
+TARGET_CALLS = "contestados"
 TARGET_TMO = "tmo (segundos)" # <--- MODIFICADO: Coincide con main.py
 
 # Ventana reciente para lags/MA (no afecta last_ts)
