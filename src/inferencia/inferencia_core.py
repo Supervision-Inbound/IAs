@@ -3,7 +3,7 @@
 # Núcleo de inferencia — Planner (llamadas) + TMO autoregresivo + Erlang + Export
 # Ajustes:
 #  - Flags ENV para control fino del planner (feriados, clip).
-#  - TMO AR con blend a mediana por hora y cap por cuantil horario.
+#  - TMO AR con blend a mediana por hora, cap por cuantil horario y elasticidad a la carga.
 #  - Regularización (MAD, límites) + calibración opcional.
 #  - JSON pretty (indent=2).
 # Compat: horizon_days (alias de horizonte_dias), holidays_set (alias feriados).
@@ -60,6 +60,11 @@ TMO_MIN_S       = float(os.getenv("TMO_MIN_S", "80"))
 TMO_MAX_S       = float(os.getenv("TMO_MAX_S", "900"))
 TMO_BLEND_ALPHA = float(os.getenv("TMO_BLEND_ALPHA", "0.75"))  # 0..1 (peso del modelo)
 TMO_HOURLY_QHI  = float(os.getenv("TMO_HOURLY_QHI", "0.95"))   # 0 desactiva cap por cuantil
+
+# --- NUEVO: elasticidad del TMO a la carga de llamadas ---
+TMO_ELASTICITY_BETA = float(os.getenv("TMO_ELASTICITY_BETA", "-0.12"))  # negativo reduce TMO cuando suben llamadas
+TMO_ELASTICITY_MIN  = float(os.getenv("TMO_ELASTICITY_MIN", "0.85"))    # factor mínimo por hora
+TMO_ELASTICITY_MAX  = float(os.getenv("TMO_ELASTICITY_MAX", "1.05"))    # factor máximo por hora
 
 # =============================================================================
 # Helpers generales
@@ -187,6 +192,29 @@ def _apply_calibration(series: pd.Series, factor: float | None, lo: float = 0.7,
         return series
     f = float(max(lo, min(hi, factor)))
     return series * f
+
+# --- NUEVO: elasticidad del TMO a la carga de llamadas ---
+def _apply_calls_elasticity(
+    tmo_pred: pd.Series,
+    calls_pred: pd.Series,
+    df_calls_hist: pd.DataFrame,
+    beta: float = TMO_ELASTICITY_BETA,
+    fmin: float = TMO_ELASTICITY_MIN,
+    fmax: float = TMO_ELASTICITY_MAX,
+) -> pd.Series:
+    """
+    Ajuste suave del TMO según la carga de llamadas vs. mediana histórica por hora del día.
+    factor(ts) = clip( (calls_pred(ts) / mediana_llamadas_hist_hora)^beta , fmin, fmax )
+    beta < 0 => más llamadas => menor TMO.
+    """
+    med_calls_by_hour = df_calls_hist["calls"].groupby(df_calls_hist.index.hour).median()
+    baseline = calls_pred.index.map(lambda ts: med_calls_by_hour.get(ts.hour, np.nan))
+    baseline = pd.Series(baseline.values, index=calls_pred.index).fillna(calls_pred.median())
+
+    ratio = (calls_pred / (baseline.replace(0, np.nan))).fillna(1.0)
+    factor = np.power(ratio, beta).clip(lower=fmin, upper=fmax)
+
+    return (tmo_pred * factor).astype(float)
 
 # =============================================================================
 # Carga de artefactos
@@ -401,7 +429,6 @@ def forecast_120d(
         if 0.0 <= TMO_BLEND_ALPHA <= 1.0 and TMO_BLEND_ALPHA < 1.0:
             tmo_pred = TMO_BLEND_ALPHA * tmo_pred + (1.0 - TMO_BLEND_ALPHA) * anchor
     except Exception:
-        # si no pudimos calcular ancla, seguimos con pred tal cual
         pass
 
     # Cap por cuantil horario histórico (p. ej. 95%)
@@ -418,6 +445,22 @@ def forecast_120d(
     # Calibración opcional
     cal_factor = _load_calibration_factor(default=None)
     tmo_pred = _apply_calibration(tmo_pred, factor=cal_factor, lo=0.7, hi=1.3)
+
+    # --- NUEVO: Elasticidad del TMO a la carga de llamadas (suave y acotada) ---
+    try:
+        tmo_pred = _apply_calls_elasticity(
+            tmo_pred=tmo_pred,
+            calls_pred=calls_pred,
+            df_calls_hist=df_calls_hist,
+            beta=TMO_ELASTICITY_BETA,
+            fmin=TMO_ELASTICITY_MIN,
+            fmax=TMO_ELASTICITY_MAX,
+        )
+    except Exception:
+        pass
+
+    # Reaplicar clamp operativo tras el ajuste elástico
+    tmo_pred = _clamp_tmo_bounds(tmo_pred, min_s=TMO_MIN_S, max_s=TMO_MAX_S)
 
     # Ensamblar DF final
     df_pred = pd.DataFrame(index=idx_h)
@@ -479,4 +522,5 @@ def forecast_120d(
 # =============================================================================
 # Fin de archivo
 # =============================================================================
+
 
