@@ -1,4 +1,6 @@
-# src/main.py
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
 import argparse
 import os
 import sys
@@ -52,39 +54,35 @@ def _coerce_numeric(s: pd.Series) -> pd.Series:
 
 def _canonicalize_ts_index(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Asegura que 'ts' sea SOLO índice (no columna). Evita el error:
-    "'ts' is both an index level and a column label".
+    Asegura que 'ts' sea SOLO índice.
     """
-    # Si el índice ya es 'ts' y además existe la columna 'ts', la eliminamos.
-    if "ts" in df.columns and (df.index.name == "ts" or "ts" in (df.index.names or [])):
-        df = df.drop(columns=["ts"])
-    # Si AÚN no es índice, lo establecemos.
-    if df.index.name != "ts" and "ts" in df.columns:
-        df = df.set_index("ts")
-    # Orden temporal ascendente
+    d = df.copy()
+    # ensure_ts ya setea índice ts; pero por si viene mezclado:
+    if "ts" in d.columns and (d.index.name == "ts" or "ts" in (d.index.names or [])):
+        d = d.drop(columns=["ts"])
+    if d.index.name != "ts" and "ts" in d.columns:
+        d = d.set_index("ts")
     try:
-        df = df.sort_index()
+        d = d.sort_index()
     except Exception:
         pass
-    return df
+    return d
 
 def _prepare_hosting_df(df_raw: pd.DataFrame) -> pd.DataFrame:
     """
-    Normaliza:
-      - 'ts' (índice con zona horaria que maneje ensure_ts).
-      - TARGET_CALLS = 'recibidos_nacional' (si viene 'recibidos', renombrar).
-      - TARGET_TMO   = 'tmo_general' (si viene 'TMO (segundos)' u otro alias, mapear).
-      - 'feriados' (si no existe, 0).
+    - Asegura TS (índice)
+    - renombra columnas a estándar:
+        TARGET_CALLS ('recibidos_nacional')
+        TARGET_TMO   ('tmo_general') si existe 'TMO (segundos)' / 'TMO (s)' / 'aht'
+        'feriados'   (si no existe, 0)
     """
     df = df_raw.copy()
     cols_map = {c.lower().strip(): c for c in df.columns}
 
-    # 1) ts normalizado (la función de features)
     df = ensure_ts(df)
-    # 2) Canonizar 'ts' solo como índice
     df = _canonicalize_ts_index(df)
 
-    # 3) llamadas
+    # llamadas
     if TARGET_CALLS not in df.columns:
         for cand in ["recibidos", "llamadas", "total_llamadas", "recibidos total", "recibidos_nacional"]:
             if cand in cols_map:
@@ -94,7 +92,7 @@ def _prepare_hosting_df(df_raw: pd.DataFrame) -> pd.DataFrame:
         raise ValueError(f"No encuentro la columna de llamadas '{TARGET_CALLS}' ni sus alias.")
     df[TARGET_CALLS] = _coerce_numeric(df[TARGET_CALLS]).fillna(0)
 
-    # 4) TMO (segundos) -> tmo_general (si existe)
+    # TMO (segundos) -> tmo_general (si existe)
     if TARGET_TMO not in df.columns:
         for cand in ["tmo (segundos)", "tmo (s)", "aht", "tmo_seg", "tmo_general"]:
             if cand in cols_map:
@@ -103,7 +101,7 @@ def _prepare_hosting_df(df_raw: pd.DataFrame) -> pd.DataFrame:
     if TARGET_TMO in df.columns:
         df[TARGET_TMO] = _coerce_numeric(df[TARGET_TMO])
 
-    # 5) feriados
+    # feriados
     if "feriados" not in df.columns:
         df["feriados"] = 0
     df["feriados"] = pd.to_numeric(df["feriados"], errors="coerce").fillna(0).astype(int)
@@ -127,7 +125,6 @@ def _build_holidays_set(df_hosting: pd.DataFrame) -> set:
 def main(horizonte_dias: int):
     Path(PUBLIC_DIR).mkdir(parents=True, exist_ok=True)
 
-    # Localiza histórico de Hosting
     candidates = [
         Path(KAGGLE_INPUT_DIR) / DEFAULT_XLSX,
         Path("data") / DEFAULT_XLSX,
@@ -142,14 +139,10 @@ def main(horizonte_dias: int):
     print(f"[main] Leyendo histórico desde: {src_path}")
     df_raw = _smart_read(src_path)
 
-    # Preparar dataframe
     df = _prepare_hosting_df(df_raw)
-
-    # Holidays
     holidays_set = _build_holidays_set(df)
     print(f"[main] Feriados detectados (fechas únicas): {len(holidays_set)}")
 
-    # Inferencia
     print(f"[main] Ejecutando forecast_120d (horizonte={horizonte_dias} días)...")
     df_hourly = forecast_120d(
         df_hist_joined=df,
@@ -158,7 +151,6 @@ def main(horizonte_dias: int):
         holidays_set=holidays_set
     )
 
-    # Resumen
     print("\n[main] Resumen de la predicción (primeras 5 filas):")
     print(df_hourly.head().to_string())
     print("\n[main] Archivos generados en 'public/':")
@@ -175,3 +167,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"[main][ERROR] {e}", file=sys.stderr)
         sys.exit(1)
+
