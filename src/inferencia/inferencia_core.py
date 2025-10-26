@@ -2,6 +2,7 @@
 # =============================================================================
 # Núcleo de inferencia — Planner (llamadas) + TMO autoregresivo + Erlang + Export
 # Acepta alias de compatibilidad: horizon_days y holidays_set.
+# Incluye localización TZ retrocompatible (sin 'errors' en tz_localize).
 # =============================================================================
 
 from __future__ import annotations
@@ -39,8 +40,42 @@ def _mad_cap(series: pd.Series, k: float = 3.5) -> pd.Series:
 def _clamp(series: pd.Series, low: float, high: float) -> pd.Series:
     return series.clip(lower=low, upper=high)
 
+def _localize_index_safe(idx: pd.DatetimeIndex, tz: str) -> pd.DatetimeIndex:
+    """Localiza/convierte un DatetimeIndex a tz de forma retrocompatible."""
+    # Si ya tiene tz, solo convertir
+    if getattr(idx, "tz", None) is not None:
+        try:
+            return idx.tz_convert(tz)
+        except Exception:
+            # Si viene con tz inválida, lo volvemos naive y localizamos
+            idx = idx.tz_convert("UTC").tz_localize(None)
+    # En este punto es naive
+    # Intento preferido (pandas recientes)
+    try:
+        return idx.tz_localize(tz, nonexistent="shift_forward", ambiguous="infer")
+    except TypeError:
+        # pandas antiguo: no soporta esos kwargs
+        pass
+    except Exception:
+        # cae a intentos siguientes
+        pass
+    # Intento 2: sin kwargs
+    try:
+        return idx.tz_localize(tz)
+    except Exception:
+        # Intento 3: resolver ambigüedad con booleanos
+        try:
+            return idx.tz_localize(tz, ambiguous=True)
+        except Exception:
+            try:
+                return idx.tz_localize(tz, ambiguous=False)
+            except Exception:
+                # Último recurso: desplazamos 1h y localizamos
+                idx_shift = idx + pd.Timedelta(hours=1)
+                return idx_shift.tz_localize(tz)
+
 def _ensure_ts_index(df: pd.DataFrame, tz: str = TZ) -> pd.DataFrame:
-    """Asegura índice horario 'ts' con tz y ordenado."""
+    """Asegura índice horario 'ts' con tz y ordenado (retrocompatible con pandas)."""
     if "ts" not in df.columns and not isinstance(df.index, pd.DatetimeIndex):
         raise ValueError("Se requiere columna 'ts' o un DatetimeIndex.")
     if "ts" in df.columns:
@@ -52,9 +87,8 @@ def _ensure_ts_index(df: pd.DataFrame, tz: str = TZ) -> pd.DataFrame:
         df = df.copy()
         df.index = pd.to_datetime(df.index, errors="coerce", utc=False)
         df = df.loc[df.index.notna()].sort_index()
-    # Local-time aware (no UTC), respetando cambios de hora CL
-    df.index = df.index.tz_localize(tz, nonexistent="shift_forward", ambiguous="NaT", errors="coerce") \
-                         .tz_convert(tz)
+    # Localizar/convertir tz de forma segura
+    df.index = _localize_index_safe(df.index, tz)
     df = df.loc[df.index.notna()]
     return df
 
@@ -93,12 +127,7 @@ def _load_planner(models_dir: str | Path = "models"):
     return planner_model, scaler, training_cols
 
 def _planner_row(ts: pd.Timestamp, calls_hist: dict[pd.Timestamp, float], feriado: int) -> dict:
-    """Replica features del entrenamiento del planner:
-       - lags: 24, 48, 72, 168
-       - MAs: 24, 72, 168
-       - calendario/dummies + sin/cos
-       - feriados + es_dia_de_pago
-    """
+    """Replica features del entrenamiento del planner."""
     def lag(h: int) -> float:
         key = ts - pd.Timedelta(hours=h)
         return float(calls_hist.get(key, np.nan))
@@ -127,8 +156,8 @@ def _planner_row(ts: pd.Timestamp, calls_hist: dict[pd.Timestamp, float], feriad
 
 def predict_calls_horizonte(
     idx_horizonte: pd.DatetimeIndex,
-    calls_hist_series: pd.Series,     # histórico real de llamadas por hora (hasta t0-1h)
-    feriados_series: pd.Series,       # 0/1 por hora para el horizonte
+    calls_hist_series: pd.Series,
+    feriados_series: pd.Series,
     models_dir: str | Path = "models",
     cap_k: float = 3.5,
 ) -> pd.Series:
@@ -205,11 +234,7 @@ def _calendar_series_for_horizon(idx: pd.DatetimeIndex, feriados_df: pd.DataFram
     return fer
 
 def _calendar_series_from_holidays_set(idx: pd.DatetimeIndex, holidays_set: Iterable[Any]) -> pd.Series:
-    """
-    Construye 0/1 por hora a partir de un conjunto/lista de feriados (fechas).
-    Acepta: date/datetime/pandas Timestamp/str (YYYY-MM-DD).
-    """
-    # Normalizar a set de fechas (date)
+    """Crea 0/1 por hora a partir de un conjunto/lista de fechas (YYYY-MM-DD, date o Timestamp)."""
     dates = set()
     for d in holidays_set:
         if isinstance(d, pd.Timestamp):
@@ -218,12 +243,10 @@ def _calendar_series_from_holidays_set(idx: pd.DatetimeIndex, holidays_set: Iter
             try:
                 dates.add(pd.Timestamp(d).date())
             except Exception:
-                # ignora elementos inválidos silenciosamente
                 pass
     if not dates:
         return pd.Series(0, index=idx, dtype=int)
-    ser = pd.Series([1 if ts.date() in dates else 0 for ts in idx], index=idx, dtype=int)
-    return ser
+    return pd.Series([1 if ts.date() in dates else 0 for ts in idx], index=idx, dtype=int)
 
 # =============================================================================
 # INFERENCIA PRINCIPAL
@@ -232,19 +255,19 @@ def _calendar_series_from_holidays_set(idx: pd.DatetimeIndex, holidays_set: Iter
 def forecast_120d(
     historico_llamadas: pd.DataFrame,     # columnas: ts, recibidos (o calls), feriados (0/1)
     historico_tmo: pd.DataFrame,          # columnas: ts, tmo_s (segundos)
-    feriados_df: pd.DataFrame | None = None,     # opcional: serie/DF por hora o diario
+    feriados_df: pd.DataFrame | None = None,
     models_dir: str | Path = "models",
     horizonte_dias: int = 120,
     # --- ALIAS DE COMPATIBILIDAD ---
-    horizon_days: int | None = None,             # alias de horizonte_dias
-    holidays_set: Iterable[Any] | None = None,   # alias alternativo a feriados_df (lista/set de fechas)
+    horizon_days: int | None = None,
+    holidays_set: Iterable[Any] | None = None,
     exportar_json: bool = True,
 ) -> pd.DataFrame:
     """
     Devuelve un DataFrame horario con: calls, tmo_s, agents_prod, agents_sched.
     Exporta los JSON si exportar_json=True.
     """
-    # Compatibilidad: si llega horizon_days, tiene prioridad.
+    # Compatibilidad con src/main.py
     if horizon_days is not None:
         try:
             horizonte_dias = int(horizon_days)
@@ -253,7 +276,6 @@ def forecast_120d(
 
     # 0) Normalizar insumos
     df_calls_hist = historico_llamadas.copy()
-    # Normalizar nombre de columna calls
     if "recibidos" in df_calls_hist.columns and "calls" not in df_calls_hist.columns:
         df_calls_hist = df_calls_hist.rename(columns={"recibidos": "calls"})
     if "feriados" not in df_calls_hist.columns:
@@ -271,21 +293,18 @@ def forecast_120d(
     horizonte_horas = horizonte_dias * 24
     idx_horizonte = _build_horizon_index(last_ts, horas=horizonte_horas)
 
-    # 1) Calendario de feriados para el horizonte
+    # 1) Feriados para horizonte
     if holidays_set is not None:
         fer_h = _calendar_series_from_holidays_set(idx_horizonte, holidays_set)
     else:
         fer_h = _calendar_series_for_horizon(idx_horizonte, feriados_df)
 
-    # 2) Predicción de LLAMADAS (feed-forward con Planner)
+    # 2) LLAMADAS (planner feed-forward) + ajuste de feriados SOLO a llamadas
     calls_hist_series = df_calls_hist["calls"].astype(float).sort_index()
-
-    # Factores por hora a partir del histórico real (para ajustar SOLO llamadas en feriados)
     hour_factors = compute_holiday_factors(
         calls_hist=calls_hist_series,
         feriados_hist=df_calls_hist["feriados"].astype(int)
     )
-
     calls_pred_raw = predict_calls_horizonte(
         idx_horizonte=idx_horizonte,
         calls_hist_series=calls_hist_series,
@@ -293,42 +312,39 @@ def forecast_120d(
         models_dir=models_dir,
         cap_k=3.5
     )
-    # Ajuste de feriados SOLO a llamadas
     calls_pred = apply_holiday_adjustment(calls_pred_raw, fer_h, hour_factors)
 
-    # 3) Predicción de TMO AUTORREGRESIVO (feed-forward)
+    # 3) TMO AUTORREGRESIVO (feed-forward)
     tmo_hist_series = df_tmo_hist["tmo_s"].astype(float).sort_index()
     tmo_pred = predict_tmo_from_models_dir(
         idx_horizonte=idx_horizonte,
         serie_tmo_hist=tmo_hist_series,
-        calls_series=calls_pred,       # ya ajustadas por feriado
+        calls_series=calls_pred,
         feriados_series=fer_h,
         models_dir=models_dir,
-        fill_prop=(0.55, 0.45),        # si puedes, reemplaza por proporciones reales recientes
+        fill_prop=(0.55, 0.45),
         cap_k=3.5,
         clamp_bounds=(80, 900),
         strict_columns_check=False
     )
 
-    # 4) Ensamblar DF horario final (previo a Erlang)
+    # 4) Ensamble
     df_pred = pd.DataFrame(index=idx_horizonte)
     df_pred["calls"] = calls_pred
     df_pred["tmo_s"] = tmo_pred
 
-    # 5) Erlang C: agentes productivos y programados
+    # 5) Erlang
     agents_prod = []
     agents_sched = []
     for ts, row in df_pred.iterrows():
         a = required_agents(calls=float(row["calls"]), aht_s=float(row["tmo_s"]))
         agents_prod.append(int(np.ceil(a)))
         agents_sched.append(int(np.ceil(schedule_agents(a))))
-
     df_pred["agents_prod"] = agents_prod
     df_pred["agents_sched"] = agents_sched
 
     # 6) Export (horario y diario)
     if exportar_json:
-        # Horario
         out_h = [
             {
                 "ts": ts.isoformat(),
@@ -341,7 +357,6 @@ def forecast_120d(
         ]
         _write_json(PUBLIC_DIR / "prediccion_horaria.json", out_h)
 
-        # Diario (sum calls, mean tmo)
         df_daily = pd.DataFrame({
             "fecha": df_pred.index.tz_convert(TZ).normalize(),
             "calls": df_pred["calls"].values,
@@ -372,4 +387,6 @@ def forecast_120d(
 #     res = forecast_120d(df_calls, df_tmo, df_fer,
 #                         models_dir="models", horizon_days=120, exportar_json=True)
 #     print(res.head())
+
+
 
