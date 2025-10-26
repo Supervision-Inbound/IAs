@@ -282,12 +282,13 @@ def predict_calls_horizonte(
         row = _planner_row(ts, calls_hist, int(feriados_series.get(ts, 0)))
         X = dummies_and_reindex(pd.DataFrame([row], index=[ts]), train_cols)
         if X.isna().any().any():
-            X = X.fillna(method="ffill", axis=1).fillna(0)
+            # FutureWarning-safe
+            X = X.ffill(axis=1).infer_objects(copy=False).fillna(0)
         y_hat = float(model.predict(scaler.transform(X.values), verbose=0).ravel()[0])
         preds.append((ts, y_hat))
         calls_hist[ts] = y_hat  # feed-forward
     s = pd.Series(dict(preds)).sort_index()
-    # Guardrail suave; el planner suele ser estable, pero aplicamos cap por si acaso
+    # Guardrail suave
     med = s.median()
     s = s.clip(lower=0, upper=max(med * 5, s.quantile(0.995)))
     return s
@@ -343,7 +344,7 @@ def _predict_tmo_feedforward(
         X_row = pd.concat([df_row, df_for_lags], axis=1)
         X = dummies_and_reindex(X_row, cols_tmo)
         if X.isna().any().any():
-            X = X.fillna(method="ffill", axis=1).fillna(0)
+            X = X.ffill(axis=1).infer_objects(copy=False).fillna(0)
 
         y_hat = float(m_tmo.predict(sc_tmo.transform(X.values), verbose=0).ravel()[0])
         preds.append((ts, y_hat))
@@ -412,8 +413,6 @@ def forecast_120d(
 
     # 4) TMO — feed-forward (autoregresivo) alineado a entrenamiento
     m_tmo, sc_tmo, cols_tmo = _load_tmo(models_dir)
-    # asegurar columnas auxiliares (si existen) para proporciones internas
-    # loader_tmo ya suele traer q_llamadas_*; si no existen, usamos fallback 0.55/0.45 dentro de la función
     df_tmo_sorted = df_tmo_hist.sort_index()
 
     tmo_pred = _predict_tmo_feedforward(
@@ -442,10 +441,10 @@ def forecast_120d(
     df_pred["calls"] = calls_pred
     df_pred["tmo_s"] = tmo_pred
 
-    # 7) Erlang C (agentes)
+    # 7) Erlang C (agentes) — llamadas POSICIONALES (no keywords)
     agents_prod, agents_sched = [], []
     for ts, row in df_pred.iterrows():
-        a = required_agents(calls=float(row["calls"]), aht_s=float(row["tmo_s"]))
+        a = required_agents(float(row["calls"]), float(row["tmo_s"]))  # <-- posicional
         agents_prod.append(int(np.ceil(a)))
         agents_sched.append(int(np.ceil(schedule_agents(a))))
     df_pred["agents_prod"] = agents_prod
@@ -489,5 +488,4 @@ def forecast_120d(
 # =============================================================================
 # Fin de archivo
 # =============================================================================
-
 
