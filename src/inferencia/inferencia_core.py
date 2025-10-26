@@ -108,7 +108,6 @@ def _normalize_tmo(df_tmo: pd.DataFrame) -> pd.DataFrame:
     cols_lower = {c.lower(): c for c in df.columns}
     src_tmo = next((cols_lower[c] for c in TARGET_TMO_CANDIDATES if c in cols_lower), None)
     if src_tmo is None and "tmo_s" not in df.columns:
-        # Si ya viene tmo_s, respetar
         raise KeyError(f"No se encontró columna de TMO. Candidatas: {TARGET_TMO_CANDIDATES}. Columns={list(df.columns)}")
     if src_tmo and src_tmo != "tmo_s":
         df = df.rename(columns={src_tmo: "tmo_s"})
@@ -441,12 +440,21 @@ def forecast_120d(
     df_pred["calls"] = calls_pred
     df_pred["tmo_s"] = tmo_pred
 
-    # 7) Erlang C (agentes) — llamadas POSICIONALES (no keywords)
+    # 7) Erlang C (agentes) — robusto a salidas vector/array
     agents_prod, agents_sched = [], []
     for ts, row in df_pred.iterrows():
-        a = required_agents(float(row["calls"]), float(row["tmo_s"]))  # <-- posicional
-        agents_prod.append(int(np.ceil(a)))
-        agents_sched.append(int(np.ceil(schedule_agents(a))))
+        # asegurar escalares
+        a_raw = required_agents(float(row["calls"]), float(row["tmo_s"]))
+        a_scalar = float(np.asarray(a_raw).reshape(-1)[0])
+        a_prod = int(np.ceil(a_scalar))
+
+        sched_raw = schedule_agents(a_scalar)
+        sched_scalar = float(np.asarray(sched_raw).reshape(-1)[0])
+        a_sched = int(np.ceil(sched_scalar))
+
+        agents_prod.append(a_prod)
+        agents_sched.append(a_sched)
+
     df_pred["agents_prod"] = agents_prod
     df_pred["agents_sched"] = agents_sched
 
