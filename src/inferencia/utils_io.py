@@ -1,36 +1,45 @@
-# -*- coding: utf-8 -*-
-from __future__ import annotations
-
-import json
-from pathlib import Path
-
+# src/inferencia/utils_io.py
+import json, os
 import pandas as pd
 
-def write_json_pretty(path: str | Path, df_or_records):
-    """
-    Escribe JSON indentado (UTF-8, ascii off).
-    Acepta DataFrame (se serializa como records) o lista de dicts.
-    """
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
+def write_json(path: str, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-    if isinstance(df_or_records, pd.DataFrame):
-        records = df_or_records.to_dict(orient="records")
-    else:
-        records = df_or_records
+def write_hourly_json(path: str, df_hourly: pd.DataFrame, calls_col: str, tmo_col: str, agentes_col: str):
+    out = (df_hourly.reset_index()
+                   .rename(columns={"index":"ts", calls_col:"llamadas_hora", tmo_col:"tmo_hora", agentes_col:"agentes_requeridos"}))
+    # Asegurar que ts es string serializable
+    out["ts"] = pd.to_datetime(out["ts"], errors="coerce")
+    out = out.dropna(subset=["ts"])
+    out["ts"] = out["ts"].dt.strftime("%Y-%m-%d %H:%M:%S")
 
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(records, f, ensure_ascii=False, indent=2)
+    # Tipos serializables
+    out["llamadas_hora"] = out["llamadas_hora"].astype(int)
+    out["tmo_hora"] = out["tmo_hora"].astype(float)
+    out["agentes_requeridos"] = out["agentes_requeridos"].astype(int)
 
-def write_daily_agg(path: str | Path, df_daily: pd.DataFrame):
-    """
-    Guarda daily agg (DataFrame con índice date) como JSON bonito.
-    """
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    out = df_daily.reset_index()
-    # normalizar fecha a YYYY-MM-DD
-    if "date" in out.columns:
-        out["date"] = pd.to_datetime(out["date"]).dt.strftime("%Y-%m-%d")
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(out.to_dict(orient="records"), f, ensure_ascii=False, indent=2)
+    write_json(path, out.to_dict(orient="records"))
+
+def write_daily_json(path: str, df_hourly: pd.DataFrame, calls_col: str, tmo_col: str):
+    tmp = (df_hourly.reset_index()
+                     .rename(columns={"index": "ts"}))
+
+    # Asegurar que 'ts' es datetime (puede venir como string del index)
+    tmp["ts"] = pd.to_datetime(tmp["ts"], errors="coerce")
+    tmp = tmp.dropna(subset=["ts"])
+
+    # Construir 'fecha' y convertir a string para JSON
+    tmp["fecha"] = tmp["ts"].dt.date.astype(str)
+
+    # Agregar por día: suma de llamadas, promedio de TMO
+    daily = (tmp.groupby("fecha", as_index=False)
+                .agg(llamadas_diarias=(calls_col, "sum"),
+                     tmo_diario=(tmo_col, "mean")))
+
+    # Asegurar tipos serializables
+    daily["llamadas_diarias"] = daily["llamadas_diarias"].astype(int)
+    daily["tmo_diario"] = daily["tmo_diario"].astype(float)
+
+    write_json(path, daily.to_dict(orient="records"))
