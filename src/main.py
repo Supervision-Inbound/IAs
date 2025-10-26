@@ -10,7 +10,7 @@ from src.data.loader_tmo import load_historico_tmo
 
 DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
-TMO_HIST_FILE = "data/HISTORICO_TMO.csv" # <-- VERIFICADO (o usa "data/HISTORICO_TMO.csv" si ese es el nombre)
+TMO_HIST_FILE = "data/HISTORICO_TMO.csv"
 
 TARGET_CALLS_NEW = "recibidos_nacional"
 TARGET_TMO_NEW = "tmo_general"
@@ -84,21 +84,16 @@ def main(horizonte_dias: int):
     dfh = ensure_ts(dfh)
 
     # 2) Fusionar HISTORICO_TMO.csv (alineado por ts)
-    df_tmo_hist_only = None  # <-- Variable para TMO puro
+    df_tmo_hist_only = None  # <-- NUEVA LÍNEA: Variable para TMO puro
     if os.path.exists(TMO_HIST_FILE):
         df_tmo = load_historico_tmo(TMO_HIST_FILE)  # index ts
-        df_tmo_hist_only = df_tmo.copy()  # <-- Guardamos la data pura
+        df_tmo_hist_only = df_tmo.copy()  # <-- NUEVA LÍNEA: Guardamos la data pura
         
-        # === INICIO DE CAMBIO ===
-        # YA NO HACEMOS EL JOIN AQUÍ. La función forecast_120d
-        # ahora maneja los dos streams de datos por separado.
-        
-        # # left-join sobre dfh (mantiene las horas que usa el planner)
-        # dfh = dfh.join(df_tmo, how="left")
-        # # si tmo_general llegó desde TMO_HIST, úsalo como autoridad
-        # if "tmo_general" in dfh.columns:
-        #     dfh[TARGET_TMO_NEW] = dfh["tmo_general"].combine_first(dfh[TARGET_TMO_NEW])
-        # === FIN DE CAMBIO ===
+        # left-join sobre dfh (mantiene las horas que usa el planner)
+        dfh = dfh.join(df_tmo, how="left")
+        # si tmo_general llegó desde TMO_HIST, úsalo como autoridad
+        if "tmo_general" in dfh.columns:
+            dfh[TARGET_TMO_NEW] = dfh["tmo_general"].combine_first(dfh[TARGET_TMO_NEW])
 
     # 3) Derivar calendario para el histórico
     holidays_set = load_holidays(HOLIDAYS_FILE)

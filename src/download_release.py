@@ -39,4 +39,3 @@ if __name__ == "__main__":
     args = ap.parse_args()
     download_latest_assets(args.owner, args.repo, args.out)
 
-
