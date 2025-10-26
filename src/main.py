@@ -7,25 +7,34 @@ import sys
 import warnings
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
+import numpy as np
 
-# Silenciar verbosidad TF (opcional)
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 warnings.filterwarnings("ignore", category=UserWarning)
 
 # ---------- Imports robustos (paquete/standalone) ----------
 def _import_inferencia():
+    # 1) paquete relativo (cuando se corre con `python -m src.main`)
     try:
         from .inferencia.inferencia_core import forecast_120d, TARGET_CALLS, TARGET_TMO, TIMEZONE
         from .inferencia.features import ensure_ts
         return forecast_120d, TARGET_CALLS, TARGET_TMO, TIMEZONE, ensure_ts
     except Exception:
-        here = Path(__file__).resolve().parent
-        sys.path.append(str(here))
-        from inferencia.inferencia_core import forecast_120d, TARGET_CALLS, TARGET_TMO, TIMEZONE
-        from inferencia.features import ensure_ts
+        pass
+    # 2) paquete absoluto (src.*)
+    try:
+        from src.inferencia.inferencia_core import forecast_120d, TARGET_CALLS, TARGET_TMO, TIMEZONE
+        from src.inferencia.features import ensure_ts
         return forecast_120d, TARGET_CALLS, TARGET_TMO, TIMEZONE, ensure_ts
+    except Exception:
+        pass
+    # 3) módulos planos
+    here = Path(__file__).resolve().parent
+    sys.path.append(str(here))
+    from inferencia.inferencia_core import forecast_120d, TARGET_CALLS, TARGET_TMO, TIMEZONE  # type: ignore
+    from inferencia.features import ensure_ts  # type: ignore
+    return forecast_120d, TARGET_CALLS, TARGET_TMO, TIMEZONE, ensure_ts
 
 forecast_120d, TARGET_CALLS, TARGET_TMO, TIMEZONE, ensure_ts = _import_inferencia()
 
@@ -53,11 +62,7 @@ def _coerce_numeric(s: pd.Series) -> pd.Series:
     return pd.to_numeric(s.astype(str).str.replace(",", ".", regex=False), errors="coerce")
 
 def _canonicalize_ts_index(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Asegura que 'ts' sea SOLO índice.
-    """
     d = df.copy()
-    # ensure_ts ya setea índice ts; pero por si viene mezclado:
     if "ts" in d.columns and (d.index.name == "ts" or "ts" in (d.index.names or [])):
         d = d.drop(columns=["ts"])
     if d.index.name != "ts" and "ts" in d.columns:
@@ -69,20 +74,12 @@ def _canonicalize_ts_index(df: pd.DataFrame) -> pd.DataFrame:
     return d
 
 def _prepare_hosting_df(df_raw: pd.DataFrame) -> pd.DataFrame:
-    """
-    - Asegura TS (índice)
-    - renombra columnas a estándar:
-        TARGET_CALLS ('recibidos_nacional')
-        TARGET_TMO   ('tmo_general') si existe 'TMO (segundos)' / 'TMO (s)' / 'aht'
-        'feriados'   (si no existe, 0)
-    """
     df = df_raw.copy()
     cols_map = {c.lower().strip(): c for c in df.columns}
 
     df = ensure_ts(df)
     df = _canonicalize_ts_index(df)
 
-    # llamadas
     if TARGET_CALLS not in df.columns:
         for cand in ["recibidos", "llamadas", "total_llamadas", "recibidos total", "recibidos_nacional"]:
             if cand in cols_map:
@@ -92,7 +89,6 @@ def _prepare_hosting_df(df_raw: pd.DataFrame) -> pd.DataFrame:
         raise ValueError(f"No encuentro la columna de llamadas '{TARGET_CALLS}' ni sus alias.")
     df[TARGET_CALLS] = _coerce_numeric(df[TARGET_CALLS]).fillna(0)
 
-    # TMO (segundos) -> tmo_general (si existe)
     if TARGET_TMO not in df.columns:
         for cand in ["tmo (segundos)", "tmo (s)", "aht", "tmo_seg", "tmo_general"]:
             if cand in cols_map:
@@ -101,7 +97,6 @@ def _prepare_hosting_df(df_raw: pd.DataFrame) -> pd.DataFrame:
     if TARGET_TMO in df.columns:
         df[TARGET_TMO] = _coerce_numeric(df[TARGET_TMO])
 
-    # feriados
     if "feriados" not in df.columns:
         df["feriados"] = 0
     df["feriados"] = pd.to_numeric(df["feriados"], errors="coerce").fillna(0).astype(int)
@@ -167,4 +162,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"[main][ERROR] {e}", file=sys.stderr)
         sys.exit(1)
-
