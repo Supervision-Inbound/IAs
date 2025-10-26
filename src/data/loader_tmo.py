@@ -50,8 +50,19 @@ def _parse_tmo(val):
 def _ensure_ts(df, col_fecha, col_hora):
     # normaliza hora a HH:MM, arma tz local y ordena
     h = df[col_hora].astype(str).str.slice(0, 5)
-    ts = pd.to_datetime(df[col_fecha].astype(str) + " " + h,
-                        errors="coerce", dayfirst=True, format="%Y-%m-%d %H:%M")
+    fecha_str = df[col_fecha].astype(str).str.strip()
+    dt_str = fecha_str + " " + h
+
+    # El histórico real viene con fechas tipo "27-07-2025" (día primero).
+    # La lógica anterior forzaba el formato YYYY-mm-dd, lo que devolvía todo NaT
+    # y dejaba la tabla vacía. Intentamos primero con el formato ISO y, si no
+    # funciona, con el formato día-mes-año; finalmente caemos a un parseo general
+    # con dayfirst=True.
+    ts = pd.to_datetime(dt_str, errors="coerce", format="%Y-%m-%d %H:%M")
+    if ts.isna().all():
+        ts = pd.to_datetime(dt_str, errors="coerce", format="%d-%m-%Y %H:%M")
+    if ts.isna().all():
+        ts = pd.to_datetime(dt_str, errors="coerce", dayfirst=True, infer_datetime_format=True)
     df = df.assign(ts=ts).dropna(subset=["ts"]).sort_values("ts")
     df["ts"] = df["ts"].dt.tz_localize(TZ, ambiguous="NaT", nonexistent="NaT")
     df = df.dropna(subset=["ts"])
