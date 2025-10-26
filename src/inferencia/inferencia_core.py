@@ -1,15 +1,14 @@
 # src/inferencia/inferencia_core.py
 # =============================================================================
 # Núcleo de inferencia — Planner (llamadas) + TMO autoregresivo + Erlang + Export
-# Adaptado para usar TMO AUTORREGRESIVO en inferencia (feed-forward),
-# replicando las features del entrenamiento.
+# Acepta alias de compatibilidad: horizon_days y holidays_set.
 # =============================================================================
 
 from __future__ import annotations
 import os
 import json
 from pathlib import Path
-from typing import Sequence, Tuple
+from typing import Sequence, Tuple, Iterable, Any
 
 import numpy as np
 import pandas as pd
@@ -57,7 +56,6 @@ def _ensure_ts_index(df: pd.DataFrame, tz: str = TZ) -> pd.DataFrame:
     df.index = df.index.tz_localize(tz, nonexistent="shift_forward", ambiguous="NaT", errors="coerce") \
                          .tz_convert(tz)
     df = df.loc[df.index.notna()]
-    # Forzamos frecuencia 1h si es posible (no estricta)
     return df
 
 def _write_json(path: Path, data) -> None:
@@ -156,7 +154,7 @@ def predict_calls_horizonte(
     return s
 
 # =============================================================================
-# Ajustes por feriados — SOLO para llamadas
+# Feriados
 # =============================================================================
 
 def compute_holiday_factors(
@@ -192,19 +190,13 @@ def apply_holiday_adjustment(
             adj.append(v)
     return pd.Series(adj, index=calls_series.index)
 
-# =============================================================================
-# Construcción de horizonte y calendario
-# =============================================================================
-
 def _build_horizon_index(last_ts: pd.Timestamp, horas: int) -> pd.DatetimeIndex:
     start = last_ts + pd.Timedelta(hours=1)
     idx = pd.date_range(start=start, periods=horas, freq="H", tz=TZ)
     return idx
 
 def _calendar_series_for_horizon(idx: pd.DatetimeIndex, feriados_df: pd.DataFrame | None) -> pd.Series:
-    """Genera serie 0/1 de feriados para el horizonte.
-       Si no se entrega un DF de feriados por hora, se asume 0.
-    """
+    """Genera serie 0/1 de feriados para el horizonte desde un DataFrame; si no, 0."""
     if feriados_df is None or "feriados" not in feriados_df.columns:
         return pd.Series(0, index=idx, dtype=int)
     fer = _ensure_ts_index(feriados_df)[["feriados"]].astype(int)
@@ -212,17 +204,40 @@ def _calendar_series_for_horizon(idx: pd.DatetimeIndex, feriados_df: pd.DataFram
     fer.index = idx
     return fer
 
+def _calendar_series_from_holidays_set(idx: pd.DatetimeIndex, holidays_set: Iterable[Any]) -> pd.Series:
+    """
+    Construye 0/1 por hora a partir de un conjunto/lista de feriados (fechas).
+    Acepta: date/datetime/pandas Timestamp/str (YYYY-MM-DD).
+    """
+    # Normalizar a set de fechas (date)
+    dates = set()
+    for d in holidays_set:
+        if isinstance(d, pd.Timestamp):
+            dates.add(d.date())
+        else:
+            try:
+                dates.add(pd.Timestamp(d).date())
+            except Exception:
+                # ignora elementos inválidos silenciosamente
+                pass
+    if not dates:
+        return pd.Series(0, index=idx, dtype=int)
+    ser = pd.Series([1 if ts.date() in dates else 0 for ts in idx], index=idx, dtype=int)
+    return ser
+
 # =============================================================================
-# INFERENCIA PRINCIPAL (120 días por defecto)
+# INFERENCIA PRINCIPAL
 # =============================================================================
 
 def forecast_120d(
     historico_llamadas: pd.DataFrame,     # columnas: ts, recibidos (o calls), feriados (0/1)
     historico_tmo: pd.DataFrame,          # columnas: ts, tmo_s (segundos)
-    feriados_df: pd.DataFrame | None,     # opcional (por hora o diario; se mapea)
+    feriados_df: pd.DataFrame | None = None,     # opcional: serie/DF por hora o diario
     models_dir: str | Path = "models",
     horizonte_dias: int = 120,
-    horizon_days: int | None = None,      # <-- alias para compatibilidad con src/main.py
+    # --- ALIAS DE COMPATIBILIDAD ---
+    horizon_days: int | None = None,             # alias de horizonte_dias
+    holidays_set: Iterable[Any] | None = None,   # alias alternativo a feriados_df (lista/set de fechas)
     exportar_json: bool = True,
 ) -> pd.DataFrame:
     """
@@ -247,7 +262,6 @@ def forecast_120d(
     df_calls_hist = _ensure_ts_index(df_calls_hist)
     df_tmo_hist   = _ensure_ts_index(historico_tmo)
     if "tmo_s" not in df_tmo_hist.columns:
-        # intenta inferir
         tmo_col = next((c for c in df_tmo_hist.columns if "tmo" in c.lower()), None)
         if not tmo_col:
             raise ValueError("No se encontró columna de TMO en historico_tmo.")
@@ -257,17 +271,21 @@ def forecast_120d(
     horizonte_horas = horizonte_dias * 24
     idx_horizonte = _build_horizon_index(last_ts, horas=horizonte_horas)
 
-    # 1) Calendario feriados para horizonte
-    fer_h = _calendar_series_for_horizon(idx_horizonte, feriados_df)
+    # 1) Calendario de feriados para el horizonte
+    if holidays_set is not None:
+        fer_h = _calendar_series_from_holidays_set(idx_horizonte, holidays_set)
+    else:
+        fer_h = _calendar_series_for_horizon(idx_horizonte, feriados_df)
 
     # 2) Predicción de LLAMADAS (feed-forward con Planner)
-    #    History de llamadas por hora: tomar la serie real hasta last_ts
     calls_hist_series = df_calls_hist["calls"].astype(float).sort_index()
-    # Holiday adjustment: computamos factores con históricos (por hora)
+
+    # Factores por hora a partir del histórico real (para ajustar SOLO llamadas en feriados)
     hour_factors = compute_holiday_factors(
         calls_hist=calls_hist_series,
         feriados_hist=df_calls_hist["feriados"].astype(int)
     )
+
     calls_pred_raw = predict_calls_horizonte(
         idx_horizonte=idx_horizonte,
         calls_hist_series=calls_hist_series,
@@ -275,7 +293,7 @@ def forecast_120d(
         models_dir=models_dir,
         cap_k=3.5
     )
-    # Aplicamos ajuste de feriados SOLO a llamadas
+    # Ajuste de feriados SOLO a llamadas
     calls_pred = apply_holiday_adjustment(calls_pred_raw, fer_h, hour_factors)
 
     # 3) Predicción de TMO AUTORREGRESIVO (feed-forward)
@@ -283,7 +301,7 @@ def forecast_120d(
     tmo_pred = predict_tmo_from_models_dir(
         idx_horizonte=idx_horizonte,
         serie_tmo_hist=tmo_hist_series,
-        calls_series=calls_pred,       # usamos las llamadas ya ajustadas
+        calls_series=calls_pred,       # ya ajustadas por feriado
         feriados_series=fer_h,
         models_dir=models_dir,
         fill_prop=(0.55, 0.45),        # si puedes, reemplaza por proporciones reales recientes
@@ -348,9 +366,10 @@ def forecast_120d(
 # Ejemplo de uso (comentado)
 # =============================================================================
 # if __name__ == "__main__":
-#     # Carga tus históricos (deberían venir ya con 'ts' y columnas esperadas)
-#     df_calls = pd.read_csv("data/historical_data.csv")           # ts, recibidos, feriados
-#     df_tmo   = pd.read_csv("data/HISTORICO_TMO.csv")             # ts, tmo_s
-#     df_fer   = pd.read_csv("data/Feriados_Chilev2.csv")          # ts, feriados
-#     res = forecast_120d(df_calls, df_tmo, df_fer, models_dir="models", horizonte_dias=120, exportar_json=True)
+#     df_calls = pd.read_csv("data/historical_data.csv")   # ts, recibidos, feriados
+#     df_tmo   = pd.read_csv("data/HISTORICO_TMO.csv")     # ts, tmo_s
+#     df_fer   = pd.read_csv("data/Feriados_Chilev2.csv")  # ts, feriados
+#     res = forecast_120d(df_calls, df_tmo, df_fer,
+#                         models_dir="models", horizon_days=120, exportar_json=True)
 #     print(res.head())
+
