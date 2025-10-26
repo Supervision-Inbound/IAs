@@ -1,164 +1,150 @@
-# -*- coding: utf-8 -*-
-from __future__ import annotations
-
+# src/main.py
 import argparse
 import os
-import sys
-import warnings
-from pathlib import Path
-
-import pandas as pd
 import numpy as np
+import pandas as pd
+import warnings
 
-os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
-warnings.filterwarnings("ignore", category=UserWarning)
+from src.inferencia.inferencia_core import forecast_120d
+from src.inferencia.features import ensure_ts, add_es_dia_de_pago
+# <--- MODIFICADO: Ya no importamos 'load_historico_tmo'
+# from src.data.loader_tmo import load_historico_tmo 
 
-# ---------- Imports robustos (paquete/standalone) ----------
-def _import_inferencia():
-    # 1) paquete relativo (cuando se corre con `python -m src.main`)
-    try:
-        from .inferencia.inferencia_core import forecast_120d, TARGET_CALLS, TARGET_TMO, TIMEZONE
-        from .inferencia.features import ensure_ts
-        return forecast_120d, TARGET_CALLS, TARGET_TMO, TIMEZONE, ensure_ts
-    except Exception:
-        pass
-    # 2) paquete absoluto (src.*)
-    try:
-        from src.inferencia.inferencia_core import forecast_120d, TARGET_CALLS, TARGET_TMO, TIMEZONE
-        from src.inferencia.features import ensure_ts
-        return forecast_120d, TARGET_CALLS, TARGET_TMO, TIMEZONE, ensure_ts
-    except Exception:
-        pass
-    # 3) módulos planos
-    here = Path(__file__).resolve().parent
-    sys.path.append(str(here))
-    from inferencia.inferencia_core import forecast_120d, TARGET_CALLS, TARGET_TMO, TIMEZONE  # type: ignore
-    from inferencia.features import ensure_ts  # type: ignore
-    return forecast_120d, TARGET_CALLS, TARGET_TMO, TIMEZONE, ensure_ts
+DATA_FILE = "data/historical_data.csv"
+HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
+# <--- MODIFICADO: Eliminada la referencia al TMO_HIST_FILE
+# TMO_HIST_FILE = "data/HISTORICO_TMO.csv" 
 
-forecast_120d, TARGET_CALLS, TARGET_TMO, TIMEZONE, ensure_ts = _import_inferencia()
+TARGET_CALLS_NEW = "recibidos_nacional"
+TARGET_TMO_NEW = "tmo (segundos)" # <--- MODIFICADO: Usamos el TMO del CSV principal
+TZ = "America/Santiago"
 
-# ---------- Rutas por defecto ----------
-KAGGLE_INPUT_DIR = "/kaggle/input/data-ia"
-DEFAULT_XLSX = "Hosting ia.xlsx"
-PUBLIC_DIR = "public"
-
-# ---------- Utilidades ----------
-def _smart_read(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        raise FileNotFoundError(f"No existe el archivo: {path}")
-    low = path.name.lower()
-    if low.endswith((".xlsx", ".xls")):
-        return pd.read_excel(path)
+def smart_read_historical(path: str) -> pd.DataFrame:
     try:
         df = pd.read_csv(path, low_memory=False)
-        if df.shape[1] == 1 and ";" in str(df.iloc[0, 0]):
-            return pd.read_csv(path, delimiter=";", low_memory=False)
-        return df
-    except Exception:
-        return pd.read_csv(path, delimiter=";", low_memory=False)
-
-def _coerce_numeric(s: pd.Series) -> pd.Series:
-    return pd.to_numeric(s.astype(str).str.replace(",", ".", regex=False), errors="coerce")
-
-def _canonicalize_ts_index(df: pd.DataFrame) -> pd.DataFrame:
-    d = df.copy()
-    if "ts" in d.columns and (d.index.name == "ts" or "ts" in (d.index.names or [])):
-        d = d.drop(columns=["ts"])
-    if d.index.name != "ts" and "ts" in d.columns:
-        d = d.set_index("ts")
-    try:
-        d = d.sort_index()
+        if df.shape[1] > 1:
+            return df
     except Exception:
         pass
-    return d
-
-def _prepare_hosting_df(df_raw: pd.DataFrame) -> pd.DataFrame:
-    df = df_raw.copy()
-    cols_map = {c.lower().strip(): c for c in df.columns}
-
-    df = ensure_ts(df)
-    df = _canonicalize_ts_index(df)
-
-    if TARGET_CALLS not in df.columns:
-        for cand in ["recibidos", "llamadas", "total_llamadas", "recibidos total", "recibidos_nacional"]:
-            if cand in cols_map:
-                df.rename(columns={cols_map[cand]: TARGET_CALLS}, inplace=True)
-                break
-    if TARGET_CALLS not in df.columns:
-        raise ValueError(f"No encuentro la columna de llamadas '{TARGET_CALLS}' ni sus alias.")
-    df[TARGET_CALLS] = _coerce_numeric(df[TARGET_CALLS]).fillna(0)
-
-    if TARGET_TMO not in df.columns:
-        for cand in ["tmo (segundos)", "tmo (s)", "aht", "tmo_seg", "tmo_general"]:
-            if cand in cols_map:
-                df.rename(columns={cols_map[cand]: TARGET_TMO}, inplace=True)
-                break
-    if TARGET_TMO in df.columns:
-        df[TARGET_TMO] = _coerce_numeric(df[TARGET_TMO])
-
-    if "feriados" not in df.columns:
-        df["feriados"] = 0
-    df["feriados"] = pd.to_numeric(df["feriados"], errors="coerce").fillna(0).astype(int)
-
-    return df.sort_index()
-
-def _build_holidays_set(df_hosting: pd.DataFrame) -> set:
-    if "feriados" not in df_hosting.columns:
-        return set()
-    mask = df_hosting["feriados"].fillna(0).astype(int) == 1
-    if not mask.any():
-        return set()
-    idx = df_hosting.index
+    # Fallback a delimitador ;
     try:
-        dates = idx.tz_convert(TIMEZONE).date
+        return pd.read_csv(path, delimiter=';', low_memory=False)
+    except Exception as e:
+        raise ValueError(f"No se pudo leer el CSV {path} con , ni con ;. Error: {e}")
+
+def parse_tmo_to_seconds(val):
+    if pd.isna(val): return np.nan
+    s = str(val).strip().replace(",", ".")
+    if s.replace(".", "", 1).isdigit():
+        try: return float(s)
+        except: return np.nan
+    
+    # Check si es HH:MM:SS o MM:SS
+    parts = s.split(":")
+    try:
+        if len(parts) == 3: return float(parts[0])*3600 + float(parts[1])*60 + float(parts[2])
+        if len(parts) == 2: return float(parts[1])*60 + float(parts[0]) # Asumimos MM:SS
     except Exception:
-        dates = idx.date
-    return set(pd.Series(dates, index=idx)[mask].unique().tolist())
+        return np.nan
+    return np.nan
 
-# ---------- Main ----------
-def main(horizonte_dias: int):
-    Path(PUBLIC_DIR).mkdir(parents=True, exist_ok=True)
+def load_holidays(path: str) -> set:
+    try:
+        df_h = pd.read_csv(path, header=None, names=['date', 'desc'])
+        df_h['date'] = pd.to_datetime(df_h['date'], dayfirst=True).dt.date
+        return set(df_h['date'])
+    except Exception as e:
+        print(f"WARN: No se pudo cargar feriados desde {path}. {e}", file=sys.stderr)
+        return set()
 
-    candidates = [
-        Path(KAGGLE_INPUT_DIR) / DEFAULT_XLSX,
-        Path("data") / DEFAULT_XLSX,
-        Path("data") / "historical_data.csv",
-        Path("data") / "Hosting.csv",
-    ]
-    src_path = next((p for p in candidates if p.exists()), None)
-    if src_path is None:
-        raise FileNotFoundError(
-            f"No se encontró el histórico de Hosting. Revisé: {', '.join(str(c) for c in candidates)}"
-        )
-    print(f"[main] Leyendo histórico desde: {src_path}")
-    df_raw = _smart_read(src_path)
+def mark_holidays_index(idx: pd.DatetimeIndex, holidays_set: set) -> pd.Series:
+    return pd.Series(idx.date, index=idx).isin(holidays_set).astype(int)
 
-    df = _prepare_hosting_df(df_raw)
-    holidays_set = _build_holidays_set(df)
-    print(f"[main] Feriados detectados (fechas únicas): {len(holidays_set)}")
 
-    print(f"[main] Ejecutando forecast_120d (horizonte={horizonte_dias} días)...")
+def run_forecast_pipeline():
+    """
+    Función principal que ejecuta el pipeline de inferencia.
+    """
+    print(f"Iniciando pipeline de inferencia...")
+    print(f"Usando data histórica: {DATA_FILE}")
+
+    # 1) Cargar histórico (el CSV unificado)
+    df_raw = smart_read_historical(DATA_FILE)
+    
+    # 2) <--- MODIFICADO: Procesamiento unificado
+    # Ya no cargamos TMO por separado.
+    # Aseguramos que 'recibidos_nacional' y 'tmo (segundos)' existan y sean numéricos
+    
+    dfh = ensure_ts(df_raw, tz=TZ)
+    
+    if TARGET_CALLS_NEW not in dfh.columns:
+        # Intentar buscar columnas candidatas para LLAMADAS
+        call_cands = ['recibidos', 'llamadas_recibidas', 'calls']
+        found_call = False
+        for c in call_cands:
+            if c in dfh.columns:
+                dfh = dfh.rename(columns={c: TARGET_CALLS_NEW})
+                found_call = True
+                break
+        if not found_call:
+             raise ValueError(f"No se encuentra la columna de llamadas '{TARGET_CALLS_NEW}' en {DATA_FILE}")
+    
+    if TARGET_TMO_NEW not in dfh.columns:
+        # Intentar buscar columnas candidatas para TMO
+        tmo_cands = ['tmo_general', 'tmo', 'tmo (s)', 'tmo seg']
+        found_tmo = False
+        for c in tmo_cands:
+             if c in dfh.columns:
+                dfh = dfh.rename(columns={c: TARGET_TMO_NEW})
+                found_tmo = True
+                break
+        if not found_tmo:
+            raise ValueError(f"No se encuentra la columna TMO '{TARGET_TMO_NEW}' en {DATA_FILE}")
+
+    print(f"Usando '{TARGET_CALLS_NEW}' para llamadas y '{TARGET_TMO_NEW}' para TMO.")
+
+    # Convertir a numérico
+    dfh[TARGET_CALLS_NEW] = pd.to_numeric(dfh[TARGET_CALLS_NEW], errors='coerce')
+    
+    # Intentar parsear TMO si es string (HH:MM:SS)
+    if not pd.api.types.is_numeric_dtype(dfh[TARGET_TMO_NEW]):
+        print(f"Columna '{TARGET_TMO_NEW}' no es numérica, intentando parsear H:M:S...")
+        dfh[TARGET_TMO_NEW] = dfh[TARGET_TMO_NEW].apply(parse_tmo_to_seconds)
+        
+    dfh[TARGET_TMO_NEW] = pd.to_numeric(dfh[TARGET_TMO_NEW], errors='coerce')
+
+    # Rellenar nulos iniciales o faltantes
+    dfh[TARGET_CALLS_NEW] = dfh[TARGET_CALLS_NEW].fillna(0)
+    dfh[TARGET_TMO_NEW] = dfh[TARGET_TMO_NEW].fillna(method='ffill').fillna(200) # ffill y luego un valor default
+    
+    # 3) Derivar calendario para el histórico
+    holidays_set = load_holidays(HOLIDAYS_FILE)
+    if "feriados" not in dfh.columns:
+        dfh["feriados"] = mark_holidays_index(dfh.index, holidays_set).values
+    dfh["feriados"] = pd.to_numeric(dfh["feriados"], errors='coerce').fillna(0).astype(int)
+    
+    if "es_dia_de_pago" not in dfh.columns:
+        dfh["es_dia_de_pago"] = add_es_dia_de_pago(dfh).values
+
+    # 4) ffill de columnas clave para evitar NaN en el borde
+    for c in [TARGET_TMO_NEW, "feriados", "es_dia_de_pago"]:
+        if c in dfh.columns:
+            dfh[c] = dfh[c].ffill()
+
+    # 5) <--- MODIFICADO: Forecast
+    # Ya no pasamos 'df_tmo_hist_only'. La función 'forecast_120d'
+    # usará el 'dfh' unificado para las features de TMO.
+    print("Iniciando forecast_120d...")
     df_hourly = forecast_120d(
-        df_hist_joined=df,
-        df_hist_tmo_only=None,
-        horizon_days=int(horizonte_dias),
+        dfh.reset_index(),
+        # df_tmo_hist_only.reset_index() if df_tmo_hist_only is not None else None, # <--- ELIMINADO
         holidays_set=holidays_set
     )
 
-    print("\n[main] Resumen de la predicción (primeras 5 filas):")
-    print(df_hourly.head().to_string())
-    print("\n[main] Archivos generados en 'public/':")
-    print(" - prediccion_horaria.json")
-    print(" - prediccion_diaria.json")
-    print("\n[main] Listo.")
+    print("Pipeline de inferencia completado.")
+    return df_hourly
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--horizonte", type=int, default=120, help="Días de horizonte a predecir (default: 120)")
-    args = parser.parse_args()
-    try:
-        main(args.horizonte)
-    except Exception as e:
-        print(f"[main][ERROR] {e}", file=sys.stderr)
-        sys.exit(1)
+    warnings.simplefilter(action='ignore', category=FutureWarning)
+    run_forecast_pipeline()
