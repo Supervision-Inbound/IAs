@@ -1,4 +1,7 @@
 # src/inferencia/inferencia_core.py
+import os
+import glob
+import pathlib
 import json
 import joblib
 import numpy as np
@@ -9,32 +12,99 @@ from .features import ensure_ts, add_time_parts, add_lags_mas, dummies_and_reind
 from .erlang import required_agents, schedule_agents
 from .utils_io import write_daily_json, write_hourly_json
 
+# =========================
+# Config & rutas de modelos
+# =========================
+
 TIMEZONE = "America/Santiago"
 PUBLIC_DIR = "public"
 
+# --- Resolver flexible de artefactos TMO (detecta en release) ---
+def _candidate_dirs():
+    here = pathlib.Path(".").resolve()
+    bases = [
+        here,
+        here / "models",
+        here / "modelos",
+        here / "release",
+        here / "releases",
+        here / "artifacts",
+        here / "outputs",
+        here / "output",
+        here / "dist",
+        here / "build",
+        pathlib.Path(os.environ.get("GITHUB_WORKSPACE", ".")),
+        pathlib.Path("/kaggle/working/models"),
+        pathlib.Path("/kaggle/working"),
+    ]
+    uniq = []
+    for p in bases:
+        try:
+            p = p.resolve()
+            if p.exists() and p not in uniq:
+                uniq.append(p)
+        except Exception:
+            pass
+    return uniq
+
+def _find_one(patterns, search_dirs=None):
+    if isinstance(patterns, str):
+        patterns = [patterns]
+    search_dirs = search_dirs or _candidate_dirs()
+    for d in search_dirs:
+        for pat in patterns:
+            for match in glob.glob(str(d / "**" / pat), recursive=True):
+                p = pathlib.Path(match)
+                if p.is_file():
+                    return str(p)
+    return None
+
+def _resolve_tmo_artifacts():
+    paths = {
+        "keras": _find_one(["modelo_tmo.keras", "tmo*.keras", "*_tmo*.keras"]),
+        "scaler": _find_one(["scaler_tmo.pkl", "*tmo*scaler*.pkl", "*scaler*_tmo*.pkl"]),
+        "cols": _find_one(["training_columns_tmo.json", "*tmo*columns*.json", "*training*columns*to*.json"]),
+        "baseline": _find_one(["tmo_baseline_dow_hour.csv", "*baseline*dw*hour*.csv", "*tmo*baseline*.csv"]),
+        "meta": _find_one(["tmo_residual_meta.json", "*tmo*residual*meta*.json"]),
+    }
+    return paths
+
+_paths = _resolve_tmo_artifacts()
+# Si quieres ver qué encontró, descomenta:
+# print("INFO TMO artifacts:", {k: (v if v else "DEFAULT_PATH") for k, v in _paths.items()})
+
+# --- Planner (volumen). Mantenemos rutas por defecto del repo ---
 PLANNER_MODEL = "models/modelo_planner.keras"
 PLANNER_SCALER = "models/scaler_planner.pkl"
-PLANNER_COLS = "models/training_columns_planner.json"
+PLANNER_COLS   = "models/training_columns_planner.json"
 
-TMO_MODEL = "models/modelo_tmo.keras"
-TMO_SCALER = "models/scaler_tmo.pkl"
-TMO_COLS = "models/training_columns_tmo.json"
+# --- TMO residual (tomamos lo que detecte el release; fallback = defaults) ---
+TMO_MODEL    = _paths.get("keras")    or "models/modelo_tmo.keras"
+TMO_SCALER   = _paths.get("scaler")   or "models/scaler_tmo.pkl"
+TMO_COLS     = _paths.get("cols")     or "models/training_columns_tmo.json"
+TMO_BASELINE = _paths.get("baseline") or "models/tmo_baseline_dow_hour.csv"
+TMO_META     = _paths.get("meta")     or "models/tmo_residual_meta.json"
 
-# ======= Ajuste clave: el volumen ahora es 'contestados' =======
+# ======================
+# Parámetros de negocio
+# ======================
+
+# Volumen principal (como pediste): contestados
 TARGET_CALLS = "contestados"
-TARGET_TMO = "tmo_general"
+# TMO en segundos (si en el histórico viene en otro formato, se normaliza en main.py)
+TARGET_TMO   = "tmo_general"
 
-# Ventana de lookback para construir lags pro
+# Ventana de lookback para lags/MA
 HIST_WINDOW_DAYS = 90
 
-# ======= NUEVO: Guardrail Outliers (config) =======
+# Guardrail Outliers (config)
 ENABLE_OUTLIER_CAP = True
 K_WEEKDAY = 6.0
 K_WEEKEND = 7.0
 
-# ======= Artefactos TMO residual =======
-TMO_BASELINE = "models/tmo_baseline_dow_hour.csv"
-TMO_META     = "models/tmo_residual_meta.json"
+# ================
+# Utilidades varias
+# ================
 
 def _load_cols(path: str):
     with open(path, "r") as f:
@@ -206,17 +276,58 @@ def _is_holiday(ts, holidays_set: set) -> int:
         d = ts.date()
     return 1 if d in holidays_set else 0
 
-# ======= Residual TMO helpers =======
-def _load_tmo_residual_artifacts():
-    with open(TMO_META, "r", encoding="utf-8") as f:
-        meta = json.load(f)
-    base = pd.read_csv(TMO_BASELINE)
-    base = base[["dow","hour","tmo_baseline"]].copy()
-    base["dow"]  = base["dow"].astype(int)
+# =============================================
+# TMO residual: carga de artefactos y fallback
+# =============================================
+
+def _try_build_tmo_artifacts_from_history(df_hist: pd.DataFrame):
+    """
+    Si no existen los artefactos TMO, generamos:
+      - baseline por (dow,hour) desde el histórico (mediana de TARGET_TMO)
+      - resid_mean y resid_std desde el residuo histórico
+    Si el histórico no tiene TARGET_TMO, usamos baseline constante 180s y residuo ~ 0±1.
+    """
+    print("WARN: Artefactos TMO no encontrados. Construyendo baseline y meta desde histórico...")
+    d = ensure_ts(df_hist.copy())
+    d = add_time_parts(d)
+
+    if TARGET_TMO in d.columns:
+        tmo = pd.to_numeric(d[TARGET_TMO], errors="coerce")
+        base = (d.assign(tmo_s=tmo)
+                  .groupby(["dow","hour"])["tmo_s"]
+                  .median()
+                  .rename("tmo_baseline")
+                  .reset_index())
+        merged = d.merge(base, on=["dow","hour"], how="left")
+        resid = pd.to_numeric(merged[TARGET_TMO], errors="coerce") - merged["tmo_baseline"]
+        resid_mean = float(np.nanmean(resid))
+        resid_std  = float(np.nanstd(resid)) or 1.0
+    else:
+        base = pd.DataFrame({"dow": np.repeat(np.arange(7), 24),
+                             "hour": list(np.tile(np.arange(24), 7)),
+                             "tmo_baseline": 180.0})
+        resid_mean = 0.0
+        resid_std  = 1.0
+
+    base["dow"] = base["dow"].astype(int)
     base["hour"] = base["hour"].astype(int)
-    resid_mean = float(meta.get("resid_mean", 0.0))
-    resid_std  = float(meta.get("resid_std",  1.0)) or 1.0
+    print(f"INFO: baseline TMO generado (rows={len(base)}), resid_mean={resid_mean:.3f}, resid_std={resid_std:.3f}")
     return base, resid_mean, resid_std
+
+def _load_tmo_residual_artifacts_or_fallback(df_hist: pd.DataFrame):
+    has_meta = os.path.exists(TMO_META)
+    has_base = os.path.exists(TMO_BASELINE)
+    if has_meta and has_base:
+        with open(TMO_META, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        base = pd.read_csv(TMO_BASELINE)
+        base = base[["dow","hour","tmo_baseline"]].copy()
+        base["dow"]  = base["dow"].astype(int)
+        base["hour"] = base["hour"].astype(int)
+        resid_mean = float(meta.get("resid_mean", 0.0))
+        resid_std  = float(meta.get("resid_std",  1.0)) or 1.0
+        return base, resid_mean, resid_std
+    return _try_build_tmo_artifacts_from_history(df_hist)
 
 def _add_tmo_resid_features(df_in: pd.DataFrame) -> pd.DataFrame:
     d = df_in.copy()
@@ -233,28 +344,31 @@ def _add_tmo_resid_features(df_in: pd.DataFrame) -> pd.DataFrame:
     d = add_time_parts(d)
     return d
 
+# ==========================
+# Núcleo de la inferencia
+# ==========================
+
 def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holidays_set: set | None = None):
     """
     Versión Autorregresiva (v8)
-    - Planner iterativo (volumen = contestados).
+    - Volumen iterativo (volumen = contestados) con planner.
     - TMO residual iterativo usando baseline (dow,hour) + residuo desestandarizado.
     - Ajustes por FERIADOS y POST-FERIADOS.
-    - CAP outliers por (dow,hour) con mediana+MAD.
+    - CAP de outliers por (dow,hour) con mediana+MAD.
     - Erlang C y salidas JSON.
     """
-    # === Artefactos ===
+    # === Artefactos del planner ===
     m_pl = tf.keras.models.load_model(PLANNER_MODEL, compile=False)
     sc_pl = joblib.load(PLANNER_SCALER)
     cols_pl = _load_cols(PLANNER_COLS)
 
+    # === Artefactos del TMO residual ===
     m_tmo = tf.keras.models.load_model(TMO_MODEL, compile=False)
     sc_tmo = joblib.load(TMO_SCALER)
     cols_tmo = _load_cols(TMO_COLS)
-    tmo_base_table, resid_mean, resid_std = _load_tmo_residual_artifacts()
 
-    # === Base histórica (para lags) ===
+    # === Base histórica ===
     df = ensure_ts(df_hist_joined)
-
     if TARGET_CALLS not in df.columns:
         raise ValueError(f"Falta columna {TARGET_CALLS} en historical_data.csv")
     if "feriados" not in df.columns:
@@ -262,10 +376,14 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
     if "es_dia_de_pago" not in df.columns:
         df["es_dia_de_pago"] = 0
 
-    # baseline histórica y residuo histórico (si hay TMO observado)
+    # Cargar baseline/meta TMO o construir fallback con histórico
+    tmo_base_table, resid_mean, resid_std = _load_tmo_residual_artifacts_or_fallback(df)
+
+    # baseline & residuo histórico
     keep_cols = [TARGET_CALLS, "feriados", "es_dia_de_pago"]
     if TARGET_TMO in df.columns:
         keep_cols.append(TARGET_TMO)
+
     df_tmp = add_time_parts(df[keep_cols].copy())
     df_tmp = df_tmp.merge(tmo_base_table, on=["dow","hour"], how="left")
     if TARGET_TMO in df_tmp.columns:
@@ -292,7 +410,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
         tz=TIMEZONE
     )
 
-    # ===== Bucle Iterativo (contestados + TMO) =====
+    # ===== Bucle Iterativo =====
     print("Iniciando predicción iterativa (Contestados + TMO residual)...")
     for ts in future_ts:
         # 1) Volumen (contestados) con planner
@@ -304,10 +422,17 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
         yhat_calls = max(0.0, yhat_calls)
 
         # 2) Baseline TMO para este ts
-        dow = int(ts.tz_convert(TIMEZONE).weekday())
-        hour = int(ts.tz_convert(TIMEZONE).hour)
+        try:
+            dow = int(ts.tz_convert(TIMEZONE).weekday())
+            hour = int(ts.tz_convert(TIMEZONE).hour)
+        except Exception:
+            dow = int(ts.weekday()); hour = int(ts.hour)
+
         base_row = tmo_base_table[(tmo_base_table["dow"]==dow)&(tmo_base_table["hour"]==hour)]
-        tmo_base = float(base_row["tmo_baseline"].iloc[0]) if not base_row.empty else float(dfp["tmo_baseline"].median())
+        if not base_row.empty:
+            tmo_base = float(base_row["tmo_baseline"].iloc[0])
+        else:
+            tmo_base = float(np.nanmedian(tmo_base_table["tmo_baseline"])) if "tmo_baseline" in tmo_base_table.columns else 180.0
 
         # 3) Features residuales TMO
         tmp_tmo = dfp[["tmo_resid","feriados","es_dia_de_pago"]].copy()
@@ -331,12 +456,11 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
 
     # ===== Curva base =====
     df_hourly = pd.DataFrame(index=future_ts)
-    # mantenemos el nombre 'calls' en la salida para compatibilidad con alertas y front,
-    # pero representa 'contestados' predichos
+    # Nota: mantenemos nombre 'calls' en salida para compatibilidad; aquí representa 'contestados'
     df_hourly["calls"] = np.round(dfp.loc[future_ts, TARGET_CALLS]).astype(int)
     df_hourly["tmo_s"] = np.round(dfp.loc[future_ts, "tmo_baseline"] + dfp.loc[future_ts, "tmo_resid"]).astype(int)
 
-    # ===== Ajustes por feriados (opcional) =====
+    # ===== Ajustes por feriados =====
     if holidays_set and len(holidays_set) > 0:
         (f_calls_by_hour, f_tmo_by_hour,
          _g_calls, _g_tmo, post_calls_by_hour) = compute_holiday_factors(df, holidays_set, col_calls=TARGET_CALLS, col_tmo=TARGET_TMO)
@@ -369,7 +493,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
     # ===== Salidas =====
     write_hourly_json(f"{PUBLIC_DIR}/prediccion_horaria.json",
                       df_hourly, "calls", "tmo_s", "agents_sched")
-    # PROMEDIO DIARIO PONDERADO por 'contestados' (en futuro usamos 'calls' que es contestados predicho)
+    # TMO diario ponderado por 'contestados' (en futuro usamos 'calls' como proxy)
     write_daily_json(f"{PUBLIC_DIR}/prediccion_diaria.json",
                      df_hourly, "calls", "tmo_s", weights_col="calls")
 
