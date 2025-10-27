@@ -18,10 +18,16 @@ jobs:
         with:
           python-version: "3.11"
 
+      # --- ¡AQUÍ ESTÁ LA CORRECCIÓN! ---
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
+          # Forzar la instalación/actualización de numpy PRIMERO
+          # Esto resuelve el error 'numpy.dtype size changed'
+          pip install --upgrade numpy 
+          # Instalar el resto de los requisitos
           pip install -r requirements.txt
+      # --- FIN DE LA CORRECCIÓN ---
 
       - name: Download release assets
         env:
@@ -46,6 +52,5 @@ jobs:
       - name: Upload JSON artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: salidas-json
-          path: public/*.json
-
+          name: pronosticos-json
+          path: public/
