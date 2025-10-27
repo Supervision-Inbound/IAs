@@ -5,13 +5,16 @@ import numpy as np
 TIMEZONE = "America/Santiago"
 
 def _coerce_ts_series(s: pd.Series) -> pd.DatetimeIndex:
-    """Parsea una serie a datetime con TZ America/Santiago, tolerante a formatos."""
-    # Pandas >=2 ya ignora infer_datetime_format; evitamos ese arg.
-    ts = pd.to_datetime(s, errors='coerce', dayfirst=True)
-    # Si viene ya tz-aware, convertimos; si no, localizamos.
-    if getattr(ts.dt, "tz", None) is not None:
-        return ts.dt.tz_convert(TIMEZONE)
-    return ts.dt.tz_localize(TIMEZONE, ambiguous='NaT', nonexistent='NaT')
+    """
+    Parsea una serie a datetime con TZ America/Santiago, tolerante a formatos y
+    a mezclas de zonas horarias. Estrategia:
+      1) Parsear SIEMPRE con utc=True (evita mixed-TZ -> dtype object).
+      2) Convertir a TIMEZONE con tz_convert.
+    """
+    # Nota: dayfirst=True para compat ancha con formatos DD/MM/AAAA HH:MM
+    ts = pd.to_datetime(s, errors='coerce', dayfirst=True, utc=True)
+    # Convertimos de UTC a la zona de trabajo:
+    return ts.dt.tz_convert(TIMEZONE)
 
 def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -22,15 +25,15 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     Reglas:
       1) Si ya hay índice 'ts' o columna 'ts', se respeta y se normaliza.
       2) Si no hay 'ts', se intenta 'fecha' + 'hora'.
-      3) Fallback: 'datetime'/'datatime'.
+      3) Fallback: 'datetime'/'datatime'/'fecha_hora'.
     """
     d = df.copy()
 
-    # Caso A: ya existe índice con nombre 'ts' -> convertir a columna temporal para normalizar
+    # Si el índice ya se llama 'ts', lo paso a columna para normalizar homogéneo
     if isinstance(d.index, pd.DatetimeIndex) and d.index.name == 'ts':
         d = d.reset_index()
 
-    # Caso B: si existe columna 'ts', normalizarla
+    # Mapa de columnas normalizadas
     cols = {c.strip().lower(): c for c in d.columns}
     ts_col = cols.get('ts')
 
@@ -38,7 +41,7 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
         ts = _coerce_ts_series(d[ts_col].astype(str))
         d['__ts__'] = ts
     else:
-        # Caso C: 'fecha' + 'hora'
+        # Intento fecha + hora
         fecha_key = next((k for k in ['fecha','date'] if k in cols), None)
         hora_key  = next((k for k in ['hora','hour','hora numero','hora_número','h'] if k in cols), None)
 
@@ -46,11 +49,12 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
             fecha_col = cols[fecha_key]
             hora_col  = cols[hora_key]
 
+            # Fecha a string normalizado
             fecha_dt = pd.to_datetime(d[fecha_col], errors='coerce', dayfirst=True)
 
             # Normalizar hora a HH:MM
             hora_str = d[hora_col].astype(str).str.strip().str.replace('.', ':', regex=False)
-            # Reparar formatos parciales tipo "8" -> "08:00", "8:0" -> "08:00"
+
             def _fix_hhmm(x: str) -> str:
                 if ':' not in x:
                     # solo hora -> HH:MM
@@ -71,40 +75,51 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
                     except:
                         m = 0
                 return f"{h:02d}:{m:02d}"
+
             hora_str = hora_str.apply(_fix_hhmm)
 
-            ts = pd.to_datetime(
+            # Combinar y parsear en UTC, luego convertir a TIMEZONE
+            ts_utc = pd.to_datetime(
                 fecha_dt.astype(str) + " " + hora_str,
-                errors='coerce', format="%Y-%m-%d %H:%M"
+                errors='coerce',
+                format="%Y-%m-%d %H:%M",
+                utc=True
             )
-            ts = ts.dt.tz_localize(TIMEZONE, ambiguous='NaT', nonexistent='NaT')
-            d['__ts__'] = ts
+            d['__ts__'] = ts_utc.dt.tz_convert(TIMEZONE)
         else:
-            # Caso D: fallback a 'datetime'/'datatime'
+            # Fallback: datetime/datatime/fecha_hora
             dt_key = next((k for k in ['datetime','datatime','fecha_hora'] if k in cols), None)
             if not dt_key:
                 raise ValueError("No se pudieron inferir columnas temporales. Se esperaba 'ts' o 'fecha'+'hora'.")
             dt_col = cols[dt_key]
             d['__ts__'] = _coerce_ts_series(d[dt_col].astype(str))
 
-    # Limpieza: columna/índice 'ts' duplicados
-    # Si existía una columna 'ts', la descartamos a favor de '__ts__'
+    # Limpieza de duplicados 'ts'
     if ts_col is not None and 'ts' in d.columns:
         d = d.drop(columns=['ts'])
 
     # Construir índice final
     d = d.dropna(subset=['__ts__']).rename(columns={'__ts__':'ts'})
-    # Evitar ambigüedad: si por alguna razón quedó una columna 'ts' y también la usaremos de índice, elimínala
+
+    # Evitar ambigüedad: si por alguna razón 'ts' también es nombre de índice, quitar columna
     if 'ts' in d.columns and 'ts' in getattr(d.index, 'names', []):
         d = d.drop(columns=['ts'])
+
     # Orden y set_index seguro
     d = d.sort_values('ts').set_index('ts')
-    # Asegurar que NO haya una columna 'ts' residual
+
+    # Garantizar tz (si alguien pasó un índice naïve)
+    if not isinstance(d.index, pd.DatetimeIndex):
+        d.index = pd.DatetimeIndex(d.index)
+    if d.index.tz is None:
+        d.index = d.index.tz_localize(TIMEZONE)
+
+    # Asegurar que no quede columna 'ts'
     if 'ts' in d.columns:
         d = d.drop(columns=['ts'])
 
-    # Normalizar tipo para downstream
-    d.index = pd.DatetimeIndex(d.index).tz_convert(TIMEZONE)
+    # Convertir definitivamente a la TZ de trabajo
+    d.index = d.index.tz_convert(TIMEZONE)
     return d
 
 def add_time_parts(df_or_indexed: pd.DataFrame) -> pd.DataFrame:
@@ -114,6 +129,11 @@ def add_time_parts(df_or_indexed: pd.DataFrame) -> pd.DataFrame:
         idx = _coerce_ts_series(d['ts'].astype(str))
     elif isinstance(d.index, pd.DatetimeIndex):
         idx = d.index
+        # Si el índice no tiene TZ, lo localizo a la zona de trabajo
+        if idx.tz is None:
+            idx = idx.tz_localize(TIMEZONE)
+        else:
+            idx = idx.tz_convert(TIMEZONE)
     else:
         raise ValueError("add_time_parts requiere un índice datetime o una columna 'ts'.")
 
@@ -146,5 +166,4 @@ def dummies_and_reindex(df_row: pd.DataFrame, training_cols: list) -> pd.DataFra
         if c not in d.columns:
             d[c] = 0
     return d.reindex(columns=training_cols, fill_value=0)
-
 
