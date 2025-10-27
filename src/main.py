@@ -10,7 +10,8 @@ from src.inferencia.features import ensure_ts
 DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
 
-TARGET_CALLS_NEW = "recibidos_nacional"
+# ======= Ajuste clave: volumen esperado en histórico =======
+TARGET_CALLS_NEW = "contestados"
 TARGET_TMO_NEW = "tmo_general"
 TZ = "America/Santiago"
 
@@ -55,27 +56,26 @@ def mark_holidays_index(dt_index, holidays_set: set) -> pd.Series:
     return pd.Series([d in holidays_set for d in idx_dates], index=dt_index, dtype=int, name="feriados")
 
 def add_es_dia_de_pago(df_idx: pd.DataFrame) -> pd.Series:
-    # No se usa en TMO, pero preservamos la columna en 0 por compatibilidad
     return pd.Series(0, index=df_idx.index, name="es_dia_de_pago")
 
 def main(horizonte_dias: int):
     os.makedirs("public", exist_ok=True)
 
-    # 1) Leer histórico principal (llamadas + TMO en el MISMO CSV)
+    # 1) Leer histórico principal (contestados + TMO en el MISMO CSV)
     dfh = smart_read_historical(DATA_FILE)
     dfh.columns = dfh.columns.str.strip()
 
-    # Normalizar columna de llamadas si viene con otro alias
+    # Normalizar columna de volumen a 'contestados'
     if TARGET_CALLS_NEW not in dfh.columns:
-        for cand in ["recibidos_nacional", "recibidos", "total_llamadas", "llamadas"]:
+        for cand in ["contestados", "recibidos_nacional", "recibidos", "total_llamadas", "llamadas"]:
             if cand in dfh.columns:
                 dfh = dfh.rename(columns={cand: TARGET_CALLS_NEW})
                 break
 
-    # Normalizar TMO a segundos (acepta mm:ss, hh:mm:ss o número)
+    # Normalizar TMO a segundos -> 'tmo_general'
     if TARGET_TMO_NEW not in dfh.columns:
         tmo_source = None
-        for cand in ["tmo (segundos)", "tmo_seg", "tmo", "tmo_general", "aht"]:
+        for cand in ["tmo_general", "tmo (segundos)", "tmo (s)", "tmo_seg", "tmo", "aht"]:
             if cand in dfh.columns:
                 tmo_source = cand; break
         if tmo_source:
@@ -94,7 +94,7 @@ def main(horizonte_dias: int):
     else:
         dfh["es_dia_de_pago"] = 0  # forzado según nueva lógica
 
-    # 4) ffill de columnas clave para evitar NaN en el borde
+    # 4) ffill columnas clave
     for c in [TARGET_TMO_NEW, "feriados", "es_dia_de_pago",
               "proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
         if c in dfh.columns:
@@ -107,7 +107,7 @@ def main(horizonte_dias: int):
         holidays_set=holidays_set
     )
 
-    # 6) Alertas clima (usa la curva del planner)
+    # 6) Alertas clima (usa la curva de volumen)
     from src.inferencia.alertas_clima import generar_alertas
     generar_alertas(df_hourly[["calls"]])
 
@@ -116,4 +116,5 @@ if __name__ == "__main__":
     ap.add_argument("--horizonte", type=int, default=120)
     args = ap.parse_args()
     main(args.horizonte)
+
 
