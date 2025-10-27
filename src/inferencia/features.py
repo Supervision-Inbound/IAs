@@ -38,7 +38,8 @@ def ensure_ts(df: pd.DataFrame, tz: str = TIMEZONE) -> pd.DataFrame:
         ts_col = col('datetime')
     
     if ts_col:
-        ts = pd.to_datetime(d[ts_col], errors='coerce', dayfirst=True, infer_datetime_format=True)
+        # Quitamos infer_datetime_format (deprecated)
+        ts = pd.to_datetime(d[ts_col], errors='coerce', dayfirst=True)
     else:
         raise ValueError("No se encontraron columnas 'ts', ('fecha' y 'hora'), o 'datatime' en el CSV.")
 
@@ -83,16 +84,18 @@ def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     d['cos_dow']  = np.cos(2 * np.pi * d['dow'] / 7)
     return d
 
-
+# --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN!! ---
 def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     """Crea features autoregresivas (lags y MAs) para el target_col."""
-    d = df.copy()
     
-    # Usar shift(1) para MAs y EMAs para evitar data leak
-    target_shifted = d[target_col].shift(1)
+    # No copiar el df, crear un df nuevo solo con las features AR
+    d = pd.DataFrame(index=df.index)
+    
+    target = df[target_col] # Usar el target original
+    target_shifted = target.shift(1) # Usar shift(1) para MAs/EMAs
     
     for lag in [24, 48, 72, 168]:
-        d[f"lag_{lag}"] = d[target_col].shift(lag)
+        d[f"lag_{lag}"] = target.shift(lag)
     
     for w in [6, 12, 24, 72, 168]:
         d[f"ma_{w}"] = target_shifted.rolling(w, min_periods=1).mean()
@@ -104,7 +107,12 @@ def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
         d[f"std_{w}"] = target_shifted.rolling(w, min_periods=2).std()
         d[f"max_{w}"] = target_shifted.rolling(w, min_periods=1).max()
         
-    return d.fillna(0) # Rellenar NaNs (ej. al inicio de la serie) con 0
+    # Rellenar NaNs (ej. std al inicio)
+    # ffill() para rellenar NaNs (ej. std al inicio)
+    # bfill() para el primer registro
+    # fillna(0) para lo que quede
+    return d.ffill().bfill().fillna(0)
+# --- FIN DE LA CORRECCIÓN ---
 
 
 def dummies_and_reindex(df: pd.DataFrame, model_columns: list) -> pd.DataFrame:
@@ -112,7 +120,10 @@ def dummies_and_reindex(df: pd.DataFrame, model_columns: list) -> pd.DataFrame:
     # Columnas categóricas esperadas por el modelo (basado en train)
     cat_cols = ['dow', 'month', 'hour']
     
-    df_dummies = pd.get_dummies(df, columns=cat_cols, drop_first=False)
+    # Asegurarnos de que no haya duplicados *antes* de get_dummies
+    df_no_duplicates = df.loc[:, ~df.columns.duplicated()]
+    
+    df_dummies = pd.get_dummies(df_no_duplicates, columns=cat_cols, drop_first=False)
     
     # Reindexar para asegurar que todas las columnas del modelo existan
     df_reindexed = df_dummies.reindex(columns=model_columns, fill_value=0)
