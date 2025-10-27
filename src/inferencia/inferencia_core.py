@@ -1,10 +1,11 @@
 # src/inferencia/inferencia_core.py
 import json
-import os
+import os # Importar OS
 import joblib
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+
 try:
     from tqdm import tqdm
 except ImportError:
@@ -21,7 +22,6 @@ try:
     from .features import mark_holidays_index, add_es_dia_de_pago
 except ImportError:
     print("ERROR: Faltan 'mark_holidays_index' o 'add_es_dia_de_pago' en features.py")
-    # Fallback
     def mark_holidays_index(idx, h): return pd.Series(0, index=idx.date)
     def add_es_dia_de_pago(df): df['es_dia_de_pago'] = 0; return df
 
@@ -41,8 +41,8 @@ TMO_BASELINE = "models/tmo_baseline_dow_hour.csv" # <-- NUEVO
 TMO_META = "models/tmo_residual_meta.json"      # <-- NUEVO
 
 # Nombres de columnas (se pasan desde main.py)
-# TARGET_CALLS = "recibidos" # (Se recibe como argumento)
-# TARGET_TMO = "tmo_general" # (Se recibe como argumento)
+# TARGET_CALLS = "recibidos" 
+# TARGET_TMO = "tmo_general"
 
 # Ventana reciente para lags/MA
 HIST_WINDOW_DAYS = 90
@@ -57,20 +57,16 @@ def _load_cols(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-# (Helpers de Outliers - Corregido para Pandas >= 2.0)
+# (Helpers de Outliers - Sin Tocar)
+# (Esto funcionará si fijas pandas<2.0 en requirements.txt)
 def _baseline_median_mad(df: pd.DataFrame, col: str) -> pd.DataFrame:
     """Calcula mediana y MAD por (dow, hour) del histórico."""
     df_b = df.loc[df.index > df.index.max() - pd.DateOffset(days=90)].copy()
     if 'dow' not in df_b.columns or 'hour' not in df_b.columns:
         df_b = add_time_parts(df_b)
     
-    # .mad() fue eliminado en Pandas 2.0
-    mad_calc = lambda x: (x - x.median()).abs().median()
-    
-    base = df_b.groupby(['dow','hour'])[col].agg(
-        median='median', 
-        mad=mad_calc
-    ).reset_index()
+    # .mad() REQUIERE PANDAS < 2.0
+    base = df_b.groupby(['dow','hour'])[col].agg(['median', 'mad']).reset_index()
     base['mad'] = base['mad'].fillna(base['mad'].mean())
     return base.set_index(['dow','hour'])
 
@@ -84,8 +80,8 @@ def apply_outlier_cap(df_hourly: pd.DataFrame, baseline_mad: pd.DataFrame,
         return df
         
     df = df.merge(baseline_mad, on=['dow','hour'], how='left')
-    df['mad'] = df['mad'].ffill().bfill() # Corregido para Pandas >= 2.0
-    df['median'] = df['median'].ffill().bfill() # Corregido para Pandas >= 2.0
+    df['mad'] = df['mad'].fillna(method='ffill').fillna(method='bfill')
+    df['median'] = df['median'].fillna(method='ffill').fillna(method='bfill')
     
     df['k'] = np.where(df['dow'].isin([5, 6]), k_weekend, k_weekday)
     df['cap'] = df['median'] + df['k'] * df['mad']
@@ -345,28 +341,19 @@ def forecast_120d(
             k_weekday=K_WEEKDAY, k_weekend=K_WEEKEND
         )
 
-    # ===== Erlang por hora (Lógica intacta, con corrección .apply) =====
+    # ===== Erlang por hora (LÓGICA ORIGINAL DEL BUCLE) =====
     print("Calculando agentes requeridos (Erlang)...")
     df_hourly["agents_prod"] = 0
     
-    try:
-        calls_erlang = df_hourly["calls"].fillna(0).values
-        tmo_erlang = df_hourly["tmo_s"].ffill().bfill().fillna(60).values
-        df_hourly["agents_prod"] = np.vectorize(required_agents)(
-            calls_erlang, 
-            tmo_erlang
-        )[0]
-        df_hourly["agents_prod"] = df_hourly["agents_prod"].astype(int)
-    except Exception as e:
-        print(f"Vectorización de Erlang falló ({e}), usando loop...")
-        for ts in tqdm(df_hourly.index, desc="Calculando Erlang (loop)"):
-            c = float(df_hourly.at[ts, "calls"])
-            t = float(df_hourly.at[ts, "tmo_s"])
-            if pd.isna(c) or pd.isna(t): a = 0
-            else: a, _ = required_agents(c, t)
-            df_hourly.at[ts, "agents_prod"] = int(a)
+    for ts in tqdm(df_hourly.index, desc="Calculando Erlang"):
+        c = float(df_hourly.at[ts, "calls"])
+        t = float(df_hourly.at[ts, "tmo_s"])
+        if pd.isna(c) or pd.isna(t):
+            a = 0
+        else:
+            a, _ = required_agents(c, t)
+        df_hourly.at[ts, "agents_prod"] = int(a)
     
-    # Corregido para TypeError (usar .apply)
     df_hourly["agents_sched"] = df_hourly["agents_prod"].apply(schedule_agents)
 
     # ===== Guardar resultados (NOMBRES DE JSON ORIGINALES) =====
