@@ -1,170 +1,170 @@
 [
   {
+    "ts": "2025-07-27 19:00:00",
+    "llamadas_hora": 164,
+    "tmo_hora": 289.0,
+    "agents_prod": 19,
+    "agentes_requeridos": 36
+  },
+  {
+    "ts": "2025-07-27 20:00:00",
+    "llamadas_hora": 75,
+    "tmo_hora": 289.0,
+    "agents_prod": 10,
+    "agentes_requeridos": 19
+  },
+  {
+    "ts": "2025-07-27 21:00:00",
+    "llamadas_hora": 36,
+    "tmo_hora": 287.0,
+    "agents_prod": 6,
+    "agentes_requeridos": 12
+  },
+  {
+    "ts": "2025-07-27 22:00:00",
+    "llamadas_hora": 18,
+    "tmo_hora": 299.0,
+    "agents_prod": 4,
+    "agentes_requeridos": 8
+  },
+  {
     "ts": "2025-07-27 23:00:00",
-    "llamadas_hora": 60,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 9,
+    "tmo_hora": 308.0,
+    "agents_prod": 3,
+    "agentes_requeridos": 6
   },
   {
     "ts": "2025-07-28 00:00:00",
-    "llamadas_hora": 27,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 8,
+    "tmo_hora": 273.0,
+    "agents_prod": 3,
+    "agentes_requeridos": 6
   },
   {
     "ts": "2025-07-28 01:00:00",
-    "llamadas_hora": 7,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 8,
+    "tmo_hora": 290.0,
+    "agents_prod": 3,
+    "agentes_requeridos": 6
   },
   {
     "ts": "2025-07-28 02:00:00",
-    "llamadas_hora": 5,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 8,
+    "tmo_hora": 270.0,
+    "agents_prod": 3,
+    "agentes_requeridos": 6
   },
   {
     "ts": "2025-07-28 03:00:00",
-    "llamadas_hora": 6,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 7,
+    "tmo_hora": 277.0,
+    "agents_prod": 3,
+    "agentes_requeridos": 6
   },
   {
     "ts": "2025-07-28 04:00:00",
-    "llamadas_hora": 5,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 7,
+    "tmo_hora": 311.0,
+    "agents_prod": 3,
+    "agentes_requeridos": 6
   },
   {
     "ts": "2025-07-28 05:00:00",
-    "llamadas_hora": 6,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 7,
+    "tmo_hora": 328.0,
+    "agents_prod": 3,
+    "agentes_requeridos": 6
   },
   {
     "ts": "2025-07-28 06:00:00",
-    "llamadas_hora": 8,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 7,
+    "tmo_hora": 356.0,
+    "agents_prod": 3,
+    "agentes_requeridos": 6
   },
   {
     "ts": "2025-07-28 07:00:00",
-    "llamadas_hora": 42,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 8,
+    "tmo_hora": 351.0,
+    "agents_prod": 3,
+    "agentes_requeridos": 6
   },
   {
     "ts": "2025-07-28 08:00:00",
-    "llamadas_hora": 143,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 31,
+    "tmo_hora": 344.0,
+    "agents_prod": 6,
+    "agentes_requeridos": 12
   },
   {
     "ts": "2025-07-28 09:00:00",
-    "llamadas_hora": 244,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 126,
+    "tmo_hora": 335.0,
+    "agents_prod": 17,
+    "agentes_requeridos": 32
   },
   {
     "ts": "2025-07-28 10:00:00",
-    "llamadas_hora": 303,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 209,
+    "tmo_hora": 351.0,
+    "agents_prod": 27,
+    "agentes_requeridos": 51
   },
   {
     "ts": "2025-07-28 11:00:00",
-    "llamadas_hora": 320,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 250,
+    "tmo_hora": 340.0,
+    "agents_prod": 30,
+    "agentes_requeridos": 56
   },
   {
     "ts": "2025-07-28 12:00:00",
-    "llamadas_hora": 299,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 277,
+    "tmo_hora": 357.0,
+    "agents_prod": 35,
+    "agentes_requeridos": 65
   },
   {
     "ts": "2025-07-28 13:00:00",
-    "llamadas_hora": 257,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 255,
+    "tmo_hora": 360.0,
+    "agents_prod": 33,
+    "agentes_requeridos": 62
   },
   {
     "ts": "2025-07-28 14:00:00",
-    "llamadas_hora": 255,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 222,
+    "tmo_hora": 349.0,
+    "agents_prod": 28,
+    "agentes_requeridos": 52
   },
   {
     "ts": "2025-07-28 15:00:00",
-    "llamadas_hora": 243,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 214,
+    "tmo_hora": 341.0,
+    "agents_prod": 27,
+    "agentes_requeridos": 51
   },
   {
     "ts": "2025-07-28 16:00:00",
-    "llamadas_hora": 243,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 203,
+    "tmo_hora": 326.0,
+    "agents_prod": 25,
+    "agentes_requeridos": 47
   },
   {
     "ts": "2025-07-28 17:00:00",
-    "llamadas_hora": 240,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 207,
+    "tmo_hora": 319.0,
+    "agents_prod": 25,
+    "agentes_requeridos": 47
   },
   {
     "ts": "2025-07-28 18:00:00",
-    "llamadas_hora": 219,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
-  },
-  {
-    "ts": "2025-07-28 19:00:00",
-    "llamadas_hora": 166,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
-  },
-  {
-    "ts": "2025-07-28 20:00:00",
-    "llamadas_hora": 157,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
-  },
-  {
-    "ts": "2025-07-28 21:00:00",
-    "llamadas_hora": 130,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
-  },
-  {
-    "ts": "2025-07-28 22:00:00",
-    "llamadas_hora": 80,
-    "tmo_hora": 0.0,
-    "agents_prod": 1,
-    "agentes_requeridos": 2
+    "llamadas_hora": 213,
+    "tmo_hora": 338.0,
+    "agents_prod": 26,
+    "agentes_requeridos": 49
   }
 ]
