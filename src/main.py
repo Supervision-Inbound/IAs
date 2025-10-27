@@ -13,9 +13,14 @@ from src.inferencia.utils_io import load_holidays
 
 DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
-# TMO_HIST_FILE = "data/HISTORICO_TMO.csv" # <-- ELIMINADO
-TARGET_CALLS_NEW = "recibidos" # <-- AJUSTADO A TU CSV (era recibidos_nacional)
+
+# --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN!! ---
+# Definimos los nombres de columna aquí, en el scope global.
+# 'recibidos' es el nombre en tu historical_data.csv
+TARGET_CALLS_NEW = "recibidos" 
 TARGET_TMO_NEW = "tmo_general" # Nombre estándar interno
+# ----------------------------------
+
 TZ = "America/Santiago"
 
 # ==================================================================
@@ -79,15 +84,8 @@ def main():
         print(f"Usando columna TMO existente: '{TARGET_TMO_NEW}'")
         dfh[TARGET_TMO_NEW] = pd.to_numeric(dfh[TARGET_TMO_NEW], errors='coerce')
         
-    # Validar columna de llamadas (viene de tu CSV)
-    if TARGET_CALLS_NEW not in dfh.columns:
-        print(f"ADVERTENCIA: No se encontró la columna de llamadas '{TARGET_CALLS_NEW}'. Verifique el CSV.")
-        # Intentar usar 'recibidos' como fallback si existe
-        if 'recibidos' in dfh.columns:
-            TARGET_CALLS_NEW = 'recibidos'
-            print(f"Usando columna 'recibidos' como fallback.")
-        else:
-            raise KeyError(f"No se encuentra la columna '{TARGET_CALLS_NEW}' en el CSV.")
+    # --- BLOQUE QUE CAUSABA EL ERROR (ELIMINADO) ---
+    # Ya no validamos TARGET_CALLS_NEW aquí, confiamos en la variable global.
 
     # 3) Derivar calendario para el histórico
     holidays_set = load_holidays(args.holidays)
@@ -124,7 +122,6 @@ def main():
 
 if __name__ == "__main__":
     # --- Estas funciones deben existir en features.py y utils_io.py ---
-    # (Si no existen, el import fallará. Asumo que SÍ existen)
     try:
         from src.inferencia.features import mark_holidays_index, add_es_dia_de_pago
         from src.inferencia.utils_io import load_holidays
