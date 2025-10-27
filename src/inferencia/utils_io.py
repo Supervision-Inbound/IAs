@@ -5,7 +5,8 @@ import pandas as pd
 def load_holidays(path: str) -> set:
     """
     Carga un set de fechas de feriados desde un CSV.
-    Espera una columna 'fecha' con formato 'dd-mm-YYYY' o 'YYYY-mm-dd'.
+    Espera una columna 'fecha' (insensible a mayúsculas) 
+    con formato 'dd-mm-YYYY' o 'YYYY-mm-dd'.
     Intenta detectar separador (',' o ';').
     """
     if not os.path.exists(path):
@@ -15,9 +16,14 @@ def load_holidays(path: str) -> set:
     try:
         # Intentar con ;
         df_h = pd.read_csv(path, delimiter=';', low_memory=False)
+        # --- CORRECCIÓN: Normalizar nombres de columnas ---
+        df_h.columns = [str(c).strip().lower() for c in df_h.columns]
+        
         if 'fecha' not in df_h.columns:
              # Fallback a ,
              df_h = pd.read_csv(path, delimiter=',', low_memory=False)
+             # --- CORRECCIÓN: Normalizar nombres de columnas ---
+             df_h.columns = [str(c).strip().lower() for c in df_h.columns]
         
         if 'fecha' not in df_h.columns:
              print(f"ADVERTENCIA: No se encontró la columna 'fecha' en {path}. Usando set vacío.")
