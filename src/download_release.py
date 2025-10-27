@@ -7,9 +7,6 @@ import requests
 from pathlib import Path
 
 def download_latest_assets(owner: str, repo: str, out_dir: str = "models", token: str | None = os.getenv("GITHUB_TOKEN")):
-    """
-    Descarga los últimos assets de un release de GitHub.
-    """
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     sess = requests.Session()
     if token:
@@ -29,9 +26,9 @@ def download_latest_assets(owner: str, repo: str, out_dir: str = "models", token
         print(f"Respuesta de la API (no se encontraron 'assets'): {rel.get('message', 'Sin mensaje')}")
         raise RuntimeError(f"No se encontraron 'assets' en el último release o hubo un error de API.")
 
-    # --- LISTA DE ARTEFACTOS CORREGIDA (para TMO v7) ---
+    # --- LISTA DE ARTEFACTOS ACTUALIZADA ---
     target_names = {
-        # Planner (Llamadas)
+        # Planner (Llamadas) - Sin cambios
         "modelo_planner.keras", 
         "scaler_planner.pkl", 
         "training_columns_planner.json",
@@ -40,10 +37,10 @@ def download_latest_assets(owner: str, repo: str, out_dir: str = "models", token
         "modelo_tmo.keras", 
         "scaler_tmo.pkl", 
         "training_columns_tmo.json",
-        "tmo_baseline_dow_hour.csv",  # <-- ¡NUEVO!
-        "tmo_residual_meta.json",     # <-- ¡NUEVO!
+        "tmo_baseline_dow_hour.csv",  # <-- ARTEFACTO NUEVO
+        "tmo_residual_meta.json",     # <-- ARTEFACTO NUEVO
 
-        # Riesgos y Clima
+        # Riesgos y Clima (Sin cambios)
         "modelo_riesgos.keras", 
         "scaler_riesgos.pkl", 
         "training_columns_riesgos.json",
@@ -64,7 +61,7 @@ def download_latest_assets(owner: str, repo: str, out_dir: str = "models", token
         asset_url = next((a["browser_download_url"] for a in rel["assets"] if a.get("name") == name), None)
         
         if not asset_url:
-            print(f"ERROR: No se pudo obtener la URL para '{name}' aunque fue listado.")
+            print(f"ERROR: No se pudo obtener la URL para '{name}'.")
             continue
             
         print(f"↓ Descargando {name}...")
@@ -91,24 +88,21 @@ if __name__ == "__main__":
         epilog="Ejemplo: python -m src.download_release --owner MiUsuario --repo MiRepo"
     )
     
-    # --- ¡ESTA ES LA CORRECCIÓN! ---
-    # Ahora acepta --owner y --repo como argumentos nombrados y obligatorios.
+    # Acepta --owner y --repo como argumentos nombrados
     parser.add_argument(
         "--owner", 
-        dest="repo_owner", # El script interno usará args.repo_owner
+        dest="repo_owner",
         type=str, 
-        required=True,    # Sigue siendo obligatorio
+        required=True,
         help="Owner (usuario u organización) del repositorio (e.g., 'Supervision-Inbound')"
     )
     parser.add_argument(
         "--repo", 
-        dest="repo_name", # El script interno usará args.repo_name
+        dest="repo_name",
         type=str, 
-        required=True,   # Sigue siendo obligatorio
+        required=True,
         help="Nombre del repositorio (e.g., 'IAs')"
     )
-    # -----------------------------------
-    
     parser.add_argument(
         "--out_dir", 
         type=str, 
@@ -118,7 +112,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     try:
-        # La función espera (owner, repo, ...), por eso usamos dest=
         download_latest_assets(args.repo_owner, args.repo_name, args.out_dir)
     except Exception as e:
         print(f"\nError fatal durante la descarga: {e}")
