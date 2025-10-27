@@ -29,10 +29,9 @@ def download_latest_assets(owner: str, repo: str, out_dir: str = "models", token
         print(f"Respuesta de la API (no se encontraron 'assets'): {rel.get('message', 'Sin mensaje')}")
         raise RuntimeError(f"No se encontraron 'assets' en el último release o hubo un error de API.")
 
-    # --- LISTA DE ARTEFACTOS CORREGIDA ---
-    # Asegúrate de que todos estos archivos existan en tu release de GitHub
+    # --- LISTA DE ARTEFACTOS CORREGIDA (para TMO v7) ---
     target_names = {
-        # Planner (Llamadas) - Sin cambios
+        # Planner (Llamadas)
         "modelo_planner.keras", 
         "scaler_planner.pkl", 
         "training_columns_planner.json",
@@ -41,10 +40,10 @@ def download_latest_assets(owner: str, repo: str, out_dir: str = "models", token
         "modelo_tmo.keras", 
         "scaler_tmo.pkl", 
         "training_columns_tmo.json",
-        "tmo_baseline_dow_hour.csv",  # <-- ARTEFACTO NUEVO/CORREGIDO
-        "tmo_residual_meta.json",     # <-- ARTEFACTO NUEVO/CORREGIDO
+        "tmo_baseline_dow_hour.csv",  # <-- ¡NUEVO!
+        "tmo_residual_meta.json",     # <-- ¡NUEVO!
 
-        # Riesgos y Clima (Sin cambios)
+        # Riesgos y Clima
         "modelo_riesgos.keras", 
         "scaler_riesgos.pkl", 
         "training_columns_riesgos.json",
@@ -62,11 +61,9 @@ def download_latest_assets(owner: str, repo: str, out_dir: str = "models", token
             print(f"ADVERTENCIA: El asset '{name}' no se encontró en el release de GitHub.")
             continue
 
-        # Encontrar la URL del asset
         asset_url = next((a["browser_download_url"] for a in rel["assets"] if a.get("name") == name), None)
         
         if not asset_url:
-            # Esto no debería pasar si la lógica anterior es correcta, pero por si acaso.
             print(f"ERROR: No se pudo obtener la URL para '{name}' aunque fue listado.")
             continue
             
@@ -91,22 +88,27 @@ def download_latest_assets(owner: str, repo: str, out_dir: str = "models", token
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Descargar últimos artefactos de modelo desde un release de GitHub.",
-        epilog="Ejemplo: python -m src.download_release MiUsuario MiRepo --out_dir 'mis_modelos'"
+        epilog="Ejemplo: python -m src.download_release --owner MiUsuario --repo MiRepo"
     )
     
-    # Argumentos POSICIONALES (sin --)
+    # --- ¡ESTA ES LA CORRECCIÓN! ---
+    # Ahora acepta --owner y --repo como argumentos nombrados y obligatorios.
     parser.add_argument(
-        "repo_owner", 
+        "--owner", 
+        dest="repo_owner", # El script interno usará args.repo_owner
         type=str, 
+        required=True,    # Sigue siendo obligatorio
         help="Owner (usuario u organización) del repositorio (e.g., 'Supervision-Inbound')"
     )
     parser.add_argument(
-        "repo_name", 
+        "--repo", 
+        dest="repo_name", # El script interno usará args.repo_name
         type=str, 
+        required=True,   # Sigue siendo obligatorio
         help="Nombre del repositorio (e.g., 'IAs')"
     )
+    # -----------------------------------
     
-    # Argumento OPCIONAL (con --)
     parser.add_argument(
         "--out_dir", 
         type=str, 
@@ -115,8 +117,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     
-    # GITHUB_TOKEN se lee automáticamente desde variables de entorno si existe
     try:
+        # La función espera (owner, repo, ...), por eso usamos dest=
         download_latest_assets(args.repo_owner, args.repo_name, args.out_dir)
     except Exception as e:
         print(f"\nError fatal durante la descarga: {e}")
