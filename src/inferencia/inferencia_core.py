@@ -435,5 +435,3 @@ def forecast_120d(
     
     print("--- Inferencia completada exitosamente ---")
     return df_hourly
-    print("--- Inferencia completada exitosamente ---")
-    return df_hourly
