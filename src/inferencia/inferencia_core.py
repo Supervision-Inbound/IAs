@@ -27,10 +27,8 @@ TMO_COLS = "models/training_columns_tmo.json"
 TMO_BASELINE = "models/tmo_baseline_dow_hour.csv" # <-- NUEVO
 TMO_META = "models/tmo_residual_meta.json"      # <-- NUEVO
 
-# --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN!! ---
-TARGET_CALLS = "recibidos" # <- Ajustado a tu CSV (era "recibidos_nacional")
+TARGET_CALLS = "recibidos" # <- Ajustado a tu CSV
 TARGET_TMO = "tmo_general" # Este es el nombre estándar (ej: 'tmo_general')
-# ------------------------------------
 
 # Ventana reciente para lags/MA
 HIST_WINDOW_DAYS = 90
@@ -94,20 +92,24 @@ def apply_outlier_cap(df_hourly: pd.DataFrame, baseline_mad: pd.DataFrame,
 
 
 # =================================================================
-# NUEVO HELPER: Creación de features residuales (de train_v7.py)
+# HELPER TMO: Creación de features residuales (de train_v7.py)
+# --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN!! ---
 # =================================================================
 def _make_tmo_residual_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Crea features autoregresivas sobre la columna 'tmo_resid'.
-    El DataFrame de entrada 'df' DEBE tener 'tmo_resid'.
+    Devuelve un DF *solo* con las nuevas features, rellenado.
     """
-    d = df.copy()
+    
+    # No copiar el df, crear un df nuevo solo con las features AR
+    d = pd.DataFrame(index=df.index)
+    tmo_resid = df["tmo_resid"] # Target (residuo)
     
     # Lags del residuo
     for lag in [1, 2, 3, 6, 12, 24, 48, 72, 168]:
-        d[f"lag_resid_{lag}"] = d["tmo_resid"].shift(lag)
+        d[f"lag_resid_{lag}"] = tmo_resid.shift(lag)
     
-    resid_shift1 = d["tmo_resid"].shift(1)
+    resid_shift1 = tmo_resid.shift(1)
     
     # MAs del residuo
     for w in [6, 12, 24, 72, 168]:
@@ -122,7 +124,12 @@ def _make_tmo_residual_features(df: pd.DataFrame) -> pd.DataFrame:
         d[f"std_resid_{w}"] = resid_shift1.rolling(w, min_periods=2).std()
         d[f"max_resid_{w}"] = resid_shift1.rolling(w, min_periods=1).max()
 
-    return d
+    # Rellenar NaNs (ej. std al inicio)
+    # ffill() para rellenar NaNs (ej. std al inicio)
+    # bfill() para el primer registro
+    # fillna(0) para lo que quede
+    return d.ffill().bfill().fillna(0)
+# --- FIN DE LA CORRECCIÓN ---
 # =================================================================
 
 
@@ -167,7 +174,6 @@ def _prepare_hist_df(df: pd.DataFrame, holidays_set: set) -> pd.DataFrame:
     dfh = dfh.loc[dfh.index >= min_ts_final].copy()
     
     # Re-asegurar que no haya NaNs en columnas clave
-    # Esta es la línea que fallaba (KeyError: 'recibidos_nacional')
     dfh[TARGET_CALLS] = pd.to_numeric(dfh[TARGET_CALLS], errors='coerce').ffill().bfill()
     dfh[TARGET_TMO] = pd.to_numeric(dfh[TARGET_TMO], errors='coerce').ffill().bfill()
     dfh["feriados"] = dfh["feriados"].ffill().bfill()
@@ -192,6 +198,7 @@ def _predict_calls(df_hist: pd.DataFrame, future_index: pd.DatetimeIndex) -> pd.
         time_parts = df_hist.loc[[ts]]
         
         # 2. Features AR (sobre hist_loop)
+        # add_lags_mas ahora solo devuelve las columnas AR, ya rellenas
         ar_features = add_lags_mas(hist_loop, TARGET_CALLS)
         
         # 3. Ensamblar fila
@@ -208,7 +215,8 @@ def _predict_calls(df_hist: pd.DataFrame, future_index: pd.DatetimeIndex) -> pd.
         
         # 5. Guardar (con guardrail)
         df_future.loc[ts, TARGET_CALLS] = max(0, pred)
-        df_future.loc[ts, time_parts.columns] = time_parts.iloc[0] # Guardar time parts
+        # Copiar time parts para el siguiente loop de add_lags_mas
+        df_future.loc[ts, time_parts.columns] = time_parts.iloc[0] 
 
     print(f"Predicción Llamadas completada. Mediana: {df_future[TARGET_CALLS].median():.1f}")
     return df_future[[TARGET_CALLS]]
@@ -288,6 +296,7 @@ def _predict_tmo(df_hist_full: pd.DataFrame, future_index: pd.DatetimeIndex) -> 
             baseline_now = baseline_values[0]
 
         # c) Features autoregresivas (calculadas sobre hist_loop)
+        # _make_tmo_residual_features ahora solo devuelve las columnas AR, ya rellenas
         df_with_features = _make_tmo_residual_features(hist_loop)
         
         # d) Ensamblar fila de features para 'ts'
@@ -300,10 +309,8 @@ def _predict_tmo(df_hist_full: pd.DataFrame, future_index: pd.DatetimeIndex) -> 
         current_features.index = [ts]
 
         # e) Dummies, Reindex, Scale
-        # Rellenar NaNs de features (ej. std_resid en las primeras horas)
-        current_features_filled = current_features.ffill() 
-        
-        X_row_pre = dummies_and_reindex(current_features_filled, model_cols)
+        # --- CORRECCIÓN: Eliminado ffill() de una sola fila ---
+        X_row_pre = dummies_and_reindex(current_features, model_cols)
         
         # Rellenar NaNs *después* de dummify/reindex (si alguna columna faltaba o ffill falló)
         X_row_pre = X_row_pre.fillna(0) 
@@ -375,7 +382,7 @@ def forecast_120d(
 
     # ===== AJUSTE FERIADOS (opcional, pero recomendado) =====
     if holidays_set and len(holidays_set) > 0:
-        print("Calculando y aplicando factores de ajuste por feriados...")
+        #print("Calculando y aplicando factores de ajuste por feriados...")
         (f_calls_by_hour, f_tmo_by_hour,
          g_calls, g_tmo, post_calls_by_hour) = compute_holiday_factors(df_hist_full, holidays_set) 
 
