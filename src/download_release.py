@@ -1,5 +1,9 @@
 # src/download_release.py
-import os, sys, json, argparse, requests
+import os
+import sys
+import json
+import argparse
+import requests
 from pathlib import Path
 
 def download_latest_assets(owner: str, repo: str, out_dir: str = "models", token: str | None = os.getenv("GITHUB_TOKEN")):
@@ -22,7 +26,7 @@ def download_latest_assets(owner: str, repo: str, out_dir: str = "models", token
         print(f"Respuesta de la API (no se encontraron 'assets'): {rel.get('message', 'Sin mensaje')}")
         raise RuntimeError(f"No se encontraron 'assets' en el último release o hubo un error de API.")
 
-    # --- LISTA DE ARTEFACTOS CORREGIDA ---
+    # --- LISTA DE ARTEFACTOS ACTUALIZADA ---
     target_names = {
         # Planner (Llamadas) - Sin cambios
         "modelo_planner.keras", 
@@ -84,7 +88,6 @@ if __name__ == "__main__":
         epilog="Ejemplo: python -m src.download_release --owner MiUsuario --repo MiRepo"
     )
     
-    # Acepta --owner y --repo como argumentos nombrados
     parser.add_argument(
         "--owner", 
         dest="repo_owner",
