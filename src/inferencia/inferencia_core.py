@@ -57,16 +57,24 @@ def _load_cols(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-# (Helpers de Outliers - Sin Tocar)
-# (Esto funcionará si fijas pandas<2.0 en requirements.txt)
+# --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN PARA EL CRASH DE 'mad'!! ---
+# (Esto es necesario porque tu log muestra que usas pandas>=2.0)
 def _baseline_median_mad(df: pd.DataFrame, col: str) -> pd.DataFrame:
     """Calcula mediana y MAD por (dow, hour) del histórico."""
     df_b = df.loc[df.index > df.index.max() - pd.DateOffset(days=90)].copy()
     if 'dow' not in df_b.columns or 'hour' not in df_b.columns:
         df_b = add_time_parts(df_b)
     
-    # .mad() REQUIERE PANDAS < 2.0
-    base = df_b.groupby(['dow','hour'])[col].agg(['median', 'mad']).reset_index()
+    # .mad() fue eliminado en Pandas 2.0
+    # Usamos una lambda para calcular la Desviación Absoluta Mediana
+    mad_calc = lambda x: (x - x.median()).abs().median()
+    
+    base = df_b.groupby(['dow','hour'])[col].agg(
+        median='median', 
+        mad=mad_calc  # Usamos la lambda en lugar de 'mad'
+    ).reset_index()
+    # --- FIN DE LA CORRECCIÓN ---
+
     base['mad'] = base['mad'].fillna(base['mad'].mean())
     return base.set_index(['dow','hour'])
 
@@ -80,8 +88,8 @@ def apply_outlier_cap(df_hourly: pd.DataFrame, baseline_mad: pd.DataFrame,
         return df
         
     df = df.merge(baseline_mad, on=['dow','hour'], how='left')
-    df['mad'] = df['mad'].fillna(method='ffill').fillna(method='bfill')
-    df['median'] = df['median'].fillna(method='ffill').fillna(method='bfill')
+    df['mad'] = df['mad'].ffill().bfill() # (Usamos ffill/bfill para pandas >= 2.0)
+    df['median'] = df['median'].ffill().bfill()
     
     df['k'] = np.where(df['dow'].isin([5, 6]), k_weekend, k_weekday)
     df['cap'] = df['median'] + df['k'] * df['mad']
