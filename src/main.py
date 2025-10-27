@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from src.inferencia.inferencia_core import forecast_120d
-# --- IMPORTAMOS LAS FUNCIONES QUE ESTABAN EN TU main.py ORIGINAL (asumiendo que existen) ---
+# --- Asumimos que estas funciones existen en tus archivos originales ---
 try:
     from src.inferencia.features import ensure_ts, mark_holidays_index, add_es_dia_de_pago
     from src.inferencia.utils_io import load_holidays
@@ -16,10 +16,11 @@ except ImportError:
     def load_holidays(path): return set()
     def mark_holidays_index(idx, h): return pd.Series(0, index=idx.date)
     def add_es_dia_de_pago(df): df['es_dia_de_pago'] = 0; return df
-# ---------------------------------------------------------------------------------
+# -----------------------------------------------------------------------
 
 DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
+# TMO_HIST_FILE = "data/HISTORICO_TMO.csv" # <-- ELIMINADO
 
 # --- NOMBRES DE COLUMNAS ---
 # (Usamos 'recibidos' porque así se llama en tu historical_data.csv)
@@ -74,6 +75,8 @@ def main():
     dfh = smart_read_historical(args.data)
     dfh = ensure_ts(dfh, TZ) # Crea 'ts' indexado y normalizado a TZ
     
+    # --- INICIO BLOQUE MODIFICADO (LÓGICA TMO v7) ---
+    
     # 2) Validar y renombrar TMO (NUEVA LÓGICA v7)
     tmo_col_real = find_tmo_col(dfh)
     
@@ -83,19 +86,21 @@ def main():
     else:
         print(f"Usando columna TMO existente: '{TARGET_TMO_NEW}'")
         dfh[TARGET_TMO_NEW] = pd.to_numeric(dfh[TARGET_TMO_NEW], errors='coerce')
-        
+
+    # --- ELIMINAMOS LA CARGA Y MERGE DE HISTORICO_TMO.csv ---
+    
+    # --- FIN BLOQUE MODIFICADO ---
+
     # 3) Derivar calendario para el histórico (Lógica original)
     holidays_set = load_holidays(args.holidays)
     if "feriados" not in dfh.columns:
         dfh["feriados"] = mark_holidays_index(dfh.index, holidays_set).values
     dfh["feriados"] = pd.to_numeric(dfh["feriados"], errors='coerce').fillna(0).astype(int)
     
-    # --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN!! ---
     if "es_dia_de_pago" not in dfh.columns:
         print("Creando columna 'es_dia_de_pago'...")
-        # La función devuelve el DF completo, no se usa .values
+        # Asignación corregida (el .values daba error en el log anterior)
         dfh = add_es_dia_de_pago(dfh) 
-    # --- FIN DE LA CORRECCIÓN ---
 
     # 4) ffill de columnas clave (Lógica original)
     fill_cols = [TARGET_CALLS_NEW, TARGET_TMO_NEW, "feriados", "es_dia_de_pago"]
