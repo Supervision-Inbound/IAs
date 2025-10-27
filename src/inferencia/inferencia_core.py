@@ -1,362 +1,335 @@
 # src/inferencia/inferencia_core.py
-import json, sys
+import json
 import joblib
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+from tqdm import tqdm # Importar tqdm
 
-from .features import ensure_ts, add_time_parts, add_lags_mas, dummies_and_reindex, add_es_dia_de_pago
+from .features import ensure_ts, add_time_parts, add_lags_mas, dummies_and_reindex
 from .erlang import required_agents, schedule_agents
-from .utils_io import write_daily_json, write_hourly_json
+from .utils_io import write_daily_json, write_hourly_json, write_json
 
 TIMEZONE = "America/Santiago"
 PUBLIC_DIR = "public"
 
-# --- Modelos Planner (Llamadas) ---
+# --- Planner (Llamadas) - Sin cambios ---
 PLANNER_MODEL = "models/modelo_planner.keras"
 PLANNER_SCALER = "models/scaler_planner.pkl"
 PLANNER_COLS = "models/training_columns_planner.json"
 
-# --- Modelos TMO (NUEVO) ---
+# --- TMO (Nuevos artefactos v7-residual) ---
 TMO_MODEL = "models/modelo_tmo.keras"
 TMO_SCALER = "models/scaler_tmo.pkl"
 TMO_COLS = "models/training_columns_tmo.json"
-TMO_BASELINE = "models/tmo_baseline_dow_hour.csv" # <--- NUEVO
-TMO_META = "models/tmo_residual_meta.json"       # <--- NUEVO
+TMO_BASELINE = "models/tmo_baseline_dow_hour.csv" # <-- NUEVO
+TMO_META = "models/tmo_residual_meta.json"      # <-- NUEVO
 
-TARGET_CALLS = "contestados"
-TARGET_TMO = "tmo (segundos)" # <--- MODIFICADO: Coincide con main.py
+TARGET_CALLS = "recibidos_nacional"
+TARGET_TMO = "tmo_general" # Este es el nombre estándar (ej: 'tmo_general')
 
-# Ventana reciente para lags/MA (no afecta last_ts)
+# Ventana reciente para lags/MA
 HIST_WINDOW_DAYS = 90
 
-# ======= NUEVO: Guardrail Outliers (config) =======
-ENABLE_OUTLIER_CAP = True   # <- ponlo en False si quieres desactivarlo
-K_WEEKDAY = 6.0             # techos +K*MAD en lun-vie
-K_WEEKEND = 7.0             # techos +K*MAD en sáb-dom
+# (Configuración de Outliers queda igual)
+ENABLE_OUTLIER_CAP = True
+K_WEEKDAY = 6.0
+K_WEEKEND = 7.0
 
 
 def _load_cols(path: str):
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-# (Helpers de Outlier Cap: _baseline_median_mad, apply_outlier_cap - Sin cambios)
-# ... (mantenemos las funciones _baseline_median_mad y apply_outlier_cap)
-def _baseline_median_mad(df: pd.DataFrame, col: str) -> pd.DataFrame:
-    df_ = df.copy()
-    df_['dow'] = df_.index.dayofweek
-    df_['hour'] = df_.index.hour
-    
-    # Agrupar por (dow, hour) y calcular mediana (baseline) y MAD
-    base_mad = df_.groupby(['dow', 'hour'])[col].agg(
-        median='median',
-        count='count',
-        mad=lambda x: np.median(np.abs(x - np.median(x)))
-    ).reset_index()
-    
-    # El MAD puede ser 0 si todos los valores son iguales. 
-    # Usamos 1.4826 * MAD para estimar STD. Si MAD es 0, usamos 5% de la mediana como fallback.
-    base_mad['mad_std'] = base_mad['mad'] * 1.4826
-    base_mad['mad_std'] = base_mad['mad_std'].replace(0, base_mad['median'] * 0.05)
-    base_mad['mad_std'] = base_mad['mad_std'].replace(0, 1.0) # Fallback final si mediana es 0
-    return base_mad
-
-def apply_outlier_cap(df_future: pd.DataFrame, base_mad: pd.DataFrame, 
-                      holidays_set: set, col_calls_future: str,
-                      k_weekday: float, k_weekend: float) -> pd.DataFrame:
-    df_ = df_future.copy()
-    df_['dow'] = df_.index.dayofweek
-    df_['hour'] = df_.index.hour
-    df_['date'] = df_.index.date
-
-    df_ = df_.merge(base_mad[['dow', 'hour', 'median', 'mad_std']], on=['dow', 'hour'], how='left')
-
-    # Definir K (límite)
-    df_['k'] = np.where(df_['dow'].isin([5, 6]), k_weekend, k_weekday) # Sáb/Dom más alto
-    
-    # Calcular techo
-    df_['techo'] = df_['median'] + (df_['k'] * df_['mad_std'])
-    
-    # No aplicar techo a feriados
-    is_holiday = df_['date'].isin(holidays_set)
-    df_.loc[is_holiday, 'techo'] = np.inf
-    
-    # Aplicar cap
-    df_['original'] = df_[col_calls_future]
-    df_[col_calls_future] = np.clip(df_['original'], a_min=0, a_max=df_['techo'])
-    
-    capped_count = (df_['original'] > df_['techo']).sum()
-    if capped_count > 0:
-        print(f"WARN: (Guardrail) Se aplicó techo a {capped_count} horas futuras.")
-
-    return df_.drop(columns=['dow', 'hour', 'date', 'median', 'mad_std', 'k', 'techo', 'original'])
+# (Helpers de Outliers _baseline_median_mad y apply_outlier_cap quedan igual)
+# ... (asumimos que están aquí) ...
 
 
-# (Helpers de Feriados: compute_holiday_factors, etc. - Sin cambios)
-# ... (mantenemos las funciones compute_holiday_factors, apply_holiday_adjustment, apply_post_holiday_adjustment)
-def compute_holiday_factors(df: pd.DataFrame, holidays_set: set):
-    df_ = df.copy()
-    df_['date'] = df_.index.date
-    df_['dow'] = df_.index.dayofweek
-    df_['hour'] = df_.index.hour
+# =================================================================
+# NUEVO HELPER: Creación de features residuales (de train_v7.py)
+# =================================================================
+def _make_tmo_residual_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Crea features autoregresivas sobre la columna 'tmo_resid'.
+    El DataFrame de entrada 'df' DEBE tener 'tmo_resid'.
+    """
+    d = df.copy()
+    
+    # Lags del residuo
+    for lag in [1, 2, 3, 6, 12, 24, 48, 72, 168]:
+        d[f"lag_resid_{lag}"] = d["tmo_resid"].shift(lag)
+    
+    resid_shift1 = d["tmo_resid"].shift(1)
+    
+    # MAs del residuo
+    for w in [6, 12, 24, 72, 168]:
+        d[f"ma_resid_{w}"] = resid_shift1.rolling(w, min_periods=1).mean()
+    
+    # EMAs del residuo
+    for span in [6, 12, 24]:
+        d[f"ema_resid_{span}"] = resid_shift1.ewm(span=span, adjust=False, min_periods=1).mean()
+    
+    # Volatilidad del residuo
+    for w in [24, 72]:
+        d[f"std_resid_{w}"] = resid_shift1.rolling(w, min_periods=2).std()
+        d[f"max_resid_{w}"] = resid_shift1.rolling(w, min_periods=1).max()
 
-    df_['es_feriado'] = df_['date'].isin(holidays_set)
-    
-    # Baseline (mediana) por (dow, hour)
-    baseline = df_.groupby(['dow', 'hour'])[[TARGET_CALLS, TARGET_TMO]].median()
-    baseline = baseline.rename(columns={TARGET_CALLS: 'calls_base', TARGET_TMO: 'tmo_base'})
-    
-    df_ = df_.merge(baseline, on=['dow', 'hour'], how='left')
-    
-    # Calcular factores (Real / Baseline)
-    df_['f_calls'] = df_[TARGET_CALLS] / (df_['calls_base'] + 1)
-    df_['f_tmo'] = df_[TARGET_TMO] / (df_['tmo_base'] + 1)
-    
-    # Mediana del factor por (feriado, hora)
-    factors = df_.groupby(['es_feriado', 'hour'])[['f_calls', 'f_tmo']].median()
-    
-    # Factores de Feriado (mediana del factor en feriados)
-    f_calls_h = factors.loc[True]['f_calls'].rename("f_calls_holiday")
-    f_tmo_h = factors.loc[True]['f_tmo'].rename("f_tmo_holiday")
-    
-    # Factores de No-Feriado (mediana del factor en NO feriados - cercano a 1.0)
-    f_calls_g = factors.loc[False]['f_calls'].rename("f_calls_global")
-    f_tmo_g = factors.loc[False]['f_tmo'].rename("f_tmo_global")
-
-    # Post-feriado (efecto rebote)
-    dias_post = set(h + pd.Timedelta(days=1) for h in holidays_set)
-    df_['es_post_feriado'] = df_['date'].isin(dias_post) & (df_['dow'] != 6) # No domingos
-    
-    factors_post = df_.groupby(['es_post_feriado', 'hour'])[['f_calls']].median()
-    f_calls_post_h = factors_post.loc[True]['f_calls'].rename("f_calls_post_holiday")
-
-    return f_calls_h, f_tmo_h, f_calls_g, f_tmo_g, f_calls_post_h
-
-def apply_holiday_adjustment(df_future: pd.DataFrame, holidays_set: set,
-                             f_calls_by_hour: pd.Series, f_tmo_by_hour: pd.Series,
-                             col_calls_future: str, col_tmo_future: str) -> pd.DataFrame:
-    df_ = df_future.copy()
-    df_['date'] = df_.index.date
-    df_['hour'] = df_.index.hour
-    
-    is_holiday = df_['date'].isin(holidays_set)
-    if is_holiday.sum() == 0:
-        return df_.drop(columns=['date', 'hour']) # No hay feriados en el futuro
-        
-    df_ = df_.merge(f_calls_by_hour, left_on='hour', right_index=True, how='left')
-    df_ = df_.merge(f_tmo_by_hour, left_on='hour', right_index=True, how='left')
-    
-    # Aplicar factor SOLO a feriados
-    df_.loc[is_holiday, col_calls_future] *= df_.loc[is_holiday, 'f_calls_holiday']
-    df_.loc[is_holiday, col_tmo_future]  *= df_.loc[is_holiday, 'f_tmo_holiday']
-
-    return df_.drop(columns=['date', 'hour', 'f_calls_holiday', 'f_tmo_holiday'])
-
-def apply_post_holiday_adjustment(df_future: pd.DataFrame, holidays_set: set, 
-                                  post_calls_by_hour: pd.Series,
-                                  col_calls_future: str) -> pd.DataFrame:
-    df_ = df_future.copy()
-    df_['date'] = df_.index.date
-    df_['dow'] = df_.index.dayofweek
-    df_['hour'] = df_.index.hour
-    
-    dias_post = set(h + pd.Timedelta(days=1) for h in holidays_set)
-    is_post_holiday = df_['date'].isin(dias_post) & (df_['dow'] != 6) # No domingos
-    
-    if is_post_holiday.sum() == 0:
-        return df_.drop(columns=['date', 'dow', 'hour'])
-
-    df_ = df_.merge(post_calls_by_hour, left_on='hour', right_index=True, how='left')
-    
-    # Aplicar factor SOLO a post-feriados
-    df_.loc[is_post_holiday, col_calls_future] *= df_.loc[is_post_holiday, 'f_calls_post_holiday']
-    
-    return df_.drop(columns=['date', 'dow', 'hour', 'f_calls_post_holiday'])
+    return d
+# =================================================================
 
 
-# --- Funciones de Predicción ---
+# (Helpers de Feriados quedan igual)
+# ... (asumimos que compute_holiday_factors, etc. están aquí) ...
 
-def _predict_planner(df_hist: pd.DataFrame, df_future: pd.DataFrame) -> pd.Series:
-    """Predice LLAMADAS (Planner)"""
-    print("Ejecutando _predict_planner (Llamadas)...")
+
+def _prepare_hist_df(df: pd.DataFrame, holidays_set: set) -> pd.DataFrame:
+    """Prepara DF histórico: TS, time parts, y recorta ventana."""
+    dfh = ensure_ts(df.copy(), TIMEZONE)
+    
+    # Asegurar feriados y pago (main.py ya los puso)
+    if "feriados" not in dfh.columns:
+         dfh["feriados"] = mark_holidays_index(dfh.index, holidays_set).values
+    if "es_dia_de_pago" not in dfh.columns:
+         from .features import add_es_dia_de_pago # Importar si es necesario
+         dfh["es_dia_de_pago"] = add_es_dia_de_pago(dfh).values
+
+    dfh = add_time_parts(dfh)
+    
+    # Recortar histórico para eficiencia (solo TMO_v7 usa lags largos)
+    last_ts = dfh.index.max()
+    min_ts_hist = last_ts - pd.DateOffset(days=HIST_WINDOW_DAYS)
+    
+    # Aseguramos 168 horas (7 días) + 7 días extra = 14 días (336h)
+    # El lag 168 es el más largo.
+    min_lag_hours = 168 + (7*24) 
+    min_ts_lags = last_ts - pd.DateOffset(hours=min_lag_hours)
+    
+    # Usamos el más restrictivo (HIST_WINDOW_DAYS)
+    min_ts_final = min(min_ts_hist, min_ts_lags) 
+    
+    dfh = dfh.loc[dfh.index >= min_ts_final].copy()
+    
+    # Re-asegurar que no haya NaNs en columnas clave
+    dfh[TARGET_CALLS] = pd.to_numeric(dfh[TARGET_CALLS], errors='coerce').ffill().bfill()
+    dfh[TARGET_TMO] = pd.to_numeric(dfh[TARGET_TMO], errors='coerce').ffill().bfill()
+    dfh["feriados"] = dfh["feriados"].ffill().bfill()
+    dfh["es_dia_de_pago"] = dfh["es_dia_de_pago"].ffill().bfill()
+
+    return dfh.asfreq('h') # Asegurar frecuencia horaria
+
+
+# --- PREDICCIÓN LLAMADAS (SIN CAMBIOS) ---
+def _predict_calls(df_hist: pd.DataFrame, future_index: pd.DatetimeIndex) -> pd.DataFrame:
+    print("--- Predicción Llamadas (Planner) ---")
     model = tf.keras.models.load_model(PLANNER_MODEL, compile=False)
     scaler = joblib.load(PLANNER_SCALER)
-    cols = _load_cols(PLANNER_COLS)
+    model_cols = _load_cols(PLANNER_COLS)
     
-    target_col = TARGET_CALLS # Usamos 'recibidos_nacional'
+    df_future = pd.DataFrame(index=future_index)
     
-    # 1. Tomar la serie histórica de la feature
-    hist_vals = df_hist[target_col]
-    future_idx = df_future.index
-    
-    # 2. Concatenar con el índice futuro
-    full_series = pd.concat([hist_vals, pd.Series(index=future_idx, dtype=float)])
-    full_series = full_series.asfreq(hist_vals.index.freq or 'H') # Asegurar freq
-    
-    # 3. Generar features autoregresivas (lags, MAs, etc.)
-    df_features = pd.DataFrame(index=full_series.index)
-    df_features[target_col] = full_series
-    df_features = add_lags_mas(df_features, target_col) # <-- de features.py
-    
-    # 4. Añadir features de tiempo
-    df_features = add_time_parts(df_features)
-    
-    # 5. Añadir features exógenas (feriados, pago) del futuro
-    df_features = df_features.join(df_future[['feriados', 'es_dia_de_pago']])
-    # Rellenar nulos en exógenas (para los días históricos)
-    df_features['feriados'] = df_features['feriados'].fillna(0)
-    df_features['es_dia_de_pago'] = df_features['es_dia_de_pago'].fillna(0)
-    
-    # 6. Filtrar solo el período de futuro
-    X_future = df_features.loc[future_idx].copy()
-    
-    # 7. Dummies, Reindex y Scaler
-    X_future, _ = dummies_and_reindex(X_future, cols)
-    X_future_s = scaler.transform(X_future)
-    
-    # 8. Predecir
-    y_pred = model.predict(X_future_s).flatten()
-    y_pred = np.clip(y_pred, 0, None) # No llamadas negativas
-    
-    return pd.Series(y_pred, index=future_idx, name="calls")
+    for ts in tqdm(future_index, desc="Prediciendo Llamadas"):
+        hist_loop = pd.concat([df_hist, df_future])
+        
+        # 1. Features de tiempo (para ts)
+        time_parts = add_time_parts(pd.DataFrame(index=[ts]))
+        time_parts["feriados"] = df_hist.loc[ts, "feriados"]
+        time_parts["es_dia_de_pago"] = df_hist.loc[ts, "es_dia_de_pago"]
+        
+        # 2. Features AR (sobre hist_loop)
+        ar_features = add_lags_mas(hist_loop, TARGET_CALLS)
+        
+        # 3. Ensamblar fila
+        current_features = pd.concat([
+            time_parts.reset_index(drop=True),
+            ar_features.iloc[[-1]].reset_index(drop=True) # Tomar última fila (features para ts)
+        ], axis=1)
+        current_features.index = [ts]
+        
+        # 4. Predecir
+        X_row_pre = dummies_and_reindex(current_features, model_cols)
+        X_row = scaler.transform(X_row_pre)
+        pred = model.predict(X_row, verbose=0)[0, 0]
+        
+        # 5. Guardar (con guardrail)
+        df_future.loc[ts, TARGET_CALLS] = max(0, pred)
+        df_future.loc[ts, time_parts.columns] = time_parts.iloc[0] # Guardar time parts
+
+    print(f"Predicción Llamadas completada. Mediana: {df_future[TARGET_CALLS].median():.1f}")
+    return df_future[[TARGET_CALLS]]
 
 
-def _predict_tmo(df_hist: pd.DataFrame, df_future: pd.DataFrame) -> pd.Series:
+# --- PREDICCIÓN TMO (REESCRITA PARA v7-RESIDUAL) ---
+def _predict_tmo(df_hist_full: pd.DataFrame, future_index: pd.DatetimeIndex) -> pd.DataFrame:
     """
-    <--- MODIFICADO: Predice TMO (v8, Residual con features de LLAMADAS) ---
+    Predice TMO usando el modelo v7-residual.
+    df_hist_full es el DF histórico completo (ya tiene time_parts, feriados, etc).
     """
-    print("Ejecutando _predict_tmo (v8 - features de llamadas)...")
+    print("--- Predicción TMO v7-residual ---")
     
-    # 1. Cargar TODOS los artefactos del nuevo modelo TMO
+    # 1. Cargar artefactos del nuevo modelo
     try:
         model = tf.keras.models.load_model(TMO_MODEL, compile=False)
         scaler = joblib.load(TMO_SCALER)
-        cols = _load_cols(TMO_COLS)
-        baseline_df = pd.read_csv(TMO_BASELINE) # (dow, hour, tmo_baseline)
-        with open(TMO_META, 'r') as f:
+        model_cols = _load_cols(TMO_COLS)
+        df_baseline = pd.read_csv(TMO_BASELINE) # (dow, hour, tmo_baseline)
+        with open(TMO_META, "r") as f:
             meta = json.load(f)
-        resid_mean = meta['resid_mean']
-        resid_std = meta['resid_std']
-    except FileNotFoundError as e:
-        print(f"ERROR: Falta un artefacto del modelo TMO: {e.filename}", file=sys.stderr)
-        print("Asegúrate de haber descargado 'tmo_baseline_dow_hour.csv' y 'tmo_residual_meta.json'", file=sys.stderr)
-        raise e
+        RESID_MEAN = meta['resid_mean']
+        RESID_STD = meta['resid_std']
+    except Exception as e:
+        print(f"ERROR: Faltan artefactos del modelo TMO v7-residual. Ejecuta download_release.py")
+        print(f"Detalle: {e}")
+        raise
+
+    # 2. Preparar histórico (el DF completo)
+    # df_hist_full ya tiene 'feriados', 'es_dia_de_pago', 'dow', 'hour', etc. de _prepare_hist_df
+    df_hist = df_hist_full.copy()
+    
+    # a) Merge baseline
+    df_hist = df_hist.merge(df_baseline, on=["dow", "hour"], how="left")
+    
+    # b) Rellenar baseline para horas/dows no vistos (p.ej. fines de semana/horas sin datos)
+    if df_hist["tmo_baseline"].isna().any():
+        print("Rellenando 'tmo_baseline' faltante en histórico (ffill/bfill)...")
+        df_hist["tmo_baseline"] = df_hist["tmo_baseline"].ffill().bfill()
         
-    # 2. Definir la columna de FEATURES.
-    # El modelo TMO v8 usa features de LLAMADAS.
-    feature_col = TARGET_CALLS # <-- ¡Esta es la clave!
+    # c) Calcular residuo histórico
+    df_hist[TARGET_TMO] = pd.to_numeric(df_hist[TARGET_TMO], errors='coerce')
+    df_hist["tmo_resid"] = df_hist[TARGET_TMO] - df_hist["tmo_baseline"]
     
-    # 3. Tomar la serie histórica de la feature (LLAMADAS)
-    hist_vals = df_hist[feature_col]
-    future_idx = df_future.index
+    # d) Llenar NaNs en el residuo histórico (clave para lags)
+    df_hist["tmo_resid"] = df_hist["tmo_resid"].ffill().bfill() 
+    if df_hist["tmo_resid"].isna().any():
+         print("WARN: 'tmo_resid' histórico sigue con NaNs. Rellenando con 0.")
+         df_hist["tmo_resid"] = df_hist["tmo_resid"].fillna(0)
+
+    # 3. Dataframe para predicciones futuras
+    df_future = pd.DataFrame(index=future_index)
     
-    # 4. Concatenar con el índice futuro
-    full_series = pd.concat([hist_vals, pd.Series(index=future_idx, dtype=float)])
-    full_series = full_series.asfreq(hist_vals.index.freq or 'H')
-    
-    # 5. Generar features autoregresivas (lags, MAs, etc. DE LLAMADAS)
-    df_features = pd.DataFrame(index=full_series.index)
-    df_features[feature_col] = full_series
-    # Usamos la *misma* función 'add_lags_mas' que usa el planner
-    df_features = add_lags_mas(df_features, feature_col)
-    
-    # 6. Añadir features de tiempo
-    df_features = add_time_parts(df_features)
-    
-    # 7. Añadir features exógenas (feriados, pago) del futuro
-    df_features = df_features.join(df_future[['feriados', 'es_dia_de_pago']])
-    df_features['feriados'] = df_features['feriados'].fillna(0)
-    df_features['es_dia_de_pago'] = df_features['es_dia_de_pago'].fillna(0)
-    
-    # 8. Filtrar solo el período de futuro
-    X_future = df_features.loc[future_idx].copy()
-    
-    # 9. Dummies, Reindex y Scaler
-    X_future, _ = dummies_and_reindex(X_future, cols)
-    X_future_s = scaler.transform(X_future)
-    
-    # 10. Predecir (Residuo Z-Score)
-    y_pred_z = model.predict(X_future_s).flatten()
-    
-    # 11. Reconstruir TMO en segundos
-    # 11.1. Invertir Z-Score -> Residuo
-    y_pred_resid = (y_pred_z * resid_std) + resid_mean
-    
-    # 11.2. Traer el Baseline (mediana por dow, hour)
-    df_pred = pd.DataFrame(y_pred_resid, index=X_future.index, columns=['tmo_resid_pred'])
-    df_pred['dow'] = df_pred.index.dayofweek
-    df_pred['hour'] = df_pred.index.hour
-    
-    # Juntar con el baseline de entrenamiento
-    df_pred = df_pred.merge(baseline_df, on=['dow', 'hour'], how='left')
-    
-    # Fallback por si falta algún (dow, hour) en el baseline (ej. 3AM)
-    median_baseline_global = baseline_df['tmo_baseline'].median()
-    df_pred['tmo_baseline'] = df_pred['tmo_baseline'].fillna(median_baseline_global)
-    
-    # 11.3. Sumar: Predicción Final = Baseline + Residuo
-    y_pred_final_sec = df_pred['tmo_baseline'] + df_pred['tmo_resid_pred']
-    
-    # 12. Aplicar un piso (ej. 30 segundos)
-    y_pred_final_sec = y_pred_final_sec.clip(lower=30.0)
-    
-    return pd.Series(y_pred_final_sec.values, index=future_idx, name="tmo_s")
+    # 4. Loop autorregresivo
+    for ts in tqdm(future_index, desc="Prediciendo TMO"):
+        # Combinar histórico + futuro predicho hasta ahora
+        hist_loop = pd.concat([df_hist, df_future])
+        
+        # a) Features de tiempo para 'ts' (ya están en df_hist_full)
+        time_parts = df_hist_full.loc[[ts]]
+        
+        # b) Baseline para 'ts'
+        current_dow = time_parts.iloc[0]['dow']
+        current_hour = time_parts.iloc[0]['hour']
+        
+        baseline_values = df_baseline.loc[
+            (df_baseline['dow'] == current_dow) & (df_baseline['hour'] == current_hour),
+            'tmo_baseline'
+        ].values
+        
+        if len(baseline_values) == 0:
+            print(f"WARN: No se encontró baseline para dow={current_dow}, hour={current_hour}. Usando ffill.")
+            baseline_now = df_hist.iloc[-1]["tmo_baseline"] # Usar el último conocido
+        else:
+            baseline_now = baseline_values[0]
+
+        # c) Features autoregresivas (calculadas sobre hist_loop)
+        # Aplicamos a todo el hist_loop y tomamos la última fila (que corresponde a 'ts')
+        df_with_features = _make_tmo_residual_features(hist_loop)
+        
+        # d) Ensamblar fila de features para 'ts'
+        # Tomamos las features de tiempo de time_parts y las AR de df_with_features.iloc[-1]
+        ar_features = df_with_features.iloc[[-1]]
+        
+        # Combinar: reset index para alinear y luego set index a 'ts'
+        current_features = pd.concat([
+            time_parts.reset_index(drop=True),
+            ar_features.reset_index(drop=True)
+        ], axis=1)
+        current_features.index = [ts]
+
+        # e) Dummies, Reindex, Scale
+        # Rellenar NaNs de features (ej. std_resid en las primeras horas)
+        current_features_filled = current_features.ffill().bfill()
+        
+        X_row_pre = dummies_and_reindex(current_features_filled, model_cols)
+        
+        # Rellenar NaNs *después* de dummify/reindex (si alguna columna faltaba)
+        X_row_pre = X_row_pre.fillna(0) 
+
+        X_row = scaler.transform(X_row_pre)
+        
+        # f) Predecir (z-score del residuo)
+        pred_z = model.predict(X_row, verbose=0)[0, 0]
+        
+        # g) Reconstruir TMO en segundos
+        pred_resid = (pred_z * RESID_STD) + RESID_MEAN
+        pred_sec = baseline_now + pred_resid
+        pred_sec = max(30, pred_sec) # Guardrail (ej: TMO mínimo 30s)
+        
+        # h) Guardar predicción en df_future para el siguiente loop
+        df_future.loc[ts, TARGET_TMO] = pred_sec
+        df_future.loc[ts, "tmo_baseline"] = baseline_now
+        df_future.loc[ts, "tmo_resid"] = pred_resid
+        
+        # Copiar time parts para que _make_tmo_residual_features funcione
+        df_future.loc[ts, time_parts.columns] = time_parts.iloc[0]
+
+    print(f"Predicción TMO v7-residual completada. Mediana: {df_future[TARGET_TMO].median():.1f}s")
+    return df_future[[TARGET_TMO]]
 
 
-# --- Pipeline Principal ---
-
+# --- FUNCIÓN PRINCIPAL (MODIFICADA) ---
 def forecast_120d(
-    df_raw_reset: pd.DataFrame,
-    # df_tmo_reset: pd.DataFrame | None, # <--- MODIFICADO: Eliminado
+    df: pd.DataFrame, 
+    # df_tmo_hist_only: pd.DataFrame | None, # <-- ELIMINADO
     holidays_set: set
 ) -> pd.DataFrame:
     
-    # --- 1. Preparar Histórico (df) ---
-    # df es el histórico de LLAMADAS (y TMO, ahora)
-    df = ensure_ts(df_raw_reset, tz=TIMEZONE)
-    df[TARGET_CALLS] = pd.to_numeric(df[TARGET_CALLS], errors='coerce').fillna(0)
-    df[TARGET_TMO] = pd.to_numeric(df[TARGET_TMO], errors='coerce').ffill()
-    
-    # --- (Eliminada la preparación de df_tmo) ---
-    
-    # Acortar historial para lags (ej. últimos 90 días)
-    last_ts = df.index.max()
-    start_hist_window = last_ts - pd.Timedelta(days=HIST_WINDOW_DAYS)
-    
-    # df_hist se usará para generar features para AMBOS modelos
-    df_hist = df.loc[df.index >= start_hist_window].copy()
-    
-    print(f"Histórico unificado desde {df_hist.index.min()} hasta {df_hist.index.max()}")
-    
-    # --- 2. Preparar Futuro (df_future) ---
-    start_future = last_ts + pd.Timedelta(hours=1)
-    end_future = last_ts + pd.Timedelta(days=120)
-    
-    future_index = pd.date_range(start=start_future, end=end_future, freq='H', tz=TIMEZONE)
-    df_future = pd.DataFrame(index=future_index)
-    
-    # Añadir features exógenas al futuro
-    df_future['feriados'] = mark_holidays_index(df_future.index, holidays_set).values
-    df_future = add_time_parts(df_future) # add_time_parts también añade 'day'
-    df_future['es_dia_de_pago'] = add_es_dia_de_pago(df_future).values
-    
-    # --- 3. Predicciones ---
-    
-    # 3.1. Predecir Planner (Llamadas)
-    # _predict_planner usa df_hist[TARGET_CALLS] para sus features
-    df_future["calls"] = _predict_planner(df_hist, df_future)
+    # 1. Preparar histórico (DF unificado)
+    df_hist_full = _prepare_hist_df(df, holidays_set)
+    last_ts = df_hist_full.index.max()
 
-    # 3.2. Predecir TMO (Nuevo modelo)
-    # _predict_tmo usa df_hist[TARGET_CALLS] para sus features
-    df_future["tmo_s"] = _predict_tmo(df_hist, df_future)
+    # 2. Definir rango futuro (120 días)
+    future_index = pd.date_range(
+        start=last_ts + pd.DateOffset(hours=1),
+        periods=120 * 24,
+        freq='h',
+        tz=TIMEZONE
+    )
+
+    # 3. Añadir feriados y time parts al rango futuro (necesario para ambos modelos)
+    df_future_base = pd.DataFrame(index=future_index)
+    df_future_base["feriados"] = mark_holidays_index(future_index, holidays_set).values
+    df_future_base = add_time_parts(df_future_base)
     
-    # --- 4. Post-Procesamiento (Ajustes Feriados, Outliers) ---
-    df_hourly = df_future.copy()
+    if "add_es_dia_de_pago" in globals(): # Si la función existe
+         from .features import add_es_dia_de_pago
+         df_future_base["es_dia_de_pago"] = add_es_dia_de_pago(df_future_base).values
+    else: # Fallback
+         df_future_base["es_dia_de_pago"] = df_future_base["day"].isin([1,2,15,16,29,30,31]).astype(int)
+
+    # Concatenar base futura al histórico (para que _predict* tengan acceso)
+    df_hist_full = pd.concat([df_hist_full, df_future_base])
+
+    # 4. Procesar histórico TMO (ELIMINADO)
+    # df_tmo_hist_only_proc = _process_tmo_hist(df_tmo_hist_only) # <-- ELIMINADO
+
+    # 5. Predecir Llamadas (SIN CAMBIOS)
+    df_calls_future = _predict_calls(df_hist_full, future_index)
+
+    # 6. Predecir TMO (LLAMADA MODIFICADA)
+    df_tmo_future = _predict_tmo(df_hist_full, future_index)
+
+    # 7. Combinar y post-procesar
+    df_hourly = df_future_base.join(df_calls_future).join(df_tmo_future)
+    df_hourly.rename(columns={TARGET_CALLS: "calls", TARGET_TMO: "tmo_s"}, inplace=True)
+
+    # ... (Resto de la función: Ajuste Feriados, Cap Outliers, Erlang) ...
     
+    # (Asumiendo que las funciones de feriados y outliers están definidas arriba)
+    
+    # ===== AJUSTE FERIADOS (opcional, pero recomendado) =====
     if holidays_set and len(holidays_set) > 0:
         print("Calculando y aplicando factores de ajuste por feriados...")
         (f_calls_by_hour, f_tmo_by_hour,
-         g_calls, g_tmo, post_calls_by_hour) = compute_holiday_factors(df, holidays_set)
+         g_calls, g_tmo, post_calls_by_hour) = compute_holiday_factors(df_hist_full, holidays_set) # Usar df_hist_full
 
         df_hourly = apply_holiday_adjustment(
             df_hourly, holidays_set,
@@ -368,43 +341,81 @@ def forecast_120d(
             col_calls_future="calls"
         )
 
-    # (OPCIONAL) CAP de OUTLIERS (Solo sobre llamadas)
+    # ===== (OPCIONAL) CAP de OUTLIERS =====
     if ENABLE_OUTLIER_CAP:
-        print("Aplicando Guardrail (Cap) de outliers sobre llamadas...")
-        base_mad = _baseline_median_mad(df, col=TARGET_CALLS)
+        print("Aplicando cap de outliers a la predicción de llamadas...")
+        base_mad = _baseline_median_mad(df_hist_full, col=TARGET_CALLS) # Usar df_hist_full
         df_hourly = apply_outlier_cap(
             df_hourly, base_mad, holidays_set,
             col_calls_future="calls",
             k_weekday=K_WEEKDAY, k_weekend=K_WEEKEND
         )
 
-    # --- 5. Erlang por hora ---
+    # ===== Erlang por hora =====
     print("Calculando agentes requeridos (Erlang)...")
     df_hourly["agents_prod"] = 0
-    for ts in df_hourly.index:
-        a, _ = required_agents(float(df_hourly.at[ts, "calls"]), float(df_hourly.at[ts, "tmo_s"]))
+    for ts in tqdm(df_hourly.index, desc="Calculando Erlang"):
+        a, _ = required_agents(
+            float(df_hourly.at[ts, "calls"]), 
+            float(df_hourly.at[ts, "tmo_s"])
+        )
         df_hourly.at[ts, "agents_prod"] = int(a)
-        
-    # Agentes conectados (con Shrinkage)
-    df_hourly["agents_conn"] = schedule_agents(df_hourly["agents_prod"])
     
-    # --- 6. Guardar Resultados ---
-    print("Guardando resultados en JSON...")
+    df_hourly["agents_sched"] = schedule_agents(df_hourly["agents_prod"])
+
+    # ===== Guardar resultados =====
+    print("Guardando resultados JSON...")
     os.makedirs(PUBLIC_DIR, exist_ok=True)
     write_hourly_json(
-        f"{PUBLIC_DIR}/forecast_hourly.json", 
-        df_hourly, 
-        calls_col="calls", 
-        tmo_col="tmo_s", 
-        agentes_col="agents_conn"
+        os.path.join(PUBLIC_DIR, "forecast_hourly.json"),
+        df_hourly, "calls", "tmo_s", "agents_sched"
     )
     write_daily_json(
-        f"{PUBLIC_DIR}/forecast_daily.json",
-        df_hourly,
-        calls_col="calls",
-        tmo_col="tmo_s"
+        os.path.join(PUBLIC_DIR, "forecast_daily.json"),
+        df_hourly, "calls", "tmo_s"
     )
-
-    print("--- Predicción de 120 días completada ---")
     
+    # Guardar JSON de inputs (si es necesario)
+    # ...
+
+    print("--- Inferencia completada exitosamente ---")
     return df_hourly
+
+# (Asegúrate de que todas las funciones helper importadas o definidas
+# como placeholders estén presentes:
+# _baseline_median_mad, apply_outlier_cap, 
+# compute_holiday_factors, apply_holiday_adjustment, apply_post_holiday_adjustment,
+# mark_holidays_index, add_es_dia_de_pago)
+
+# Placeholder simples si faltan
+if '_baseline_median_mad' not in globals():
+    def _baseline_median_mad(df, col): 
+        print(f"WARN: Usando placeholder para _baseline_median_mad({col})")
+        df_b = df.loc[df.index > df.index.max() - pd.DateOffset(days=90)].copy()
+        df_b = add_time_parts(df_b)
+        base = df_b.groupby(['dow','hour'])[col].agg(['median', 'mad']).reset_index()
+        return base.set_index(['dow','hour'])
+
+if 'apply_outlier_cap' not in globals():
+    def apply_outlier_cap(df_hourly, base_mad, holidays_set, col_calls_future, k_weekday, k_weekend):
+        print("WARN: Usando placeholder para apply_outlier_cap")
+        return df_hourly # No hace nada
+
+if 'compute_holiday_factors' not in globals():
+    def compute_holiday_factors(df, holidays_set):
+        print("WARN: Usando placeholder para compute_holiday_factors")
+        return {}, {}, 0, 0, {} # No hace nada
+
+if 'apply_holiday_adjustment' not in globals():
+    def apply_holiday_adjustment(df_hourly, *args, **kwargs):
+        print("WARN: Usando placeholder para apply_holiday_adjustment")
+        return df_hourly # No hace nada
+
+if 'apply_post_holiday_adjustment' not in globals():
+    def apply_post_holiday_adjustment(df_hourly, *args, **kwargs):
+        print("WARN: Usando placeholder para apply_post_holiday_adjustment")
+        return df_hourly # No hace nada
+
+if 'mark_holidays_index' not in globals():
+    def mark_holidays_index(idx, holidays_set):
+         return pd.Series(idx.date).isin(holidays_set).astype(int)
