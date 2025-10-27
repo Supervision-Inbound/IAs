@@ -1,132 +1,119 @@
 # src/main.py
 import argparse
 import os
-import re, unicodedata # Para find_tmo_col
 import numpy as np
 import pandas as pd
 
 from src.inferencia.inferencia_core import forecast_120d
-# --- Asumimos que estas funciones existen en tus archivos originales ---
-try:
-    from src.inferencia.features import ensure_ts, mark_holidays_index, add_es_dia_de_pago
-    from src.inferencia.utils_io import load_holidays
-except ImportError:
-    print("ADVERTENCIA: No se pudieron importar 'mark_holidays_index' o 'load_holidays'.")
-    print("Asegúrate de que existan en features.py y utils_io.py")
-    def load_holidays(path): return set()
-    def mark_holidays_index(idx, h): return pd.Series(0, index=idx.date)
-    def add_es_dia_de_pago(df): df['es_dia_de_pago'] = 0; return df
-# -----------------------------------------------------------------------
+from src.inferencia.features import ensure_ts
 
 DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
-# TMO_HIST_FILE = "data/HISTORICO_TMO.csv" # <-- ELIMINADO
 
-# --- NOMBRES DE COLUMNAS ---
-# (Usamos 'recibidos' porque así se llama en tu historical_data.csv)
-TARGET_CALLS_NEW = "recibidos" 
-TARGET_TMO_NEW = "tmo_general" # Nombre estándar interno
+TARGET_CALLS_NEW = "recibidos_nacional"
+TARGET_TMO_NEW = "tmo_general"
 TZ = "America/Santiago"
 
 def smart_read_historical(path: str) -> pd.DataFrame:
     try:
         df = pd.read_csv(path, low_memory=False)
-        if df.shape[1] > 1 or (df.shape[1] == 1 and ';' not in str(df.iloc[0,0])):
-             return df
+        if df.shape[1] > 1:
+            return df
     except Exception:
         pass
-    print("Leyendo CSV con separador ';'")
     return pd.read_csv(path, delimiter=';', low_memory=False)
 
-# ==================================================================
-# Funciones de utilidad para encontrar TMO (de train_v7.py)
-# ==================================================================
-def _norm(s: str) -> str:
-    s = str(s)
-    s = unicodedata.normalize("NFKD", s)
-    s = "".join(ch for ch in s if not unicodedata.combining(ch))
-    s = s.strip().lower()
-    s = re.sub(r"\s+", " ", s)
-    return s
+def parse_tmo_to_seconds(val):
+    if pd.isna(val): return np.nan
+    s = str(val).strip().replace(",", ".")
+    if s.replace(".", "", 1).isdigit():
+        try: return float(s)
+        except: return np.nan
+    parts = s.split(":")
+    try:
+        if len(parts) == 3: return float(parts[0])*3600 + float(parts[1])*60 + float(parts[2])
+        if len(parts) == 2: return float(parts[0])*60 + float(parts[1])
+        return float(s)
+    except:
+        return np.nan
 
-def find_tmo_col(df: pd.DataFrame) -> str:
-    """Encuentra la columna TMO correcta, p.ej. 'tmo (segundos)'."""
-    norm_map = {_norm(c): c for c in df.columns}
-    for n, orig in norm_map.items():
-        if re.match(r"^tmo\s*\(\s*(s|segundos)\s*\)$", n):
-            return orig
-    for n, orig in norm_map.items():
-        if "tmo" in n and ("(s)" in n or "segundo" in n):
-            return orig
-    if TARGET_TMO_NEW in df.columns:
-         return TARGET_TMO_NEW
-    raise ValueError(f"No se encontró columna TMO ('{TARGET_TMO_NEW}', 'tmo (s)' o 'tmo (segundos)') en el CSV.")
-# ==================================================================
+def load_holidays(csv_path: str) -> set:
+    if not os.path.exists(csv_path): return set()
+    fer = pd.read_csv(csv_path)
+    cols_map = {c.lower().strip(): c for c in fer.columns}
+    fecha_col = None
+    for cand in ["fecha", "date", "dia", "día"]:
+        if cand in cols_map:
+            fecha_col = cols_map[cand]; break
+    if not fecha_col: return set()
+    fechas = pd.to_datetime(fer[fecha_col].astype(str), dayfirst=True, errors="coerce").dropna().dt.date
+    return set(fechas)
 
-def main():
-    parser = argparse.ArgumentParser(description="Ejecutar inferencia de demanda")
-    parser.add_argument("--data", type=str, default=DATA_FILE, help="Ruta al CSV de datos históricos.")
-    parser.add_argument("--holidays", type=str, default=HOLIDAYS_FILE, help="Ruta al CSV de feriados.")
-    parser.add_argument("--horizonte", type=int, default=120, help="Días a predecir.")
-    args = parser.parse_args()
+def mark_holidays_index(dt_index, holidays_set: set) -> pd.Series:
+    tz = getattr(dt_index, "tz", None)
+    idx_dates = dt_index.tz_convert(TZ).date if tz is not None else dt_index.date
+    return pd.Series([d in holidays_set for d in idx_dates], index=dt_index, dtype=int, name="feriados")
 
-    # 1) Cargar histórico (ahora contiene tanto llamadas como TMO)
-    print(f"Cargando datos históricos desde: {args.data}")
-    dfh = smart_read_historical(args.data)
-    dfh = ensure_ts(dfh, TZ) # Crea 'ts' indexado y normalizado a TZ
-    
-    # --- INICIO BLOQUE MODIFICADO (LÓGICA TMO v7) ---
-    
-    # 2) Validar y renombrar TMO (NUEVA LÓGICA v7)
-    tmo_col_real = find_tmo_col(dfh)
-    
-    if tmo_col_real != TARGET_TMO_NEW:
-        print(f"Usando columna '{tmo_col_real}' como target TMO (renombrada a '{TARGET_TMO_NEW}')")
-        dfh[TARGET_TMO_NEW] = pd.to_numeric(dfh[tmo_col_real], errors='coerce')
-    else:
-        print(f"Usando columna TMO existente: '{TARGET_TMO_NEW}'")
-        dfh[TARGET_TMO_NEW] = pd.to_numeric(dfh[TARGET_TMO_NEW], errors='coerce')
+def add_es_dia_de_pago(df_idx: pd.DataFrame) -> pd.Series:
+    # No se usa en TMO, pero preservamos la columna en 0 por compatibilidad
+    return pd.Series(0, index=df_idx.index, name="es_dia_de_pago")
 
-    # --- ELIMINAMOS LA CARGA Y MERGE DE HISTORICO_TMO.csv ---
-    
-    # --- FIN BLOQUE MODIFICADO ---
+def main(horizonte_dias: int):
+    os.makedirs("public", exist_ok=True)
 
-    # 3) Derivar calendario para el histórico (Lógica original)
-    holidays_set = load_holidays(args.holidays)
+    # 1) Leer histórico principal (llamadas + TMO en el MISMO CSV)
+    dfh = smart_read_historical(DATA_FILE)
+    dfh.columns = dfh.columns.str.strip()
+
+    # Normalizar columna de llamadas si viene con otro alias
+    if TARGET_CALLS_NEW not in dfh.columns:
+        for cand in ["recibidos_nacional", "recibidos", "total_llamadas", "llamadas"]:
+            if cand in dfh.columns:
+                dfh = dfh.rename(columns={cand: TARGET_CALLS_NEW})
+                break
+
+    # Normalizar TMO a segundos (acepta mm:ss, hh:mm:ss o número)
+    if TARGET_TMO_NEW not in dfh.columns:
+        tmo_source = None
+        for cand in ["tmo (segundos)", "tmo_seg", "tmo", "tmo_general", "aht"]:
+            if cand in dfh.columns:
+                tmo_source = cand; break
+        if tmo_source:
+            dfh[TARGET_TMO_NEW] = dfh[tmo_source].apply(parse_tmo_to_seconds)
+
+    # 2) Asegurar índice temporal
+    dfh = ensure_ts(dfh)
+
+    # 3) Derivar calendario para el histórico (feriados, pago=0)
+    holidays_set = load_holidays(HOLIDAYS_FILE)
     if "feriados" not in dfh.columns:
         dfh["feriados"] = mark_holidays_index(dfh.index, holidays_set).values
-    dfh["feriados"] = pd.to_numeric(dfh["feriados"], errors='coerce').fillna(0).astype(int)
-    
+    dfh["feriados"] = pd.to_numeric(dfh["feriados"], errors="coerce").fillna(0).astype(int)
     if "es_dia_de_pago" not in dfh.columns:
-        print("Creando columna 'es_dia_de_pago'...")
-        # Asignación corregida (el .values daba error en el log anterior)
-        dfh = add_es_dia_de_pago(dfh) 
+        dfh["es_dia_de_pago"] = add_es_dia_de_pago(dfh).values
+    else:
+        dfh["es_dia_de_pago"] = 0  # forzado según nueva lógica
 
-    # 4) ffill de columnas clave (Lógica original)
-    fill_cols = [TARGET_CALLS_NEW, TARGET_TMO_NEW, "feriados", "es_dia_de_pago"]
-    for c in ["proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
-         if c in dfh.columns:
-            fill_cols.append(c)
-            
-    for c in fill_cols:
+    # 4) ffill de columnas clave para evitar NaN en el borde
+    for c in [TARGET_TMO_NEW, "feriados", "es_dia_de_pago",
+              "proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
         if c in dfh.columns:
             dfh[c] = dfh[c].ffill()
-        else:
-            print(f"Advertencia: Columna '{c}' no encontrada para ffill.")
 
-    # 5) Forecast
-    print(f"Iniciando forecast (horizonte={args.horizonte} días)...")
+    # 5) Forecast (una sola fuente histórica)
     df_hourly = forecast_120d(
-        dfh.reset_index(), # Pasamos el DF histórico completo
-        holidays_set=holidays_set,
-        horizon_days=args.horizonte,
-        target_calls_col=TARGET_CALLS_NEW, # Pasamos el nombre de la columna de llamadas
-        target_tmo_col=TARGET_TMO_NEW     # Pasamos el nombre de la columna de TMO
+        dfh.reset_index(),
+        horizon_days=horizonte_dias,
+        holidays_set=holidays_set
     )
 
-    print("\nProceso de inferencia completado.")
-    print(df_hourly.head())
-
+    # 6) Alertas clima (usa la curva del planner)
+    from src.inferencia.alertas_clima import generar_alertas
+    generar_alertas(df_hourly[["calls"]])
 
 if __name__ == "__main__":
-    main()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--horizonte", type=int, default=120)
+    args = ap.parse_args()
+    main(args.horizonte)
+
