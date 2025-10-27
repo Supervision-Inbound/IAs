@@ -355,17 +355,25 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
     keep_cols = [TARGET_CALLS, "feriados", "es_dia_de_pago"]
     if TARGET_TMO in df.columns:
         keep_cols.append(TARGET_TMO)
+
     df_tmp = add_time_parts(df[keep_cols].copy())
+    # --- PRESERVAR TS ANTES DEL MERGE ---
+    df_tmp["ts"] = df.index  # capturamos el índice temporal original
     df_tmp = df_tmp.merge(tmo_base_table, on=["dow","hour"], how="left")
+    # Restaurar índice temporal y orden
+    df_tmp = df_tmp.sort_values("ts").set_index("ts")
+    # ------------------------------------
+
     if TARGET_TMO in df_tmp.columns:
         df_tmp["tmo_resid"] = pd.to_numeric(df_tmp[TARGET_TMO], errors="coerce") - df_tmp["tmo_baseline"]
     else:
         df_tmp["tmo_resid"] = np.nan
 
-    # Ventana reciente (AHORA si o si con índice datetime)
+    # Ventana reciente (índice datetime asegurado)
     idx = df_tmp.index
     if not isinstance(idx, pd.DatetimeIndex):
         idx = pd.to_datetime(idx, errors="coerce", utc=True).tz_convert(TIMEZONE)
+        df_tmp = df_tmp.set_index(idx)
     last_ts = pd.to_datetime(idx.max())
     mask_recent = idx >= (last_ts - pd.Timedelta(days=HIST_WINDOW_DAYS))
     dfp = df_tmp.loc[mask_recent].copy()
@@ -390,6 +398,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
     for ts in future_ts:
         # Volumen
         tmp_calls = dfp[[TARGET_CALLS, "feriados","es_dia_de_pago"]].copy()
+        # tmp_calls hereda el índice datetime de dfp (asegurado arriba)
         tmp_calls = add_lags_mas(tmp_calls, TARGET_CALLS)
         tmp_calls = add_time_parts(tmp_calls)
         X_pl = dummies_and_reindex(tmp_calls.tail(1), cols_pl)
