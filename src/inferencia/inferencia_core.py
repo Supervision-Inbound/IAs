@@ -15,7 +15,7 @@ from .utils_io import write_daily_json, write_hourly_json, write_json
 TIMEZONE = "America/Santiago"
 PUBLIC_DIR = "public"
 
-# --- Planner (Llamadas) - Sin cambios ---
+# --- Planner (Llamadas) ---
 PLANNER_MODEL = "models/modelo_planner.keras"
 PLANNER_SCALER = "models/scaler_planner.pkl"
 PLANNER_COLS = "models/training_columns_planner.json"
@@ -27,8 +27,10 @@ TMO_COLS = "models/training_columns_tmo.json"
 TMO_BASELINE = "models/tmo_baseline_dow_hour.csv" # <-- NUEVO
 TMO_META = "models/tmo_residual_meta.json"      # <-- NUEVO
 
-TARGET_CALLS = "recibidos_nacional"
+# --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN!! ---
+TARGET_CALLS = "recibidos" # <- Ajustado a tu CSV (era "recibidos_nacional")
 TARGET_TMO = "tmo_general" # Este es el nombre estándar (ej: 'tmo_general')
+# ------------------------------------
 
 # Ventana reciente para lags/MA
 HIST_WINDOW_DAYS = 90
@@ -126,15 +128,15 @@ def _make_tmo_residual_features(df: pd.DataFrame) -> pd.DataFrame:
 
 # (Helpers de Feriados - Asumimos que están aquí)
 def compute_holiday_factors(df, holidays_set):
-    print("WARN: Usando placeholder para compute_holiday_factors")
+    #print("WARN: Usando placeholder para compute_holiday_factors")
     return {}, {}, 0, 0, {} 
 
 def apply_holiday_adjustment(df_hourly, *args, **kwargs):
-    print("WARN: Usando placeholder para apply_holiday_adjustment")
+    #print("WARN: Usando placeholder para apply_holiday_adjustment")
     return df_hourly 
 
 def apply_post_holiday_adjustment(df_hourly, *args, **kwargs):
-    print("WARN: Usando placeholder para apply_post_holiday_adjustment")
+    #print("WARN: Usando placeholder para apply_post_holiday_adjustment")
     return df_hourly
 
 
@@ -165,6 +167,7 @@ def _prepare_hist_df(df: pd.DataFrame, holidays_set: set) -> pd.DataFrame:
     dfh = dfh.loc[dfh.index >= min_ts_final].copy()
     
     # Re-asegurar que no haya NaNs en columnas clave
+    # Esta es la línea que fallaba (KeyError: 'recibidos_nacional')
     dfh[TARGET_CALLS] = pd.to_numeric(dfh[TARGET_CALLS], errors='coerce').ffill().bfill()
     dfh[TARGET_TMO] = pd.to_numeric(dfh[TARGET_TMO], errors='coerce').ffill().bfill()
     dfh["feriados"] = dfh["feriados"].ffill().bfill()
@@ -430,5 +433,7 @@ def forecast_120d(
         df_hourly, "calls", "tmo_s"
     )
     
+    print("--- Inferencia completada exitosamente ---")
+    return df_hourly
     print("--- Inferencia completada exitosamente ---")
     return df_hourly
