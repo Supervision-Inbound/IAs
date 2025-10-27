@@ -1,27 +1,46 @@
 # src/main.py
 import argparse
 import os
-import re, unicodedata
+import re, unicodedata # Para find_tmo_col
 import numpy as np
 import pandas as pd
 
 from src.inferencia.inferencia_core import forecast_120d
-# --- IMPORTAMOS LAS FUNCIONES DE FEATURES/UTILS (que ya existen) ---
-from src.inferencia.features import ensure_ts, add_es_dia_de_pago, mark_holidays_index
-from src.inferencia.utils_io import load_holidays
-# --------------------------------
+from src.inferencia.features import ensure_ts
+# --- ELIMINAMOS loader_tmo ---
+# from src.data.loader_tmo import load_historico_tmo 
+
+# --- IMPORTAMOS FUNCIONES QUE ESTABAN EN TU main.py ORIGINAL (asumiendo que existen) ---
+try:
+    from src.inferencia.features import mark_holidays_index, add_es_dia_de_pago
+    from src.inferencia.utils_io import load_holidays
+except ImportError:
+    print("ADVERTENCIA: No se pudieron importar 'mark_holidays_index' o 'load_holidays'.")
+    print("Asegúrate de que existan en features.py y utils_io.py")
+    def load_holidays(path): return set()
+    def mark_holidays_index(idx, h): return pd.Series(0, index=idx.date)
+    def add_es_dia_de_pago(df): df['es_dia_de_pago'] = 0; return df
+# ---------------------------------------------------------------------------------
 
 DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
+# TMO_HIST_FILE = "data/HISTORICO_TMO.csv" # <-- ELIMINADO
 
-# --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN!! ---
-# Definimos los nombres de columna aquí, en el scope global.
-# 'recibidos' es el nombre en tu historical_data.csv
+# --- NOMBRES DE COLUMNAS ---
+# (Usamos 'recibidos' porque así se llama en tu historical_data.csv)
 TARGET_CALLS_NEW = "recibidos" 
 TARGET_TMO_NEW = "tmo_general" # Nombre estándar interno
-# ----------------------------------
-
 TZ = "America/Santiago"
+
+def smart_read_historical(path: str) -> pd.DataFrame:
+    try:
+        df = pd.read_csv(path, low_memory=False)
+        if df.shape[1] > 1 or (df.shape[1] == 1 and ';' not in str(df.iloc[0,0])):
+             return df
+    except Exception:
+        pass
+    print("Leyendo CSV con separador ';'")
+    return pd.read_csv(path, delimiter=';', low_memory=False)
 
 # ==================================================================
 # Funciones de utilidad para encontrar TMO (de train_v7.py)
@@ -37,30 +56,16 @@ def _norm(s: str) -> str:
 def find_tmo_col(df: pd.DataFrame) -> str:
     """Encuentra la columna TMO correcta, p.ej. 'tmo (segundos)'."""
     norm_map = {_norm(c): c for c in df.columns}
-    # 1. Buscar 'tmo (s)' o 'tmo (segundos)' exacto (normalizado)
     for n, orig in norm_map.items():
         if re.match(r"^tmo\s*\(\s*(s|segundos)\s*\)$", n):
             return orig
-    # 2. Buscar heurística
     for n, orig in norm_map.items():
         if "tmo" in n and ("(s)" in n or "segundo" in n):
             return orig
-    # 3. Fallback al nombre estándar (si ya existe)
     if TARGET_TMO_NEW in df.columns:
          return TARGET_TMO_NEW
     raise ValueError(f"No se encontró columna TMO ('{TARGET_TMO_NEW}', 'tmo (s)' o 'tmo (segundos)') en el CSV.")
 # ==================================================================
-
-def smart_read_historical(path: str) -> pd.DataFrame:
-    """Lee CSV detectando separador ',' o ';'."""
-    try:
-        df = pd.read_csv(path, low_memory=False)
-        if df.shape[1] > 1 or (df.shape[1] == 1 and ';' not in str(df.iloc[0,0])):
-             return df
-    except Exception:
-        pass
-    print("Leyendo CSV con separador ';'")
-    return pd.read_csv(path, delimiter=';', low_memory=False)
 
 def main():
     parser = argparse.ArgumentParser(description="Ejecutar inferencia de demanda")
@@ -74,6 +79,8 @@ def main():
     dfh = smart_read_historical(args.data)
     dfh = ensure_ts(dfh, TZ) # Crea 'ts' indexado y normalizado a TZ
 
+    # --- INICIO BLOQUE MODIFICADO (LÓGICA TMO v7) ---
+    
     # 2) Validar y renombrar TMO (NUEVA LÓGICA v7)
     tmo_col_real = find_tmo_col(dfh)
     
@@ -83,24 +90,26 @@ def main():
     else:
         print(f"Usando columna TMO existente: '{TARGET_TMO_NEW}'")
         dfh[TARGET_TMO_NEW] = pd.to_numeric(dfh[TARGET_TMO_NEW], errors='coerce')
-        
-    # --- BLOQUE QUE CAUSABA EL ERROR (ELIMINADO) ---
-    # Ya no validamos TARGET_CALLS_NEW aquí, confiamos en la variable global.
 
-    # 3) Derivar calendario para el histórico
-    holidays_set = load_holidays(args.holidays)
+    # --- ELIMINAMOS LA CARGA Y MERGE DE HISTORICO_TMO.csv ---
     
+    # --- FIN BLOQUE MODIFICADO ---
+
+    # 3) Derivar calendario para el histórico (Lógica original)
+    holidays_set = load_holidays(args.holidays)
     if "feriados" not in dfh.columns:
-        print("Creando columna 'feriados' desde el índice...")
         dfh["feriados"] = mark_holidays_index(dfh.index, holidays_set).values
     dfh["feriados"] = pd.to_numeric(dfh["feriados"], errors='coerce').fillna(0).astype(int)
-    
     if "es_dia_de_pago" not in dfh.columns:
-        print("Creando columna 'es_dia_de_pago'...")
-        dfh = add_es_dia_de_pago(dfh)
-    
-    # 4) ffill de columnas clave (incluyendo el nuevo TMO)
+        dfh["es_dia_de_pago"] = add_es_dia_de_pago(dfh).values
+
+    # 4) ffill de columnas clave (Lógica original)
+    # (Añadimos TARGET_CALLS_NEW por si acaso)
     fill_cols = [TARGET_CALLS_NEW, TARGET_TMO_NEW, "feriados", "es_dia_de_pago"]
+    for c in ["proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
+         if c in dfh.columns:
+            fill_cols.append(c)
+            
     for c in fill_cols:
         if c in dfh.columns:
             dfh[c] = dfh[c].ffill()
@@ -120,17 +129,6 @@ def main():
     print("\nProceso de inferencia completado.")
     print(df_hourly.head())
 
+
 if __name__ == "__main__":
-    # --- Estas funciones deben existir en features.py y utils_io.py ---
-    try:
-        from src.inferencia.features import mark_holidays_index, add_es_dia_de_pago
-        from src.inferencia.utils_io import load_holidays
-    except ImportError as e:
-        print(f"ERROR: Faltan funciones helper. Asegúrate que 'features.py' y 'utils_io.py' están correctos.")
-        print(e)
-        # Fallback simple para que el linter no falle (pero el código sí lo hará si faltan)
-        def load_holidays(path): return set()
-        def mark_holidays_index(idx, h): return pd.Series(0, index=idx.date)
-        def add_es_dia_de_pago(df): df['es_dia_de_pago'] = 0; return df
-        
     main()
