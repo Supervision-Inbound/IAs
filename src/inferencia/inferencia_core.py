@@ -44,6 +44,7 @@ def _load_cols(path: str):
         return json.load(f)
 
 # (Helpers de Outliers - Asumimos que están aquí)
+# --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN!! ---
 def _baseline_median_mad(df: pd.DataFrame, col: str) -> pd.DataFrame:
     """Calcula mediana y MAD por (dow, hour) del histórico."""
     # Usar solo datos recientes (ej. últimos 90 días) para el baseline
@@ -51,8 +52,16 @@ def _baseline_median_mad(df: pd.DataFrame, col: str) -> pd.DataFrame:
     if 'dow' not in df_b.columns or 'hour' not in df_b.columns:
         df_b = add_time_parts(df_b) # Asegurar que existan dow y hour
     
-    # Calcular mediana y MAD (Median Absolute Deviation)
-    base = df_b.groupby(['dow','hour'])[col].agg(['median', 'mad']).reset_index()
+    # .mad() fue eliminado en Pandas 2.0
+    # Usamos una lambda para calcular la Desviación Absoluta Mediana
+    mad_calc = lambda x: (x - x.median()).abs().median()
+    
+    base = df_b.groupby(['dow','hour'])[col].agg(
+        median='median', 
+        mad=mad_calc  # Usamos la lambda en lugar de 'mad'
+    ).reset_index()
+    # --- FIN DE LA CORRECCIÓN ---
+
     # Rellenar NaNs en MAD (si hay pocos datos) con la media del MAD
     base['mad'] = base['mad'].fillna(base['mad'].mean())
     return base.set_index(['dow','hour'])
@@ -93,7 +102,6 @@ def apply_outlier_cap(df_hourly: pd.DataFrame, baseline_mad: pd.DataFrame,
 
 # =================================================================
 # HELPER TMO: Creación de features residuales (de train_v7.py)
-# --- ¡¡AQUÍ ESTÁ LA CORRECCIÓN!! ---
 # =================================================================
 def _make_tmo_residual_features(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -129,7 +137,6 @@ def _make_tmo_residual_features(df: pd.DataFrame) -> pd.DataFrame:
     # bfill() para el primer registro
     # fillna(0) para lo que quede
     return d.ffill().bfill().fillna(0)
-# --- FIN DE LA CORRECCIÓN ---
 # =================================================================
 
 
@@ -309,7 +316,6 @@ def _predict_tmo(df_hist_full: pd.DataFrame, future_index: pd.DatetimeIndex) -> 
         current_features.index = [ts]
 
         # e) Dummies, Reindex, Scale
-        # --- CORRECCIÓN: Eliminado ffill() de una sola fila ---
         X_row_pre = dummies_and_reindex(current_features, model_cols)
         
         # Rellenar NaNs *después* de dummify/reindex (si alguna columna faltaba o ffill falló)
@@ -412,18 +418,24 @@ def forecast_120d(
     
     # Vectorizar Erlang si es posible (más rápido que el loop)
     try:
+        # Asegurarnos de que no haya NaNs antes de vectorizar
+        calls_erlang = df_hourly["calls"].fillna(0).values
+        tmo_erlang = df_hourly["tmo_s"].ffill().bfill().fillna(60).values # Fallback a 60s
+        
         df_hourly["agents_prod"] = np.vectorize(required_agents)(
-            df_hourly["calls"].values, 
-            df_hourly["tmo_s"].values
+            calls_erlang, 
+            tmo_erlang
         )[0] # required_agents devuelve (agentes, occ)
         df_hourly["agents_prod"] = df_hourly["agents_prod"].astype(int)
-    except Exception:
-        print("Vectorización de Erlang falló, usando loop...")
+    except Exception as e:
+        print(f"Vectorización de Erlang falló ({e}), usando loop...")
         for ts in tqdm(df_hourly.index, desc="Calculando Erlang (loop)"):
-            a, _ = required_agents(
-                float(df_hourly.at[ts, "calls"]), 
-                float(df_hourly.at[ts, "tmo_s"])
-            )
+            c = float(df_hourly.at[ts, "calls"])
+            t = float(df_hourly.at[ts, "tmo_s"])
+            if pd.isna(c) or pd.isna(t):
+                a = 0
+            else:
+                a, _ = required_agents(c, t)
             df_hourly.at[ts, "agents_prod"] = int(a)
     
     df_hourly["agents_sched"] = schedule_agents(df_hourly["agents_prod"])
