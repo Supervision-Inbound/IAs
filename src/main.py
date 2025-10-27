@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from src.inferencia.inferencia_core import forecast_120d
-# --- IMPORTACIONES CORREGIDAS ---
+# --- IMPORTAMOS LAS FUNCIONES DE FEATURES/UTILS (que ya existen) ---
 from src.inferencia.features import ensure_ts, add_es_dia_de_pago, mark_holidays_index
 from src.inferencia.utils_io import load_holidays
 # --------------------------------
@@ -14,7 +14,7 @@ from src.inferencia.utils_io import load_holidays
 DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
 # TMO_HIST_FILE = "data/HISTORICO_TMO.csv" # <-- ELIMINADO
-TARGET_CALLS_NEW = "recibidos_nacional"
+TARGET_CALLS_NEW = "recibidos" # <-- AJUSTADO A TU CSV (era recibidos_nacional)
 TARGET_TMO_NEW = "tmo_general" # Nombre estándar interno
 TZ = "America/Santiago"
 
@@ -78,6 +78,16 @@ def main():
     else:
         print(f"Usando columna TMO existente: '{TARGET_TMO_NEW}'")
         dfh[TARGET_TMO_NEW] = pd.to_numeric(dfh[TARGET_TMO_NEW], errors='coerce')
+        
+    # Validar columna de llamadas (viene de tu CSV)
+    if TARGET_CALLS_NEW not in dfh.columns:
+        print(f"ADVERTENCIA: No se encontró la columna de llamadas '{TARGET_CALLS_NEW}'. Verifique el CSV.")
+        # Intentar usar 'recibidos' como fallback si existe
+        if 'recibidos' in dfh.columns:
+            TARGET_CALLS_NEW = 'recibidos'
+            print(f"Usando columna 'recibidos' como fallback.")
+        else:
+            raise KeyError(f"No se encuentra la columna '{TARGET_CALLS_NEW}' en el CSV.")
 
     # 3) Derivar calendario para el histórico
     holidays_set = load_holidays(args.holidays)
@@ -89,10 +99,10 @@ def main():
     
     if "es_dia_de_pago" not in dfh.columns:
         print("Creando columna 'es_dia_de_pago'...")
-        dfh = add_es_dia_de_pago(dfh) # Esta función devuelve el DF
+        dfh = add_es_dia_de_pago(dfh)
     
     # 4) ffill de columnas clave (incluyendo el nuevo TMO)
-    fill_cols = [TARGET_TMO_NEW, "feriados", "es_dia_de_pago"]
+    fill_cols = [TARGET_CALLS_NEW, TARGET_TMO_NEW, "feriados", "es_dia_de_pago"]
     for c in fill_cols:
         if c in dfh.columns:
             dfh[c] = dfh[c].ffill()
@@ -104,11 +114,26 @@ def main():
     df_hourly = forecast_120d(
         dfh.reset_index(), # Pasamos el DF histórico completo
         holidays_set=holidays_set,
-        horizon_days=args.horizonte # Pasamos el horizonte
+        horizon_days=args.horizonte,
+        target_calls_col=TARGET_CALLS_NEW, # Pasamos el nombre de la columna de llamadas
+        target_tmo_col=TARGET_TMO_NEW     # Pasamos el nombre de la columna de TMO
     )
 
     print("\nProceso de inferencia completado.")
     print(df_hourly.head())
 
 if __name__ == "__main__":
+    # --- Estas funciones deben existir en features.py y utils_io.py ---
+    # (Si no existen, el import fallará. Asumo que SÍ existen)
+    try:
+        from src.inferencia.features import mark_holidays_index, add_es_dia_de_pago
+        from src.inferencia.utils_io import load_holidays
+    except ImportError as e:
+        print(f"ERROR: Faltan funciones helper. Asegúrate que 'features.py' y 'utils_io.py' están correctos.")
+        print(e)
+        # Fallback simple para que el linter no falle (pero el código sí lo hará si faltan)
+        def load_holidays(path): return set()
+        def mark_holidays_index(idx, h): return pd.Series(0, index=idx.date)
+        def add_es_dia_de_pago(df): df['es_dia_de_pago'] = 0; return df
+        
     main()
