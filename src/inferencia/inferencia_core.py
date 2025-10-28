@@ -260,57 +260,50 @@ _ALIAS_BASES = [
 
 def _inject_planner_feature_aliases(df_feat: pd.DataFrame, training_cols: list, target_name: str) -> pd.DataFrame:
     """
-    Copia lags/MAs del target real hacia los nombres que espera el modelo entrenado.
-    Ej: si entrenó con 'lag_recibidos_nacional_24' y hoy generamos 'lag_contestados_24',
-    crea la columna faltante copiando los valores.
+    Construye EXACTAMENTE las columnas de lags/MAs que pide el modelo por nombre,
+    usando SIEMPRE la serie activa `target_name` (p.ej. 'recibidos') como fuente.
+    Esto evita “flattening” y mantiene la escala del original.
     """
     d = df_feat.copy()
 
-    # 1) LAGS
-    # Descubrir qué lags pide el entrenamiento por base y k
-    lag_specs = []
-    for c in training_cols:
-        m = re.match(r"^lag_([a-zA-Z0-9_]+)_(\d+)$", c)
-        if m:
-            base, k = m.group(1), int(m.group(2))
-            lag_specs.append((base, k, c))
+    # Asegura fuente numérica
+    if target_name not in d.columns:
+        d[target_name] = 0.0
+    d[target_name] = pd.to_numeric(d[target_name], errors="coerce")
 
-    for base, k, colname in lag_specs:
-        src = f"lag_{target_name}_{k}"
-        if colname not in d.columns and src in d.columns:
-            d[colname] = d[src]
-
-    # 2) MA (24/72/168) — algunos entrenamientos nombran 'ma_24' y otros 'ma_<base>_24'
-    ma_specs = []
+    # Recolecta specs que el modelo pide
+    lag_specs = []   # [(base, k, colname)]
+    ma_specs  = []   # [(base, w, colname)] ; base puede ser "__GENERIC__" si el modelo pidió "ma_24"
     for c in training_cols:
-        m1 = re.match(r"^ma_(\d+)$", c)
-        m2 = re.match(r"^ma_([a-zA-Z0-9_]+)_(\d+)$", c)
+        mlag = re.match(r"^lag_([a-zA-Z0-9_]+)_(\d+)$", c)
+        if mlag:
+            lag_specs.append((mlag.group(1), int(mlag.group(2)), c))
+            continue
+        m1 = re.match(r"^ma_(\d+)$", c)  # genérica
         if m1:
             ma_specs.append(("__GENERIC__", int(m1.group(1)), c))
-        elif m2:
+            continue
+        m2 = re.match(r"^ma_([a-zA-Z0-9_]+)_(\d+)$", c)
+        if m2:
             ma_specs.append((m2.group(1), int(m2.group(2)), c))
+            continue
 
-    # Tenemos nuestras MAs genéricas?
-    have_generic_ma = {w: f"ma_{w}" in d.columns for w in (24, 72, 168)}
+    # Genera TODAS las columnas de lag que el modelo pide, con el nombre EXACTO,
+    # usando SIEMPRE la serie target_name como fuente
+    for base, k, colname in lag_specs:
+        if colname not in d.columns:
+            d[colname] = d[target_name].shift(k)
+
+    # Genera TODAS las columnas de MA que el modelo pide, con el nombre EXACTO,
+    # usando SIEMPRE la serie target_name como fuente
     for base, w, colname in ma_specs:
-        if colname in d.columns:
-            continue
-        if base == "__GENERIC__":
-            # el entrenamiento espera 'ma_24'; si la tenemos con ese nombre, ya existe
-            continue
-        # el entrenamiento espera 'ma_<base>_<w>'
-        src_generic = f"ma_{w}"
-        if have_generic_ma.get(w, False):
-            d[colname] = d[src_generic]
-        else:
-            # si no tenemos la genérica pero existe 'lag_<target>_1', generamos una MA rápida
-            tcol = f"lag_{target_name}_1"
-            if tcol in d.columns:
-                # reconstrucción aproximada usando última ventana idéntica (1 fila!)
-                d[colname] = d[tcol]  # en inferencia online por 1 fila, mejor no recalcular
-            else:
-                d[colname] = 0.0
+        if colname not in d.columns:
+            d[colname] = d[target_name].rolling(w, min_periods=1).mean()
 
+    # Saneo
+    for c in d.columns:
+        d[c] = pd.to_numeric(d[c], errors="coerce")
+    d = d.ffill().fillna(0.0)
     return d
 
 # ---------- TMO residual: artefactos + fallback ----------
@@ -375,10 +368,10 @@ def _add_tmo_resid_features(df_in: pd.DataFrame) -> pd.DataFrame:
 # ---------- Núcleo ----------
 def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holidays_set: set | None = None):
     """
-    - Volumen iterativo (contestados) con planner.
+    - Volumen iterativo (recibidos) con planner.
     - TMO residual iterativo = baseline(dow,hour) + (z*std + mean).
     - Ajustes por feriados / post-feriados y CAP de outliers.
-    - Erlang C y salidas JSON (diaria ponderada por 'contestados').
+    - Erlang C y salidas JSON (diaria ponderada por 'recibidos').
     """
     # Artefactos
     m_pl = tf.keras.models.load_model(PLANNER_MODEL, compile=False)
@@ -454,16 +447,15 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
         tz=TIMEZONE
     )
 
-    # ===== Bucle iterativo: Contestados + TMO residual =====
-    print("Iniciando predicción iterativa (Contestados + TMO residual)...")
+    # ===== Bucle iterativo: Recibidos + TMO residual =====
+    print("Iniciando predicción iterativa (Recibidos + TMO residual)...")
     for ts in future_ts:
         # ------- Volumen (PLANNER) -------
         tmp_calls = dfp[[TARGET_CALLS, "feriados","es_dia_de_pago"]].copy()
         tmp_calls = add_lags_mas(tmp_calls, TARGET_CALLS)
         tmp_calls = add_time_parts(tmp_calls)
 
-        # *** NUEVO: Inyección de aliases para que el planner reciba EXACTAMENTE
-        # las columnas con los nombres de entrenamiento (ej. 'lag_recibidos_nacional_k') ***
+        # Construir EXACTAMENTE los lags/MAs que pide el modelo (por nombre) desde 'recibidos'
         tmp_calls = _inject_planner_feature_aliases(tmp_calls, cols_pl, target_name=TARGET_CALLS)
 
         X_pl = dummies_and_reindex(tmp_calls.tail(1), cols_pl)
@@ -502,7 +494,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
 
     # ===== Salida horaria =====
     df_hourly = pd.DataFrame(index=future_ts)
-    df_hourly["calls"] = np.round(dfp.loc[future_ts, TARGET_CALLS]).astype(int)  # calls = contestados
+    df_hourly["calls"] = np.round(dfp.loc[future_ts, TARGET_CALLS]).astype(int)  # calls = recibidos
     df_hourly["tmo_s"] = np.round(dfp.loc[future_ts, "tmo_baseline"] + dfp.loc[future_ts, "tmo_resid"]).astype(int)
 
     # ===== Ajustes feriados / post-feriados =====
@@ -532,7 +524,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
     # ===== Salidas JSON =====
     write_hourly_json(f"{PUBLIC_DIR}/prediccion_horaria.json", df_hourly, "calls", "tmo_s", "agents_sched")
     write_daily_json(f"{PUBLIC_DIR}/prediccion_diaria.json", df_hourly, "calls", "tmo_s",
-                     weights_col="calls")  # ponderado por contestados
+                     weights_col="calls")  # ponderado por recibidos
 
     return df_hourly
 
