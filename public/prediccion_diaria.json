@@ -1,607 +1,307 @@
 [
   {
     "fecha": "2025-07-27",
-    "llamadas_diarias": 319,
-    "tmo_diario": 287.9686520376176
+    "llamadas_diarias": 296,
+    "tmo_diario": 288.0439189189189
   },
   {
     "fecha": "2025-07-28",
-    "llamadas_diarias": 1885,
-    "tmo_diario": 306.5745358090186
+    "llamadas_diarias": 1800,
+    "tmo_diario": 305.7638888888889
   },
   {
     "fecha": "2025-07-29",
-    "llamadas_diarias": 1849,
-    "tmo_diario": 307.44510546241213
+    "llamadas_diarias": 1929,
+    "tmo_diario": 307.4090202177294
   },
   {
     "fecha": "2025-07-30",
-    "llamadas_diarias": 1822,
-    "tmo_diario": 305.2085620197585
+    "llamadas_diarias": 1906,
+    "tmo_diario": 304.90136411332634
   },
   {
     "fecha": "2025-07-31",
-    "llamadas_diarias": 1831,
-    "tmo_diario": 299.6657564172583
+    "llamadas_diarias": 1841,
+    "tmo_diario": 299.1596958174905
   },
   {
     "fecha": "2025-08-01",
-    "llamadas_diarias": 2041,
-    "tmo_diario": 299.2988731014209
+    "llamadas_diarias": 2015,
+    "tmo_diario": 298.5736972704715
   },
   {
     "fecha": "2025-08-02",
-    "llamadas_diarias": 2314,
-    "tmo_diario": 295.81374243733796
+    "llamadas_diarias": 2326,
+    "tmo_diario": 295.0868443680138
   },
   {
     "fecha": "2025-08-03",
-    "llamadas_diarias": 2590,
-    "tmo_diario": 292.6880308880309
+    "llamadas_diarias": 2525,
+    "tmo_diario": 292.3073267326733
   },
   {
     "fecha": "2025-08-04",
-    "llamadas_diarias": 2349,
-    "tmo_diario": 316.1260110685398
+    "llamadas_diarias": 2058,
+    "tmo_diario": 315.687074829932
   },
   {
     "fecha": "2025-08-05",
-    "llamadas_diarias": 2065,
-    "tmo_diario": 306.95205811138015
+    "llamadas_diarias": 2050,
+    "tmo_diario": 306.7185365853658
   },
   {
     "fecha": "2025-08-06",
-    "llamadas_diarias": 2049,
-    "tmo_diario": 303.7418252806247
+    "llamadas_diarias": 2028,
+    "tmo_diario": 303.5276134122288
   },
   {
     "fecha": "2025-08-07",
-    "llamadas_diarias": 1986,
-    "tmo_diario": 296.5845921450151
+    "llamadas_diarias": 1921,
+    "tmo_diario": 296.1759500260281
   },
   {
     "fecha": "2025-08-08",
-    "llamadas_diarias": 2041,
-    "tmo_diario": 300.6340029397354
+    "llamadas_diarias": 1970,
+    "tmo_diario": 300.1492385786802
   },
   {
     "fecha": "2025-08-09",
-    "llamadas_diarias": 2238,
-    "tmo_diario": 297.7980339588919
+    "llamadas_diarias": 2240,
+    "tmo_diario": 297.0861607142857
   },
   {
     "fecha": "2025-08-10",
-    "llamadas_diarias": 2467,
-    "tmo_diario": 293.0
+    "llamadas_diarias": 2459,
+    "tmo_diario": 292.48393655957705
   },
   {
     "fecha": "2025-08-11",
-    "llamadas_diarias": 2245,
-    "tmo_diario": 316.27750556792876
+    "llamadas_diarias": 2005,
+    "tmo_diario": 315.8673316708229
   },
   {
     "fecha": "2025-08-12",
-    "llamadas_diarias": 2024,
-    "tmo_diario": 306.78409090909093
+    "llamadas_diarias": 2038,
+    "tmo_diario": 306.5603532875368
   },
   {
     "fecha": "2025-08-13",
-    "llamadas_diarias": 2011,
-    "tmo_diario": 303.78766782695175
+    "llamadas_diarias": 2019,
+    "tmo_diario": 303.55225359088655
   },
   {
     "fecha": "2025-08-14",
-    "llamadas_diarias": 1966,
-    "tmo_diario": 296.6505595116989
+    "llamadas_diarias": 1922,
+    "tmo_diario": 296.1716961498439
   },
   {
     "fecha": "2025-08-15",
-    "llamadas_diarias": 1024,
-    "tmo_diario": 286.0751953125
+    "llamadas_diarias": 912,
+    "tmo_diario": 287.344298245614
   },
   {
     "fecha": "2025-08-16",
-    "llamadas_diarias": 2329,
-    "tmo_diario": 299.00901674538426
+    "llamadas_diarias": 2433,
+    "tmo_diario": 298.5947390053432
   },
   {
     "fecha": "2025-08-17",
-    "llamadas_diarias": 2460,
-    "tmo_diario": 293.0780487804878
+    "llamadas_diarias": 2513,
+    "tmo_diario": 292.5690409868683
   },
   {
     "fecha": "2025-08-18",
-    "llamadas_diarias": 2221,
-    "tmo_diario": 316.27104907699237
+    "llamadas_diarias": 2012,
+    "tmo_diario": 315.83399602385686
   },
   {
     "fecha": "2025-08-19",
-    "llamadas_diarias": 2032,
-    "tmo_diario": 306.78395669291336
+    "llamadas_diarias": 2058,
+    "tmo_diario": 306.54567541302237
   },
   {
     "fecha": "2025-08-20",
-    "llamadas_diarias": 2048,
-    "tmo_diario": 303.775390625
+    "llamadas_diarias": 2057,
+    "tmo_diario": 303.5308701993194
   },
   {
     "fecha": "2025-08-21",
-    "llamadas_diarias": 2002,
-    "tmo_diario": 296.61738261738265
+    "llamadas_diarias": 1953,
+    "tmo_diario": 296.16180235535074
   },
   {
     "fecha": "2025-08-22",
-    "llamadas_diarias": 2094,
-    "tmo_diario": 300.5955109837631
+    "llamadas_diarias": 2018,
+    "tmo_diario": 300.1179385530228
   },
   {
     "fecha": "2025-08-23",
-    "llamadas_diarias": 2284,
-    "tmo_diario": 297.46803852889667
+    "llamadas_diarias": 2271,
+    "tmo_diario": 296.77630999559665
   },
   {
     "fecha": "2025-08-24",
-    "llamadas_diarias": 2498,
-    "tmo_diario": 292.98198558847076
+    "llamadas_diarias": 2461,
+    "tmo_diario": 292.50467289719626
   },
   {
     "fecha": "2025-08-25",
-    "llamadas_diarias": 2273,
-    "tmo_diario": 316.26528816542015
+    "llamadas_diarias": 2006,
+    "tmo_diario": 315.85842472582254
   },
   {
     "fecha": "2025-08-26",
-    "llamadas_diarias": 2031,
-    "tmo_diario": 306.77449532250125
+    "llamadas_diarias": 2036,
+    "tmo_diario": 306.55500982318273
   },
   {
     "fecha": "2025-08-27",
-    "llamadas_diarias": 2012,
-    "tmo_diario": 303.7778330019881
+    "llamadas_diarias": 2010,
+    "tmo_diario": 303.56169154228854
   },
   {
     "fecha": "2025-08-28",
-    "llamadas_diarias": 1962,
-    "tmo_diario": 296.6391437308869
+    "llamadas_diarias": 1918,
+    "tmo_diario": 296.1856100104275
   },
   {
     "fecha": "2025-08-29",
-    "llamadas_diarias": 2039,
-    "tmo_diario": 300.6483570377636
+    "llamadas_diarias": 1979,
+    "tmo_diario": 300.1424962102072
   },
   {
     "fecha": "2025-08-30",
-    "llamadas_diarias": 2248,
-    "tmo_diario": 297.5
+    "llamadas_diarias": 2251,
+    "tmo_diario": 296.79031541537097
   },
   {
     "fecha": "2025-08-31",
-    "llamadas_diarias": 2487,
-    "tmo_diario": 292.99678327301973
+    "llamadas_diarias": 2469,
+    "tmo_diario": 292.50911300121504
   },
   {
     "fecha": "2025-09-01",
-    "llamadas_diarias": 2110,
-    "tmo_diario": 312.3691943127962
+    "llamadas_diarias": 1742,
+    "tmo_diario": 312.3358208955224
   },
   {
     "fecha": "2025-09-02",
-    "llamadas_diarias": 1893,
-    "tmo_diario": 308.75699947173797
+    "llamadas_diarias": 1878,
+    "tmo_diario": 308.71246006389777
   },
   {
     "fecha": "2025-09-03",
-    "llamadas_diarias": 2046,
-    "tmo_diario": 302.4868035190616
+    "llamadas_diarias": 2092,
+    "tmo_diario": 302.53059273422565
   },
   {
     "fecha": "2025-09-04",
-    "llamadas_diarias": 1899,
-    "tmo_diario": 301.3507109004739
+    "llamadas_diarias": 1787,
+    "tmo_diario": 301.36094012311133
   },
   {
     "fecha": "2025-09-05",
-    "llamadas_diarias": 2028,
-    "tmo_diario": 305.27810650887574
+    "llamadas_diarias": 1879,
+    "tmo_diario": 305.34060670569454
   },
   {
     "fecha": "2025-09-06",
-    "llamadas_diarias": 2053,
-    "tmo_diario": 305.629322942036
+    "llamadas_diarias": 1936,
+    "tmo_diario": 305.4039256198347
   },
   {
     "fecha": "2025-09-07",
-    "llamadas_diarias": 2198,
-    "tmo_diario": 306.6615104640582
+    "llamadas_diarias": 1958,
+    "tmo_diario": 306.65219611848823
   },
   {
     "fecha": "2025-09-08",
-    "llamadas_diarias": 1991,
-    "tmo_diario": 315.75690607734805
+    "llamadas_diarias": 1646,
+    "tmo_diario": 315.76852976913733
   },
   {
     "fecha": "2025-09-09",
-    "llamadas_diarias": 1838,
-    "tmo_diario": 310.4205658324266
+    "llamadas_diarias": 1835,
+    "tmo_diario": 310.467029972752
   },
   {
     "fecha": "2025-09-10",
-    "llamadas_diarias": 2027,
-    "tmo_diario": 303.0429205722743
+    "llamadas_diarias": 2069,
+    "tmo_diario": 303.0947317544708
   },
   {
     "fecha": "2025-09-11",
-    "llamadas_diarias": 1899,
-    "tmo_diario": 302.15903106898367
+    "llamadas_diarias": 1801,
+    "tmo_diario": 302.16379789006106
   },
   {
     "fecha": "2025-09-12",
-    "llamadas_diarias": 2040,
-    "tmo_diario": 306.10490196078433
+    "llamadas_diarias": 1909,
+    "tmo_diario": 306.11419591409117
   },
   {
     "fecha": "2025-09-13",
-    "llamadas_diarias": 2086,
-    "tmo_diario": 305.8451581975072
+    "llamadas_diarias": 1977,
+    "tmo_diario": 305.59433485078404
   },
   {
     "fecha": "2025-09-14",
-    "llamadas_diarias": 2102,
-    "tmo_diario": 306.7302568981922
+    "llamadas_diarias": 1901,
+    "tmo_diario": 306.71488690163073
   },
   {
     "fecha": "2025-09-15",
-    "llamadas_diarias": 1983,
-    "tmo_diario": 316.1250630358043
+    "llamadas_diarias": 1671,
+    "tmo_diario": 316.08078994614004
   },
   {
     "fecha": "2025-09-16",
-    "llamadas_diarias": 1876,
-    "tmo_diario": 310.6369936034115
+    "llamadas_diarias": 1894,
+    "tmo_diario": 310.62829989440337
   },
   {
     "fecha": "2025-09-17",
-    "llamadas_diarias": 2021,
-    "tmo_diario": 303.1741712023751
+    "llamadas_diarias": 2060,
+    "tmo_diario": 303.2354368932039
   },
   {
     "fecha": "2025-09-18",
-    "llamadas_diarias": 934,
-    "tmo_diario": 283.7291220556745
+    "llamadas_diarias": 975,
+    "tmo_diario": 285.46358974358975
   },
   {
     "fecha": "2025-09-19",
-    "llamadas_diarias": 964,
-    "tmo_diario": 288.42946058091286
+    "llamadas_diarias": 910,
+    "tmo_diario": 289.1263736263736
   },
   {
     "fecha": "2025-09-20",
-    "llamadas_diarias": 2156,
-    "tmo_diario": 306.512987012987
+    "llamadas_diarias": 2175,
+    "tmo_diario": 306.3002298850575
   },
   {
     "fecha": "2025-09-21",
-    "llamadas_diarias": 2053,
-    "tmo_diario": 306.76716999512905
+    "llamadas_diarias": 1906,
+    "tmo_diario": 306.705666316894
   },
   {
     "fecha": "2025-09-22",
-    "llamadas_diarias": 1948,
-    "tmo_diario": 316.2982546201232
+    "llamadas_diarias": 1641,
+    "tmo_diario": 316.1998781230957
   },
   {
     "fecha": "2025-09-23",
-    "llamadas_diarias": 1901,
-    "tmo_diario": 310.8427143608627
+    "llamadas_diarias": 1915,
+    "tmo_diario": 310.843864229765
   },
   {
     "fecha": "2025-09-24",
-    "llamadas_diarias": 2081,
-    "tmo_diario": 303.2508409418549
+    "llamadas_diarias": 2108,
+    "tmo_diario": 303.30170777988616
   },
   {
     "fecha": "2025-09-25",
-    "llamadas_diarias": 1971,
-    "tmo_diario": 302.3150684931507
-  },
-  {
-    "fecha": "2025-09-26",
-    "llamadas_diarias": 2114,
-    "tmo_diario": 306.35099337748346
-  },
-  {
-    "fecha": "2025-09-27",
-    "llamadas_diarias": 2124,
-    "tmo_diario": 306.13182674199624
-  },
-  {
-    "fecha": "2025-09-28",
-    "llamadas_diarias": 2117,
-    "tmo_diario": 306.9522909777988
-  },
-  {
-    "fecha": "2025-09-29",
-    "llamadas_diarias": 1984,
-    "tmo_diario": 316.2711693548387
-  },
-  {
-    "fecha": "2025-09-30",
-    "llamadas_diarias": 1866,
-    "tmo_diario": 310.88102893890675
-  },
-  {
-    "fecha": "2025-10-01",
-    "llamadas_diarias": 1569,
-    "tmo_diario": 300.2262587635437
-  },
-  {
-    "fecha": "2025-10-02",
-    "llamadas_diarias": 1384,
-    "tmo_diario": 304.6791907514451
-  },
-  {
-    "fecha": "2025-10-03",
-    "llamadas_diarias": 1560,
-    "tmo_diario": 309.19038461538463
-  },
-  {
-    "fecha": "2025-10-04",
-    "llamadas_diarias": 1733,
-    "tmo_diario": 298.7813040969417
-  },
-  {
-    "fecha": "2025-10-05",
-    "llamadas_diarias": 2014,
-    "tmo_diario": 305.3162859980139
-  },
-  {
-    "fecha": "2025-10-06",
-    "llamadas_diarias": 1721,
-    "tmo_diario": 303.8425334108077
-  },
-  {
-    "fecha": "2025-10-07",
-    "llamadas_diarias": 1887,
-    "tmo_diario": 300.52941176470586
-  },
-  {
-    "fecha": "2025-10-08",
-    "llamadas_diarias": 1675,
-    "tmo_diario": 294.0286567164179
-  },
-  {
-    "fecha": "2025-10-09",
-    "llamadas_diarias": 1456,
-    "tmo_diario": 299.3399725274725
-  },
-  {
-    "fecha": "2025-10-10",
-    "llamadas_diarias": 1618,
-    "tmo_diario": 304.57478368355993
-  },
-  {
-    "fecha": "2025-10-11",
-    "llamadas_diarias": 1787,
-    "tmo_diario": 295.31449356463344
-  },
-  {
-    "fecha": "2025-10-12",
-    "llamadas_diarias": 2043,
-    "tmo_diario": 300.59569260890845
-  },
-  {
-    "fecha": "2025-10-13",
-    "llamadas_diarias": 1737,
-    "tmo_diario": 296.88485895221646
-  },
-  {
-    "fecha": "2025-10-14",
-    "llamadas_diarias": 1883,
-    "tmo_diario": 295.59214020180565
-  },
-  {
-    "fecha": "2025-10-15",
-    "llamadas_diarias": 1665,
-    "tmo_diario": 288.5273273273273
-  },
-  {
-    "fecha": "2025-10-16",
-    "llamadas_diarias": 1448,
-    "tmo_diario": 293.52348066298345
-  },
-  {
-    "fecha": "2025-10-17",
-    "llamadas_diarias": 1610,
-    "tmo_diario": 299.03105590062114
-  },
-  {
-    "fecha": "2025-10-18",
-    "llamadas_diarias": 1777,
-    "tmo_diario": 291.8880135059088
-  },
-  {
-    "fecha": "2025-10-19",
-    "llamadas_diarias": 2039,
-    "tmo_diario": 295.69200588523785
-  },
-  {
-    "fecha": "2025-10-20",
-    "llamadas_diarias": 1735,
-    "tmo_diario": 290.1406340057637
-  },
-  {
-    "fecha": "2025-10-21",
-    "llamadas_diarias": 1883,
-    "tmo_diario": 288.84280403611257
-  },
-  {
-    "fecha": "2025-10-22",
-    "llamadas_diarias": 1665,
-    "tmo_diario": 278.0780780780781
-  },
-  {
-    "fecha": "2025-10-23",
-    "llamadas_diarias": 1450,
-    "tmo_diario": 283.20620689655175
-  },
-  {
-    "fecha": "2025-10-24",
-    "llamadas_diarias": 1611,
-    "tmo_diario": 285.81440099317194
-  },
-  {
-    "fecha": "2025-10-25",
-    "llamadas_diarias": 1778,
-    "tmo_diario": 286.50618672665917
-  },
-  {
-    "fecha": "2025-10-26",
-    "llamadas_diarias": 2040,
-    "tmo_diario": 286.8328431372549
-  },
-  {
-    "fecha": "2025-10-27",
-    "llamadas_diarias": 1735,
-    "tmo_diario": 278.31412103746396
-  },
-  {
-    "fecha": "2025-10-28",
-    "llamadas_diarias": 1883,
-    "tmo_diario": 275.0446096654275
-  },
-  {
-    "fecha": "2025-10-29",
-    "llamadas_diarias": 1665,
-    "tmo_diario": 263.5147147147147
-  },
-  {
-    "fecha": "2025-10-30",
-    "llamadas_diarias": 1450,
-    "tmo_diario": 270.20620689655175
-  },
-  {
-    "fecha": "2025-10-31",
-    "llamadas_diarias": 1611,
-    "tmo_diario": 272.07635009310985
-  },
-  {
-    "fecha": "2025-11-01",
-    "llamadas_diarias": 1731,
-    "tmo_diario": 280.2570768341999
-  },
-  {
-    "fecha": "2025-11-02",
-    "llamadas_diarias": 2007,
-    "tmo_diario": 276.30941704035877
-  },
-  {
-    "fecha": "2025-11-03",
-    "llamadas_diarias": 2043,
-    "tmo_diario": 271.1429270680372
-  },
-  {
-    "fecha": "2025-11-04",
-    "llamadas_diarias": 1780,
-    "tmo_diario": 266.0943820224719
-  },
-  {
-    "fecha": "2025-11-05",
-    "llamadas_diarias": 1926,
-    "tmo_diario": 267.36656282450673
-  },
-  {
-    "fecha": "2025-11-06",
-    "llamadas_diarias": 1966,
-    "tmo_diario": 279.12207527975585
-  },
-  {
-    "fecha": "2025-11-07",
-    "llamadas_diarias": 2073,
-    "tmo_diario": 285.1210805595755
-  },
-  {
-    "fecha": "2025-11-08",
-    "llamadas_diarias": 1858,
-    "tmo_diario": 284.48493003229277
-  },
-  {
-    "fecha": "2025-11-09",
-    "llamadas_diarias": 2022,
-    "tmo_diario": 278.566765578635
-  },
-  {
-    "fecha": "2025-11-10",
-    "llamadas_diarias": 2041,
-    "tmo_diario": 274.4282214600686
-  },
-  {
-    "fecha": "2025-11-11",
-    "llamadas_diarias": 1744,
-    "tmo_diario": 271.07740825688074
-  },
-  {
-    "fecha": "2025-11-12",
-    "llamadas_diarias": 1862,
-    "tmo_diario": 273.2089151450054
-  },
-  {
-    "fecha": "2025-11-13",
-    "llamadas_diarias": 1907,
-    "tmo_diario": 284.71054011536444
-  },
-  {
-    "fecha": "2025-11-14",
-    "llamadas_diarias": 2034,
-    "tmo_diario": 291.7005899705015
-  },
-  {
-    "fecha": "2025-11-15",
-    "llamadas_diarias": 1845,
-    "tmo_diario": 287.83577235772356
-  },
-  {
-    "fecha": "2025-11-16",
-    "llamadas_diarias": 2019,
-    "tmo_diario": 280.4264487369985
-  },
-  {
-    "fecha": "2025-11-17",
-    "llamadas_diarias": 2046,
-    "tmo_diario": 277.4926686217009
-  },
-  {
-    "fecha": "2025-11-18",
-    "llamadas_diarias": 1752,
-    "tmo_diario": 274.8744292237443
-  },
-  {
-    "fecha": "2025-11-19",
-    "llamadas_diarias": 1870,
-    "tmo_diario": 277.55561497326204
-  },
-  {
-    "fecha": "2025-11-20",
-    "llamadas_diarias": 1912,
-    "tmo_diario": 287.755230125523
-  },
-  {
-    "fecha": "2025-11-21",
-    "llamadas_diarias": 2038,
-    "tmo_diario": 295.15358194308146
-  },
-  {
-    "fecha": "2025-11-22",
-    "llamadas_diarias": 1846,
-    "tmo_diario": 290.0379198266522
-  },
-  {
-    "fecha": "2025-11-23",
-    "llamadas_diarias": 2019,
-    "tmo_diario": 282.30361565131255
-  },
-  {
-    "fecha": "2025-11-24",
-    "llamadas_diarias": 1913,
-    "tmo_diario": 280.083638264506
+    "llamadas_diarias": 1691,
+    "tmo_diario": 301.7806031933767
   }
 ]
