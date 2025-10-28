@@ -1,5 +1,16 @@
 [
   {
+    "comuna": "San Rosendo",
+    "rango_alertas": [
+      {
+        "fecha": "2025-10-31",
+        "hora_inicio": 9,
+        "hora_fin": 9,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
     "comuna": "Alto Bio Bio",
     "rango_alertas": []
   },
@@ -397,10 +408,6 @@
   },
   {
     "comuna": "San Pablo",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "San Rosendo",
     "rango_alertas": []
   },
   {
