@@ -29,22 +29,43 @@ def _coerce_ts_series(s: pd.Series) -> pd.Series:
 
 def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Asegura índice temporal 'ts'.
+    Asegura índice temporal 'ts' (tz-aware en America/Santiago), sin ambigüedad.
     Soporta:
+      - DataFrame ya indexado por datetime (nombre del índice puede ser 'ts')
       - Columna 'ts'
       - Pareja 'fecha' + 'hora'
-    Deja índice tz-aware en America/Santiago y ordenado.
     """
     d = df.copy()
+
+    # --- CASO A: ya tenemos un DatetimeIndex ---
+    if isinstance(d.index, pd.DatetimeIndex):
+        # Normalizar TZ
+        try:
+            idx = d.index.tz_convert(TIMEZONE)
+        except Exception:
+            idx = d.index.tz_localize("UTC").tz_convert(TIMEZONE)
+        d.index = idx
+
+        # Si también existe una columna 'ts', elimínala para evitar ambigüedad
+        if "ts" in d.columns:
+            d = d.drop(columns=["ts"])
+
+        # Ordenar por índice y devolver
+        d = d.sort_index()
+        # Asegurar nombre del índice (opcional): lo dejamos como 'ts' para consistencia
+        d.index.name = "ts"
+        return d
+
+    # --- CASO B: no es DatetimeIndex -> buscar columnas ---
     cols = {c.lower().strip(): c for c in d.columns}
 
-    # Caso 1: columna 'ts'
+    # B1) columna 'ts'
     ts_col = None
     for cand in ["ts"]:
         if cand in cols:
             ts_col = cols[cand]; break
 
-    # Caso 2: 'fecha' + 'hora'
+    # B2) 'fecha' + 'hora'
     fecha_col = None
     hora_col = None
     if ts_col is None:
@@ -63,8 +84,10 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     else:
         raise ValueError("No se pudo construir 'ts'. Aporta 'ts' o 'fecha'+'hora'.")
 
-    d = d.copy()
     d["ts"] = ts
+    # Antes de ordenar por 'ts', garantizamos que NO exista un índice con el mismo nombre
+    if isinstance(d.index, pd.MultiIndex) and "ts" in d.index.names:
+        d.index = d.index.droplevel(d.index.names.index("ts"))
     d = d.dropna(subset=["ts"]).sort_values("ts").set_index("ts")
     return d
 
@@ -164,4 +187,5 @@ def dummies_and_reindex(df: pd.DataFrame, training_cols: list) -> pd.DataFrame:
     # Relleno forward básico (por si quedan NaN en alguna fila intermedia)
     X = X.ffill().fillna(0.0)
     return X
+
 
