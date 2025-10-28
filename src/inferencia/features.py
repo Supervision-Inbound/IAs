@@ -1,237 +1,168 @@
 # src/inferencia/features.py
 import pandas as pd
 import numpy as np
-import re
 
 TIMEZONE = "America/Santiago"
 
-# ---------------- Utils para normalizar nombres ----------------
-def _norm_col(s: str) -> str:
-    s = re.sub(r"[\s\-\./:_]+", "_", s.strip().lower())
-    s = re.sub(r"_+", "_", s)
-    return s
-
-def _find_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    norm = {_norm_col(c): c for c in df.columns}
-    for cand in candidates:
-        if cand in norm:
-            return norm[cand]
-    return None
-
-def _find_first_with(df: pd.DataFrame, substrings: list[str]) -> str | None:
-    for c in df.columns:
-        n = _norm_col(c)
-        if any(sub in n for sub in substrings):
-            return c
-    return None
-
-# ---------------- Parse de fechas/horas ----------------
-def _parse_epoch_series(s: pd.Series):
-    """Intenta parsear epoch (s o ms). Devuelve DatetimeIndex o None si no aplica."""
-    if not pd.api.types.is_numeric_dtype(s):
-        # Si son strings numéricas, intenta convertir
-        try:
-            s_num = pd.to_numeric(s, errors="coerce")
-        except Exception:
-            return None
-    else:
-        s_num = s
-
-    if s_num.notna().sum() == 0:
-        return None
-
-    # Heurística: ms si valores grandes
-    q50 = float(s_num.dropna().quantile(0.5))
-    try:
-        if q50 > 1e12:   # milisegundos
-            dt = pd.to_datetime(s_num, unit="ms", utc=True, errors="coerce")
-        elif q50 > 1e9:  # segundos (a veces caen aquí también)
-            dt = pd.to_datetime(s_num, unit="s", utc=True, errors="coerce")
-        else:
-            return None
-        return dt
-    except Exception:
-        return None
-
-def _parse_datetime_flex(s: pd.Series):
+def _coerce_ts_series(s: pd.Series) -> pd.DatetimeIndex:
     """
-    Parser flexible:
-    1) epoch (s/ms)
-    2) to_datetime utc=True con dayfirst=True
-    3) to_datetime utc=True con dayfirst=False
+    Parsea una serie a datetime con TZ America/Santiago, tolerante a formatos y
+    a mezclas de zonas horarias. Estrategia:
+      1) Parsear SIEMPRE con utc=True (evita mixed-TZ -> dtype object).
+      2) Convertir a TIMEZONE con tz_convert.
     """
-    # 1) epoch
-    dt = _parse_epoch_series(s)
-    if dt is not None and dt.notna().sum() > 0:
-        return dt
+    # Nota: dayfirst=True para compat ancha con formatos DD/MM/AAAA HH:MM
+    ts = pd.to_datetime(s, errors='coerce', dayfirst=True, utc=True)
+    # Convertimos de UTC a la zona de trabajo:
+    return ts.dt.tz_convert(TIMEZONE)
 
-    # 2) dayfirst=True
-    dt = pd.to_datetime(s, errors="coerce", dayfirst=True, utc=True)
-    if dt.notna().sum() > len(s) * 0.5:
-        return dt
-
-    # 3) dayfirst=False
-    dt2 = pd.to_datetime(s, errors="coerce", dayfirst=False, utc=True)
-    # Escoge el que mejor parseó
-    return dt if dt.notna().sum() >= dt2.notna().sum() else dt2
-
-def _coerce_ts_series(s: pd.Series) -> pd.Series:
-    """
-    Convierte una serie a datetime con tz consistente (UTC -> TIMEZONE).
-    Admite múltiples formatos (incluido epoch).
-    """
-    dt = _parse_datetime_flex(s.astype(str))
-    if dt is None:
-        dt = pd.Series(pd.NaT, index=s.index)
-    # Asegura tz
-    if getattr(dt.dt, "tz", None) is None:
-        dt = dt.dt.tz_localize("UTC")
-    return dt.dt.tz_convert(TIMEZONE)
-
-# ---------------- TS helpers ----------------
 def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Garantiza un índice datetime llamado 'ts'.
-
-    Detecta, en este orden:
-      A) Columna combinada: ['ts','timestamp','fecha_hora','fechahora','datetime','date_time','fecha_y_hora']
-      B) Par columnas: una de 'fecha*' + una de 'hora*'
-      C) Índice ya datetime
-      D) Cualquier columna con >80% parseable a datetime (rescate)
-
-    Todo se normaliza a UTC y luego America/Santiago.
+    Construye/normaliza 'ts' y devuelve un DataFrame con:
+      - Índice = 'ts' (tz-aware America/Santiago)
+      - SIN columna 'ts' duplicada
+      - Ordenado por 'ts'
+    Reglas:
+      1) Si ya hay índice 'ts' o columna 'ts', se respeta y se normaliza.
+      2) Si no hay 'ts', se intenta 'fecha' + 'hora'.
+      3) Fallback: 'datetime'/'datatime'/'fecha_hora'.
     """
     d = df.copy()
-    if d.empty:
-        raise ValueError("DataFrame vacío: no se puede construir 'ts'.")
 
-    # --- A) Columna combinada
-    combined_candidates = [
-        "ts", "timestamp", "fecha_hora", "fechahora", "datetime",
-        "date_time", "fecha_y_hora", "fecha__hora"
-    ]
-    # Mapa normalizado -> original
-    norm_map = {_norm_col(c): c for c in d.columns}
-    comb_col = _find_col(d, combined_candidates)
-    if comb_col is None:
-        # busca nombres "parecidos" (ej. 'fecha y hora', 'Fecha-Hora')
-        for c in d.columns:
-            n = _norm_col(c)
-            if n in ("fecha_hora", "fecha_y_hora", "fecha_hora_local", "fecha_hora_utc", "fechahora"):
-                comb_col = c
-                break
+    # Si el índice ya se llama 'ts', lo paso a columna para normalizar homogéneo
+    if isinstance(d.index, pd.DatetimeIndex) and d.index.name == 'ts':
+        d = d.reset_index()
 
-    if comb_col is not None:
-        ts = _coerce_ts_series(d[comb_col])
-        d["ts"] = ts
-        d = d.dropna(subset=["ts"]).sort_values("ts").set_index("ts")
-        return d
+    # Mapa de columnas normalizadas
+    cols = {c.strip().lower(): c for c in d.columns}
+    ts_col = cols.get('ts')
 
-    # --- B) Par fecha + hora (flex)
-    # Busca columna con 'fecha' y columna con 'hora'
-    fecha_col = _find_first_with(d, ["fecha"])
-    hora_col  = _find_first_with(d, ["hora", "time", "hr"])
-    if fecha_col is not None and hora_col is not None:
-        mix = d[fecha_col].astype(str).str.strip() + " " + d[hora_col].astype(str).str.strip()
-        ts = _coerce_ts_series(mix)
-        d["ts"] = ts
-        d = d.dropna(subset=["ts"]).sort_values("ts").set_index("ts")
-        return d
+    if ts_col is not None:
+        ts = _coerce_ts_series(d[ts_col].astype(str))
+        d['__ts__'] = ts
+    else:
+        # Intento fecha + hora
+        fecha_key = next((k for k in ['fecha','date'] if k in cols), None)
+        hora_key  = next((k for k in ['hora','hour','hora numero','hora_número','h'] if k in cols), None)
 
-    # --- C) Índice ya datetime
-    if isinstance(d.index, pd.DatetimeIndex):
-        idx = pd.to_datetime(d.index, errors="coerce", utc=True)
-        # Si venía tz-naive, localiza a UTC primero
-        if getattr(idx, "tz", None) is None:
-            idx = idx.tz_localize("UTC")
-        idx = idx.tz_convert(TIMEZONE)
-        d.index = idx
-        d = d.sort_index()
-        d.index.name = "ts"
-        return d
+        if fecha_key and hora_key:
+            fecha_col = cols[fecha_key]
+            hora_col  = cols[hora_key]
 
-    # --- D) Rescate: intenta cualquier columna con >80% parseable
-    best_col = None
-    best_ok = -1
-    for c in d.columns:
-        dt_try = _parse_datetime_flex(d[c].astype(str))
-        ok = int(dt_try.notna().sum())
-        if ok > best_ok:
-            best_ok = ok
-            best_col = c
-            best_dt = dt_try
-    if best_ok >= int(len(d) * 0.8):
-        d["ts"] = best_dt.dt.tz_convert(TIMEZONE) if getattr(best_dt.dt, "tz", None) else best_dt.dt.tz_localize("UTC").dt.tz_convert(TIMEZONE)
-        d = d.dropna(subset=["ts"]).sort_values("ts").set_index("ts")
-        return d
+            # Fecha a string normalizado
+            fecha_dt = pd.to_datetime(d[fecha_col], errors='coerce', dayfirst=True)
 
-    # Si llegamos aquí, no pudimos construir TS
-    cols_disp = ", ".join(list(d.columns)[:15])
-    raise ValueError(
-        "No se pudo construir 'ts'. Aporta una columna de fecha/hora. "
-        f"Columnas disponibles (primeras 15): {cols_disp}"
-    )
+            # Normalizar hora a HH:MM
+            hora_str = d[hora_col].astype(str).str.strip().str.replace('.', ':', regex=False)
 
-# ---------------- Time parts / dummies ----------------
-def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Agrega columnas: dow, month, hour, day, sin/cos hora y dow, y flag es_dia_de_pago si no existe.
-    """
-    d = df.copy()
+            def _fix_hhmm(x: str) -> str:
+                if ':' not in x:
+                    # solo hora -> HH:MM
+                    try:
+                        h = int(float(x))
+                        return f"{h:02d}:00"
+                    except:
+                        return x
+                parts = x.split(':')
+                try:
+                    h = int(float(parts[0]))
+                except:
+                    return x
+                m = 0
+                if len(parts) > 1:
+                    try:
+                        m = int(float(parts[1]))
+                    except:
+                        m = 0
+                return f"{h:02d}:{m:02d}"
+
+            hora_str = hora_str.apply(_fix_hhmm)
+
+            # Combinar y parsear en UTC, luego convertir a TIMEZONE
+            ts_utc = pd.to_datetime(
+                fecha_dt.astype(str) + " " + hora_str,
+                errors='coerce',
+                format="%Y-%m-%d %H:%M",
+                utc=True
+            )
+            d['__ts__'] = ts_utc.dt.tz_convert(TIMEZONE)
+        else:
+            # Fallback: datetime/datatime/fecha_hora
+            dt_key = next((k for k in ['datetime','datatime','fecha_hora'] if k in cols), None)
+            if not dt_key:
+                raise ValueError("No se pudieron inferir columnas temporales. Se esperaba 'ts' o 'fecha'+'hora'.")
+            dt_col = cols[dt_key]
+            d['__ts__'] = _coerce_ts_series(d[dt_col].astype(str))
+
+    # Limpieza de duplicados 'ts'
+    if ts_col is not None and 'ts' in d.columns:
+        d = d.drop(columns=['ts'])
+
+    # Construir índice final
+    d = d.dropna(subset=['__ts__']).rename(columns={'__ts__':'ts'})
+
+    # Evitar ambigüedad: si por alguna razón 'ts' también es nombre de índice, quitar columna
+    if 'ts' in d.columns and 'ts' in getattr(d.index, 'names', []):
+        d = d.drop(columns=['ts'])
+
+    # Orden y set_index seguro
+    d = d.sort_values('ts').set_index('ts')
+
+    # Garantizar tz (si alguien pasó un índice naïve)
     if not isinstance(d.index, pd.DatetimeIndex):
-        raise ValueError("add_time_parts requiere un índice datetime o una columna 'ts' ya indexada.")
+        d.index = pd.DatetimeIndex(d.index)
+    if d.index.tz is None:
+        d.index = d.index.tz_localize(TIMEZONE)
 
-    d["dow"]   = d.index.weekday
-    d["month"] = d.index.month
-    d["hour"]  = d.index.hour
-    d["day"]   = d.index.day
-    d["sin_hour"] = np.sin(2*np.pi*d["hour"]/24.0)
-    d["cos_hour"] = np.cos(2*np.pi*d["hour"]/24.0)
-    d["sin_dow"]  = np.sin(2*np.pi*d["dow"]/7.0)
-    d["cos_dow"]  = np.cos(2*np.pi*d["dow"]/7.0)
-    if "es_dia_de_pago" not in d.columns:
-        d["es_dia_de_pago"] = d["day"].isin([1,2,15,16,29,30,31]).astype(int)
+    # Asegurar que no quede columna 'ts'
+    if 'ts' in d.columns:
+        d = d.drop(columns=['ts'])
+
+    # Convertir definitivamente a la TZ de trabajo
+    d.index = d.index.tz_convert(TIMEZONE)
     return d
 
-def dummies_and_reindex(df_last_row: pd.DataFrame, training_cols: list) -> pd.DataFrame:
-    """
-    Crea dummies solo de ['dow','month','hour'] si alguna de esas aparece en training_cols,
-    y devuelve un DataFrame UNA FILA con exactamente training_cols en el mismo orden.
-    """
-    d = df_last_row.copy()
-    base_cols = ["dow", "month", "hour"]
-    need_dum = any([(c.startswith("dow_") or c.startswith("month_") or c.startswith("hour_")) for c in training_cols])
+def add_time_parts(df_or_indexed: pd.DataFrame) -> pd.DataFrame:
+    """Agrega dow, month, hour, day y senoidales. Soporta que 'ts' sea índice o columna."""
+    d = df_or_indexed.copy()
+    if 'ts' in d.columns:
+        idx = _coerce_ts_series(d['ts'].astype(str))
+    elif isinstance(d.index, pd.DatetimeIndex):
+        idx = d.index
+        # Si el índice no tiene TZ, lo localizo a la zona de trabajo
+        if idx.tz is None:
+            idx = idx.tz_localize(TIMEZONE)
+        else:
+            idx = idx.tz_convert(TIMEZONE)
+    else:
+        raise ValueError("add_time_parts requiere un índice datetime o una columna 'ts'.")
 
-    if need_dum:
-        # Si faltan columnas base, las construyo a partir del índice
-        idx_stub = pd.DataFrame(index=d.index)
-        idx_stub = add_time_parts(idx_stub)
-        for c in base_cols:
-            if c not in d.columns:
-                d[c] = idx_stub[c]
-        d = pd.get_dummies(d, columns=[c for c in base_cols if c in d.columns], drop_first=False)
+    d['dow']   = idx.dayofweek
+    d['month'] = idx.month
+    d['hour']  = idx.hour
+    d['day']   = idx.day
 
-    # numérico y saneo
-    for c in d.columns:
-        d[c] = pd.to_numeric(d[c], errors="coerce")
-    d = d.ffill().fillna(0)
-
-    # reindex exacto
-    out = d.reindex(columns=training_cols, fill_value=0).tail(1)
-    return out
-
-# ---------------- (Compat) lags/MA genéricos ----------------
-def add_lags_mas(s: pd.Series, lags: list[int] = None, mas: list[int] = None, prefix: str = "") -> pd.DataFrame:
-    """
-    Pequeña utilidad para generar lags y medias móviles de una serie.
-    Devuelve DataFrame con columnas lag_{k} y ma_{w} (con prefijo opcional).
-    """
-    lags = lags or []
-    mas = mas or []
-    d = pd.DataFrame(index=s.index)
-    for k in lags:
-        d[f"{prefix}lag_{k}"] = s.shift(k)
-    for w in mas:
-        d[f"{prefix}ma_{w}"] = s.rolling(w, min_periods=1).mean()
+    d['sin_hour'] = np.sin(2*np.pi*d['hour']/24.0)
+    d['cos_hour'] = np.cos(2*np.pi*d['hour']/24.0)
+    d['sin_dow']  = np.sin(2*np.pi*d['dow']/7.0)
+    d['cos_dow']  = np.cos(2*np.pi*d['dow']/7.0)
     return d
 
+def add_lags_mas(df_in: pd.DataFrame, target_col: str) -> pd.DataFrame:
+    """Lags (1..168) y medias móviles (24,72,168) sobre target_col."""
+    d = df_in.copy()
+    d[target_col] = pd.to_numeric(d[target_col], errors='coerce')
+    for lag in [1,2,3,6,12,24,48,72,168]:
+        d[f'lag_{target_col}_{lag}'] = d[target_col].shift(lag)
+    for window in [24, 72, 168]:
+        d[f'ma_{window}'] = d[target_col].rolling(window, min_periods=1).mean()
+    return d
+
+def dummies_and_reindex(df_row: pd.DataFrame, training_cols: list) -> pd.DataFrame:
+    d = df_row.copy()
+    d = pd.get_dummies(d, columns=['dow', 'month', 'hour'], drop_first=False)
+    # asegurar columnas del entrenamiento
+    for c in training_cols:
+        if c not in d.columns:
+            d[c] = 0
+    return d.reindex(columns=training_cols, fill_value=0)
