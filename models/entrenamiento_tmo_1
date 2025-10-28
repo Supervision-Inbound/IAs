@@ -1,0 +1,311 @@
+# =================================================================================
+# TRAIN TMO (KAGGLE) v7-residual
+# - Objetivo: "tmo (segundos)" o "tmo (s)" desde Hosting ia.xlsx
+# - Modelo independiente de llamadas (no usa contestadas como feature)
+# - Aprende el RESIDUO contra baseline por (dow, hour) y lo estandariza (z-score)
+# - Pérdida Huber + L2; opcional sample_weight por 'contestadas'
+# - Artefactos:
+#    modelo_tmo.keras
+#    scaler_tmo.pkl                 (features)
+#    training_columns_tmo.json      (orden columnas)
+#    tmo_residual_meta.json         (media/std residuo + flags)
+#    tmo_baseline_dow_hour.csv      (baseline por dow,hour)
+# =================================================================================
+
+import os, re, json, warnings, unicodedata
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+from tensorflow.keras import regularizers
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_absolute_error, r2_score
+import joblib
+
+# ---------------- Config Kaggle ----------------
+KAGGLE_INPUT_DIR = "/kaggle/input/data-ia/"
+HOSTING_FILE = os.path.join(KAGGLE_INPUT_DIR, "Hosting ia.xlsx")
+OUTPUT_DIR = "/kaggle/working/models/"
+
+EPOCHS = 120
+BATCH_SIZE = 256
+SEED = 42
+FERIADOS_COL = "feriados"
+
+# nombres aceptados para la columna objetivo
+TARGET_TMO_COL_RE = r"^tmo\s*\((s|segundos)\)$"
+
+# (opcional) ponderar por volumen de "contestadas"
+USE_SAMPLE_WEIGHT = True
+CONTESTADAS_CANDIDATES = ["contestadas", "q_contestadas", "llamadas_contestadas"]
+
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
+warnings.filterwarnings("once", category=UserWarning)
+
+# ---------------- Utils ----------------
+def read_any(path: str, sheet: int | str | None = None) -> pd.DataFrame:
+    p = str(path).lower()
+    if p.endswith(".csv"):
+        try:
+            df = pd.read_csv(path, low_memory=False)
+            if df.shape[1] == 1 and ';' in str(df.iloc[0,0]):
+                df = pd.read_csv(path, sep=';', low_memory=False)
+            return df
+        except Exception:
+            return pd.read_csv(path, sep=';', low_memory=False)
+    if p.endswith(".xlsx") or p.endswith(".xls"):
+        return pd.read_excel(path, sheet_name=sheet if sheet is not None else 0)
+    raise ValueError(f"Formato no soportado: {path}")
+
+def _norm(s: str) -> str:
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    s = s.strip().lower()
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+def ensure_ts_from_hosting(df: pd.DataFrame) -> pd.DataFrame:
+    d = df.copy()
+    d.columns = [c.strip().lower().replace(" ", "_") for c in d.columns]
+    fecha_col = next((c for c in d.columns if "fecha" in c), None)
+    hora_col  = next((c for c in d.columns if "hora"  in c), None)
+    if not fecha_col or not hora_col:
+        raise ValueError("Se requieren columnas con 'fecha' y 'hora' para construir 'ts'.")
+    d["ts"] = pd.to_datetime(d[fecha_col].astype(str) + " " + d[hora_col].astype(str),
+                             errors="coerce", dayfirst=True)
+    d = d.dropna(subset=["ts"]).sort_values("ts").reset_index(drop=True)
+    return d
+
+def find_tmo_col(df: pd.DataFrame) -> str:
+    norm_map = {_norm(c): c for c in df.columns}
+    for n, orig in norm_map.items():
+        if re.match(r"^tmo\s*\(\s*(s|segundos)\s*\)$", n):
+            return orig
+    for n, orig in norm_map.items():
+        if "tmo" in n and ("(s)" in n or "segundo" in n):
+            return orig
+    raise ValueError("No se encontró columna objetivo: usa 'TMO (s)' o 'TMO (segundos)'.")
+
+def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
+    d = df.copy()
+    d["dow"]   = d["ts"].dt.dayofweek
+    d["month"] = d["ts"].dt.month
+    d["hour"]  = d["ts"].dt.hour
+    d["day"]   = d["ts"].dt.day
+    d["sin_hour"] = np.sin(2*np.pi*d["hour"]/24.0)
+    d["cos_hour"] = np.cos(2*np.pi*d["hour"]/24.0)
+    d["sin_dow"]  = np.sin(2*np.pi*d["dow"]/7.0)
+    d["cos_dow"]  = np.cos(2*np.pi*d["dow"]/7.0)
+    d["es_dia_de_pago"] = d["day"].isin([1,2,15,16,29,30,31]).astype(int)
+    return d
+
+def make_tmo_autoreg_features(df: pd.DataFrame) -> pd.DataFrame:
+    d = df.copy()
+    for lag in [1,2,3,6,12,24,48,72,168]:
+        d[f"lag_tmo_{lag}"] = d["tmo_s"].shift(lag)
+    tmo_shift1 = d["tmo_s"].shift(1)
+    for w in [6,12,24,72,168]:
+        d[f"ma_tmo_{w}"] = tmo_shift1.rolling(w, min_periods=1).mean()
+    for span in [6,12,24]:
+        d[f"ema_tmo_{span}"] = tmo_shift1.ewm(span=span, adjust=False, min_periods=1).mean()
+    for w in [24,72]:
+        d[f"std_tmo_{w}"] = tmo_shift1.rolling(w, min_periods=2).std()
+        d[f"max_tmo_{w}"] = tmo_shift1.rolling(w, min_periods=1).max()
+    return d
+
+def find_contestadas_col(df: pd.DataFrame) -> str | None:
+    cols_norm = {_norm(c): c for c in df.columns}
+    for cand in CONTESTADAS_CANDIDATES:
+        n = _norm(cand)
+        for k, orig in cols_norm.items():
+            if k == n:
+                return orig
+    # heurística
+    for k, orig in cols_norm.items():
+        if "contest" in k or ("recibidos" in k and "nacional" in k):
+            return orig
+    return None
+
+# ---------------- Modelo ----------------
+def create_model(n_features: int) -> tf.keras.Model:
+    model = tf.keras.Sequential([
+        tf.keras.layers.Input(shape=(n_features,)),
+        tf.keras.layers.Dense(256, activation='relu',
+                              kernel_regularizer=regularizers.l2(1e-5)),
+        tf.keras.layers.Dropout(0.25),
+        tf.keras.layers.Dense(128, activation='relu',
+                              kernel_regularizer=regularizers.l2(1e-5)),
+        tf.keras.layers.Dropout(0.20),
+        tf.keras.layers.Dense(64, activation='relu',
+                              kernel_regularizer=regularizers.l2(1e-5)),
+        tf.keras.layers.Dense(1, activation='linear'),
+    ])
+    lr = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_learning_rate=1e-3, decay_steps=10000, decay_rate=0.9
+    )
+    opt = tf.keras.optimizers.Adam(learning_rate=lr, clipnorm=1.0)
+    huber = tf.keras.losses.Huber(delta=30.0)  # delta en segundos; ajústalo si tu p90 ~325
+    model.compile(optimizer=opt, loss=huber, metrics=['mae'])
+    return model
+
+# ---------------- Entrenamiento ----------------
+def train_tmo_from_hosting_kaggle_residual():
+    print("\n" + "="*70)
+    print("ENTRENAMIENTO TMO v7-residual (Kaggle) | objetivo = 'TMO (s)' / 'TMO (segundos)'")
+    print("="*70)
+
+    # 1) Cargar Hosting
+    if not os.path.exists(HOSTING_FILE):
+        raise FileNotFoundError(f"No se encuentra el archivo: {HOSTING_FILE}")
+    raw = read_any(HOSTING_FILE, sheet=0)
+
+    # 2) ts + columnas clave
+    d = ensure_ts_from_hosting(raw)
+
+    # feriados
+    if FERIADOS_COL not in d.columns:
+        cand = [c for c in raw.columns if _norm(c).replace("_"," ") == FERIADOS_COL]
+        if cand:
+            d[FERIADOS_COL] = pd.to_numeric(raw[cand[0]], errors='coerce').fillna(0).astype(int)
+        else:
+            raise ValueError(f"No se encontró columna '{FERIADOS_COL}'.")
+    else:
+        d[FERIADOS_COL] = pd.to_numeric(d[FERIADOS_COL], errors='coerce').fillna(0).astype(int)
+
+    # TMO objetivo
+    tmo_col = find_tmo_col(raw)
+    d = d.join(pd.to_numeric(raw[tmo_col], errors="coerce").rename("tmo_s"))
+    d["tmo_s"] = pd.to_numeric(d["tmo_s"], errors="coerce")
+
+    # (opcional) columna contestadas solo para sample_weight
+    contest_col = find_contestadas_col(raw)
+    if contest_col is not None:
+        d = d.join(pd.to_numeric(raw[contest_col], errors="coerce").rename("contestadas"))
+    else:
+        d["contestadas"] = np.nan
+
+    # 3) partes de tiempo + baseline por (dow,hour)
+    d = add_time_parts(d)
+    baseline = (d.groupby(["dow","hour"])["tmo_s"]
+                  .median().rename("tmo_baseline")
+                  .reset_index())
+    d = d.merge(baseline, on=["dow","hour"], how="left")
+
+    # residuo
+    d["tmo_resid"] = d["tmo_s"] - d["tmo_baseline"]
+
+    # 4) autorregresivas (sobre tmo_s y sobre residuo: mejor solo residuo)
+    #   usamos lags/mas del RESIDUO para que el modelo refine sobre la estacionalidad ya quitada
+    for lag in [1,2,3,6,12,24,48,72,168]:
+        d[f"lag_resid_{lag}"] = d["tmo_resid"].shift(lag)
+    resid_shift1 = d["tmo_resid"].shift(1)
+    for w in [6,12,24,72,168]:
+        d[f"ma_resid_{w}"] = resid_shift1.rolling(w, min_periods=1).mean()
+    for span in [6,12,24]:
+        d[f"ema_resid_{span}"] = resid_shift1.ewm(span=span, adjust=False, min_periods=1).mean()
+    for w in [24,72]:
+        d[f"std_resid_{w}"] = resid_shift1.rolling(w, min_periods=2).std()
+        d[f"max_resid_{w}"] = resid_shift1.rolling(w, min_periods=1).max()
+
+    # 5) features
+    resid_feats = [c for c in d.columns if c.startswith("lag_resid_") or c.startswith("ma_resid_")]
+    ema_feats   = [f"ema_resid_{s}" for s in [6,12,24]]
+    vol_feats   = [f"std_resid_{w}" for w in [24,72]] + [f"max_resid_{w}" for w in [24,72]]
+    cyc_feats   = ["sin_hour","cos_hour","sin_dow","cos_dow", FERIADOS_COL, "es_dia_de_pago", "dow","month","hour"]
+
+    features = resid_feats + ema_feats + vol_feats + cyc_feats
+
+    # 6) dataset modelable (objetivo = z-score del residuo)
+    dm = d.dropna(subset=features + ["tmo_resid", "tmo_baseline"]).copy()
+    # estandarización de objetivo (residuo)
+    resid_mean = dm["tmo_resid"].mean()
+    resid_std  = dm["tmo_resid"].std(ddof=0) or 1.0
+    dm["tmo_resid_z"] = (dm["tmo_resid"] - resid_mean) / resid_std
+
+    X = pd.get_dummies(dm[features], columns=["dow","month","hour"], drop_first=False)
+    y = dm["tmo_resid_z"].loc[X.index].astype(float)
+
+    # sample_weight (opcional, no es feature)
+    if USE_SAMPLE_WEIGHT and "contestadas" in dm.columns:
+        sw = dm["contestadas"].loc[X.index].fillna(0).astype(float)
+        sw = np.sqrt(np.clip(sw, 0, np.percentile(sw[sw>0], 99))) + 1.0  # suavizado + cap p99
+    else:
+        sw = None
+
+    # saneo
+    X.replace([np.inf, -np.inf], np.nan, inplace=True)
+    if X.isna().any().any():
+        X = X.ffill().dropna()
+    y = y.loc[X.index]
+    if sw is not None:
+        sw = sw.loc[X.index]
+    if X.empty:
+        raise ValueError("No quedaron datos para entrenar TMO tras el preprocesamiento.")
+
+    # 7) split temporal + escalado
+    X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.20, shuffle=False)
+    scaler = StandardScaler()
+    X_tr_s = scaler.fit_transform(X_tr)
+    X_te_s = scaler.transform(X_te)
+    sw_tr = sw.loc[X_tr.index].values if sw is not None else None
+    sw_te = sw.loc[X_te.index].values if sw is not None else None
+
+    # 8) modelo
+    model = create_model(X_tr_s.shape[1])
+    es = tf.keras.callbacks.EarlyStopping(monitor='val_mae', patience=15, restore_best_weights=True, mode='min')
+    model.fit(
+        X_tr_s, y_tr,
+        validation_data=(X_te_s, y_te, sw_te) if sw_te is not None else (X_te_s, y_te),
+        sample_weight=sw_tr,
+        epochs=EPOCHS, batch_size=BATCH_SIZE, verbose=1, callbacks=[es]
+    )
+
+    # 9) métricas (reconstruyendo a segundos)
+    yhat_z = model.predict(X_te_s, verbose=0).flatten()
+    yhat_resid = yhat_z * resid_std + resid_mean
+    # baseline para test
+    base_te = dm.loc[X_te.index, "tmo_baseline"].values
+    yhat_sec = base_te + yhat_resid
+    y_true_sec = dm.loc[X_te.index, "tmo_s"].values
+
+    mae = mean_absolute_error(y_true_sec, yhat_sec)
+    r2  = r2_score(y_true_sec, yhat_sec)
+    print(f"\nResultado TMO v7-residual: MAE={mae:.2f} | R2={r2:.3f}")
+    print(f"Distrib y_te : med={np.median(y_true_sec):.1f} | p90={np.percentile(y_true_sec,90):.1f} | p99={np.percentile(y_true_sec,99):.1f}")
+    print(f"Distrib pred: med={np.median(yhat_sec):.1f} | p90={np.percentile(yhat_sec,90):.1f} | p99={np.percentile(yhat_sec,99):.1f}")
+
+    # 10) artefactos
+    out = Path(OUTPUT_DIR); out.mkdir(parents=True, exist_ok=True)
+    # columnas + scaler de features
+    (out / "training_columns_tmo.json").write_text(json.dumps(list(X.columns), ensure_ascii=False, indent=2), encoding="utf-8")
+    joblib.dump(scaler, out / "scaler_tmo.pkl")
+    # baseline por (dow,hour)
+    base_df = baseline.sort_values(["dow","hour"])
+    base_df.to_csv(out / "tmo_baseline_dow_hour.csv", index=False)
+    # meta de residuo
+    meta = {
+        "resid_mean": float(resid_mean),
+        "resid_std":  float(resid_std),
+        "use_sample_weight": bool(USE_SAMPLE_WEIGHT),
+        "contestadas_col_used": contest_col,
+        "loss": "Huber",
+        "delta": 30.0
+    }
+    (out / "tmo_residual_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    # modelo
+    model.save(str(out / "modelo_tmo.keras"))  # en inferencia: load_model(..., compile=False)
+
+    print("\nArtefactos guardados en:", str(out.resolve()))
+    print(" - modelo_tmo.keras")
+    print(" - scaler_tmo.pkl")
+    print(" - training_columns_tmo.json")
+    print(" - tmo_baseline_dow_hour.csv")
+    print(" - tmo_residual_meta.json")
+    print("\n¡Listo! Descárgalos desde la pestaña 'Output'.")
+
+# ---------------- Run ----------------
+if __name__ == "__main__":
+    train_tmo_from_hosting_kaggle_residual()
