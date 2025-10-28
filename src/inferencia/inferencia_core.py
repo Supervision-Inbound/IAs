@@ -111,7 +111,7 @@ def compute_holiday_factors(df_hist, holidays_set,
         med_hol_tmo = dfh[dfh["is_holiday"]].groupby("hour")[col_tmo].median()
         med_nor_tmo = dfh[~dfh["is_holiday"]].groupby("hour")[col_tmo].median()
         g_hol_tmo = dfh[dfh["is_holiday"]][col_tmo].median()
-        g_nor_tmo = dfh[~dfh["is_holiday"]][col_tmo].median()
+        g_nor_tmo = dfh[~dfh]["is_holiday"][col_tmo].median() if "is_holiday" in dfh.columns else dfh[col_tmo].median()
         global_tmo_factor = _safe_ratio(g_hol_tmo, g_nor_tmo, fallback=1.00)
     else:
         global_tmo_factor = 1.00
@@ -287,23 +287,36 @@ def _add_tmo_resid_features(df_in: pd.DataFrame) -> pd.DataFrame:
     d = add_time_parts(d)
     return d
 
-# ---------- NUEVO: constructor de features del PLANNER por lista de entrenamiento ----------
+# ---------- NUEVO: extracción de "bases" y constructor exacto de features del PLANNER ----------
 _LAG_RE   = re.compile(r"^lag_([A-Za-z0-9_]+)_(\d+)$")
 _MA_NAME1 = re.compile(r"^ma_(\d+)$")                 # ej. ma_24
 _MA_NAME2 = re.compile(r"^ma_([A-Za-z0-9_]+)_(\d+)$") # ej. ma_recibidos_nacional_72
 
+def _extract_bases(cols_pl: list) -> set:
+    bases = set()
+    for c in cols_pl:
+        m = _LAG_RE.match(c)
+        if m:
+            bases.add(m.group(1))
+        else:
+            m2 = _MA_NAME2.match(c)
+            if m2:
+                bases.add(m2.group(1))
+    # Siempre incluir la base actual (contestados)
+    bases.add(TARGET_CALLS)
+    return bases
+
 def _ensure_base_series(dfp: pd.DataFrame, base_name: str, fallback_col: str = TARGET_CALLS):
-    """Si dfp no tiene 'base_name', lo crea como espejo de fallback_col."""
+    """Si dfp no tiene 'base_name', lo crea espejo de fallback_col."""
     if base_name not in dfp.columns:
         dfp[base_name] = pd.to_numeric(dfp[fallback_col], errors="coerce").copy()
     return dfp
 
 def _build_planner_features(dfp: pd.DataFrame, cols_pl: list, tz=TIMEZONE) -> pd.DataFrame:
     """
-    Devuelve un DataFrame UNA FILA con EXACTAMENTE las columnas 'cols_pl',
-    calculadas desde dfp (que trae índice datetime). No crea extras.
+    Devuelve UNA FILA con EXACTAMENTE las columnas 'cols_pl', calculadas desde dfp (índice datetime).
+    Se hace cast numérico y se rellenan vacíos para evitar NaN en el scaler.
     """
-    # 1) Tomamos una copia con índice temporal asegurado
     d = dfp.copy()
     if not isinstance(d.index, pd.DatetimeIndex):
         d.index = pd.to_datetime(d.index, errors="coerce", utc=True).tz_convert(tz)
@@ -312,61 +325,65 @@ def _build_planner_features(dfp: pd.DataFrame, cols_pl: list, tz=TIMEZONE) -> pd
     else:
         d.index = d.index.tz_convert(tz)
 
-    # 2) Para cada columna pedida por el entrenamiento, la generamos
-    feat = pd.DataFrame(index=d.tail(1).index)  # misma TS para la última fila
+    # Aseguro columnas básicas presentes
+    if "feriados" not in d.columns: d["feriados"] = 0
+    if "es_dia_de_pago" not in d.columns: d["es_dia_de_pago"] = 0
+    d[TARGET_CALLS] = pd.to_numeric(d[TARGET_CALLS], errors="coerce")
 
-    # Dummies de tiempo: primero aseguro dow/month/hour
-    temp = add_time_parts(d[[c for c in d.columns if c in ("feriados", "es_dia_de_pago", TARGET_CALLS)]].copy())
+    # Dummies base (dow/month/hour)
+    temp = add_time_parts(d[[c for c in d.columns if c in ("feriados","es_dia_de_pago", TARGET_CALLS)]].copy())
+
+    feat = pd.DataFrame(index=d.tail(1).index)
 
     for col in cols_pl:
-        # LAGs
         m = _LAG_RE.match(col)
         if m:
             base, k = m.group(1), int(m.group(2))
             _ensure_base_series(d, base, fallback_col=TARGET_CALLS)
+            d[base] = pd.to_numeric(d[base], errors="coerce")
             lag_col = f"__lag__{base}__{k}"
             if lag_col not in d.columns:
-                d[lag_col] = pd.to_numeric(d[base], errors="coerce").shift(k)
+                d[lag_col] = d[base].shift(k)
             feat[col] = d[lag_col].tail(1).values
             continue
 
-        # MAs
-        m1 = _MA_NAME1.match(col)   # ma_24
-        m2 = _MA_NAME2.match(col)   # ma_recibidos_nacional_72
+        m1 = _MA_NAME1.match(col)
+        m2 = _MA_NAME2.match(col)
         if m1:
             w = int(m1.group(1))
             ma_col = f"__ma__{TARGET_CALLS}__{w}"
             if ma_col not in d.columns:
-                d[ma_col] = pd.to_numeric(d[TARGET_CALLS], errors="coerce").rolling(w, min_periods=1).mean()
+                d[ma_col] = d[TARGET_CALLS].rolling(w, min_periods=1).mean()
             feat[col] = d[ma_col].tail(1).values
             continue
         if m2:
             base, w = m2.group(1), int(m2.group(2))
             _ensure_base_series(d, base, fallback_col=TARGET_CALLS)
+            d[base] = pd.to_numeric(d[base], errors="coerce")
             ma_col = f"__ma__{base}__{w}"
             if ma_col not in d.columns:
-                d[ma_col] = pd.to_numeric(d[base], errors="coerce").rolling(w, min_periods=1).mean()
+                d[ma_col] = d[base].rolling(w, min_periods=1).mean()
             feat[col] = d[ma_col].tail(1).values
             continue
 
-        # Dummies (dow_*, month_*, hour_*)
         if col.startswith("dow_") or col.startswith("month_") or col.startswith("hour_"):
-            # generamos todas y luego tomamos esa columna exacta si existe
             temp_dum = pd.get_dummies(temp[["dow","month","hour"]], columns=["dow","month","hour"], drop_first=False)
             feat[col] = temp_dum[col].tail(1).values if col in temp_dum.columns else 0
             continue
 
-        # Variables directas: feriados / es_dia_de_pago / etc.
         if col in d.columns:
             feat[col] = d[col].tail(1).values
         elif col in temp.columns:
             feat[col] = temp[col].tail(1).values
         else:
-            # Si el entrenamiento pedía alguna otra numérica (rara), seteo 0.
             feat[col] = 0
 
-    # Reorden final exacto
+    # Saneamiento: numérico + ffill + 0
     feat = feat.reindex(columns=cols_pl, fill_value=0)
+    for c in feat.columns:
+        feat[c] = pd.to_numeric(feat[c], errors="coerce")
+    feat = feat.ffill().fillna(0)
+
     return feat
 
 # ---------- Núcleo ----------
@@ -394,10 +411,10 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
     if "feriados" not in df.columns: df["feriados"] = 0
     if "es_dia_de_pago" not in df.columns: df["es_dia_de_pago"] = 0
 
-    # --- Artefactos TMO (sin tocar) ---
+    # --- Artefactos TMO (NO TOCAR) ---
     tmo_base_table, resid_mean, resid_std = _load_tmo_residual_artifacts_or_fallback(df)
 
-    # --- Preparación histórica para residuo TMO (sin tocar) ---
+    # --- Preparación histórica para residuo TMO (NO TOCAR) ---
     keep_cols = [TARGET_CALLS, "feriados", "es_dia_de_pago"]
     if TARGET_TMO in df.columns: keep_cols.append(TARGET_TMO)
 
@@ -422,6 +439,11 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
     dfp["tmo_resid"]  = pd.to_numeric(dfp["tmo_resid"], errors="coerce")
     if dfp["tmo_resid"].isna().all(): dfp["tmo_resid"] = 0.0
 
+    # === Bases requeridas por el planner (para mantener espejadas) ===
+    bases_required = _extract_bases(cols_pl)
+    for b in bases_required:
+        _ensure_base_series(dfp, b, fallback_col=TARGET_CALLS)
+
     # Horizonte futuro
     future_ts = pd.date_range(last_ts + pd.Timedelta(hours=1), periods=horizon_days * 24, freq="h", tz=TIMEZONE)
 
@@ -429,13 +451,11 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
     print("Iniciando predicción iterativa (Contestados + TMO residual)...")
     for ts in future_ts:
         # ----- Llamadas: features EXACTAS del entrenamiento -----
-        # (si el entrenamiento pedía 'recibidos_nacional', creo dfp['recibidos_nacional'] espejo de contestados)
-        # y construyo X_pl exactamente con cols_pl
         X_pl = _build_planner_features(dfp, cols_pl, tz=TIMEZONE)
         yhat_calls = float(m_pl.predict(sc_pl.transform(X_pl), verbose=0).flatten()[0])
-        yhat_calls = max(0.0, yhat_calls)
+        yhat_calls = 0.0 if not np.isfinite(yhat_calls) else max(0.0, yhat_calls)
 
-        # ----- TMO: baseline + residuo (sin tocar) -----
+        # ----- TMO: baseline + residuo (NO TOCAR) -----
         try:
             dow = int(ts.tz_convert(TIMEZONE).weekday()); hour = int(ts.tz_convert(TIMEZONE).hour)
         except Exception:
@@ -448,12 +468,16 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
         tmp_tmo.loc[ts, ["tmo_resid","feriados","es_dia_de_pago"]] = [tmp_tmo["tmo_resid"].iloc[-1], 0, 0]
         tmp_tmo = _add_tmo_resid_features(tmp_tmo)
         X_tmo = dummies_and_reindex(tmp_tmo.tail(1), cols_tmo)
-        yhat_z = float(m_tmo.predict(joblib.load(TMO_SCALER).transform(X_tmo), verbose=0).flatten()[0])  # scaler ya cargado arriba; aquí es equivalente
+        yhat_z = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
         yhat_resid = yhat_z * resid_std + resid_mean
-        yhat_tmo = max(0.0, tmo_base + yhat_resid)
+        yhat_tmo = 0.0 if not np.isfinite(yhat_resid) else max(0.0, tmo_base + yhat_resid)
 
-        # Actualización iterativa
+        # ----- Actualización iterativa -----
         dfp.loc[ts, TARGET_CALLS] = yhat_calls
+        # Mantener todas las "bases" espejadas para próximos lags/MA
+        for b in bases_required:
+            dfp.loc[ts, b] = yhat_calls
+
         dfp.loc[ts, "tmo_baseline"] = tmo_base
         dfp.loc[ts, "tmo_resid"] = yhat_tmo - tmo_base
         dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
@@ -490,7 +514,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
         df_hourly.at[ts, "agents_prod"] = int(a)
     df_hourly["agents_sched"] = df_hourly["agents_prod"].apply(schedule_agents)
 
-    # Salidas JSON (diario ponderado por contestados — sin tocar)
+    # Salidas JSON
     write_hourly_json(f"{PUBLIC_DIR}/prediccion_horaria.json", df_hourly, "calls", "tmo_s", "agents_sched")
     write_daily_json(f"{PUBLIC_DIR}/prediccion_diaria.json", df_hourly, "calls", "tmo_s", weights_col="calls")
     return df_hourly
