@@ -1,27 +1,5 @@
 [
   {
-    "comuna": "Tome",
-    "rango_alertas": [
-      {
-        "fecha": "2025-10-31",
-        "hora_inicio": 14,
-        "hora_fin": 14,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Valdivia",
-    "rango_alertas": [
-      {
-        "fecha": "2025-10-31",
-        "hora_inicio": 7,
-        "hora_fin": 8,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
     "comuna": "Alto Bio Bio",
     "rango_alertas": []
   },
@@ -450,11 +428,19 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Tome",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Traiguen",
     "rango_alertas": []
   },
   {
     "comuna": "Tucapel",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Valdivia",
     "rango_alertas": []
   },
   {
