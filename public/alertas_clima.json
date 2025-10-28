@@ -1,11 +1,11 @@
 [
   {
-    "comuna": "San Rosendo",
+    "comuna": "Villarrica",
     "rango_alertas": [
       {
         "fecha": "2025-10-31",
-        "hora_inicio": 9,
-        "hora_fin": 9,
+        "hora_inicio": 8,
+        "hora_fin": 8,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -411,6 +411,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "San Rosendo",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Santa Barbara",
     "rango_alertas": []
   },
@@ -456,10 +460,6 @@
   },
   {
     "comuna": "Vilcun",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Villarrica",
     "rango_alertas": []
   },
   {
