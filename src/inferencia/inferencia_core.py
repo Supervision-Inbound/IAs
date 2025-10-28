@@ -312,8 +312,10 @@ def _add_tmo_resid_features(df_in: pd.DataFrame) -> pd.DataFrame:
     return d
 
 # ---------- Núcleo ----------
-def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame | None, # <--- Acepta el segundo DF
+### INICIO CAMBIO 1: Corregir firma de función (acepta 1 DF) ###
+def forecast_120d(df_hist_joined: pd.DataFrame, 
                   horizon_days: int = 120, holidays_set: set | None = None):
+### FIN CAMBIO 1 ###
     """
     - Volumen iterativo (recibidos_nacional) con planner.
     - TMO residual iterativo = baseline(dow,hour) + (z*std + mean).
@@ -328,7 +330,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
     cols_pl = _load_cols(PLANNER_COLS)
 
     m_tmo = tf.keras.models.load_model(TMO_MODEL, compile=False)
-    sc_tmo = joblib.load(TMO_SCALER)
+    sc_tmo = joblib.load(SCALER_TMO)
     cols_tmo = _load_cols(TMO_COLS)
 
     # Base histórica única
@@ -354,17 +356,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame |
         # Forzar 'es_dia_de_pago' a 0 si existe (lógica de tu script antiguo)
         df["es_dia_de_pago"] = 0
 
-    # IMPORTANTE: Rellenar TMO y proporciones con los datos del TMO puro
-    # (Esto viene de tu script antiguo 'main.py' y es buena idea mantenerlo)
-    if df_hist_tmo_only is not None and not df_hist_tmo_only.empty:
-        try:
-            df_tmo_pure = ensure_ts(df_hist_tmo_only).ffill()
-            if not df_tmo_pure.empty:
-                print("INFO: Sobrescribiendo features TMO con HISTORICO_TMO.csv")
-                # 'update' alinea por índice y rellena
-                df.update(df_tmo_pure, overwrite=True)
-        except Exception as e:
-            print(f"WARN: Error procesando df_hist_tmo_only ({e}), usando datos unidos).")
+    ### INICIO CAMBIO 2: Eliminar bloque df_hist_tmo_only ###
+    # (Ya no es necesario, main.py nos pasa un solo DF unido)
+    ### FIN CAMBIO 2 ###
 
     # Baseline/meta TMO
     tmo_base_table, resid_mean, resid_std = _load_tmo_residual_artifacts_or_fallback(df)
