@@ -81,7 +81,7 @@ TMO_BASELINE = _paths.get("baseline") or "models/tmo_baseline_dow_hour.csv"
 TMO_META     = _paths.get("meta")     or "models/tmo_residual_meta.json"
 
 # ---------- Negocio ----------
-TARGET_CALLS = "contestados"   # volumen principal actual
+TARGET_CALLS = "recibidos"   # <--- ÚNICO CAMBIO (antes: "contestados")
 TARGET_TMO   = "tmo_general"   # TMO en segundos
 
 HIST_WINDOW_DAYS = 90
