@@ -2,10 +2,9 @@
 import argparse
 import os
 import pandas as pd
-import json
 
-from inferencia.inferencia_core import forecast_120d
-from inferencia.features import ensure_ts
+from src.inferencia.inferencia_core import forecast_120d   # <-- prefijo src.
+from src.inferencia.features import ensure_ts              # <-- prefijo src.
 
 # Opcional: set de feriados (si quieres habilitarlo, coloca fechas YYYY-mm-dd)
 HOLIDAYS = set()  # ejemplo: {date(2025,1,1), date(2025,5,1)}
@@ -13,7 +12,8 @@ HOLIDAYS = set()  # ejemplo: {date(2025,1,1), date(2025,5,1)}
 def _read_historical():
     """
     Lee el histórico desde rutas comunes del repo/runner.
-    Debe contener al menos: 'recibidos', y opcionalmente 'tmo_general', 'feriados', 'es_dia_de_pago', 'ts' o 'fecha'+'hora'.
+    Debe contener al menos: 'recibidos', y opcionalmente 'tmo_general',
+    'feriados', 'es_dia_de_pago', y 'ts' o 'fecha'+'hora'.
     """
     candidates = [
         "historical_data.csv",
@@ -47,6 +47,5 @@ if __name__ == "__main__":
     parser.add_argument("--horizonte", type=int, default=120, help="Horizonte en días (por defecto 120)")
     args = parser.parse_args()
     main(args.horizonte)
-
 
 
