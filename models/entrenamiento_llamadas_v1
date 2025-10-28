@@ -1,0 +1,162 @@
+# =================================================================================
+# SCRIPT DE ENTRENAMIENTO (MODELO PLANIFICADOR v3) - KAGGLE
+# 1. Script aislado para entrenar únicamente el modelo Planificador (regresión de llamadas).
+# 2. Genera los artefactos: modelo_planner.keras, scaler_planner.pkl, y training_columns_planner.json
+# =================================================================================
+
+import os
+import json
+import joblib
+import shutil
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import (mean_absolute_error, r2_score) # Métricas de regresión
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# --- CONFIGURACIÓN GLOBAL ---
+KAGGLE_INPUT_DIR = "/kaggle/input/data-ia/"
+HOSTING_FILE = os.path.join(KAGGLE_INPUT_DIR, "Hosting ia.xlsx")
+# CLIMA_FILE y TMO_FILE removidos, no son necesarios para el Planificador
+
+OUTPUT_DIR = "/kaggle/working/models/"
+TARGET_CALLS = "recibidos_nacional"
+# TARGET_TMO removido
+EPOCHS = 100
+BATCH_SIZE = 256
+SEED = 42
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
+
+# --- FUNCIONES DE UTILIDADES ---
+def read_data(path, hoja=None):
+    path_lower = path.lower()
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Archivo no encontrado: {path}.")
+    if path_lower.endswith(".csv"):
+        try:
+            df = pd.read_csv(path, low_memory=False)
+            if df.shape[1] == 1 and ';' in df.iloc[0,0]:
+                df = pd.read_csv(path, delimiter=';', low_memory=False)
+            return df
+        except Exception:
+            return pd.read_csv(path, delimiter=';', low_memory=False)
+    elif path_lower.endswith((".xlsx", ".xls")):
+        return pd.read_excel(path, sheet_name=hoja if hoja is not None else 0)
+    else:
+        raise ValueError(f"Formato no soportado: {path}")
+
+def ensure_ts(df):
+    df.columns = [c.lower().strip().replace(' ', '_') for c in df.columns]
+    date_col = next((c for c in df.columns if 'fecha' in c), None)
+    hour_col = next((c for c in df.columns if 'hora' in c), None)
+    if not date_col or not hour_col:
+        raise ValueError("No se encontraron 'fecha' y 'hora'.")
+    df["ts"] = pd.to_datetime(df[date_col].astype(str) + ' ' + df[hour_col].astype(str), errors='coerce')
+    return df.dropna(subset=["ts"]).sort_values("ts")
+
+def add_time_parts(df):
+    df["dow"] = df["ts"].dt.dayofweek
+    df["month"] = df["ts"].dt.month
+    df["hour"] = df["ts"].dt.hour
+    df["day"] = df["ts"].dt.day
+    df["sin_hour"] = np.sin(2 * np.pi * df["hour"] / 24)
+    df["cos_hour"] = np.cos(2 * np.pi * df["hour"] / 24)
+    df["sin_dow"] = np.sin(2 * np.pi * df["dow"] / 7)
+    df["cos_dow"] = np.cos(2 * np.pi * df["dow"] / 7)
+    return df
+
+def create_nn_model(n_features, loss='mean_squared_error', output_bias=None, is_classifier=False):
+    # Esta función se mantiene intacta, pero solo se usará para regresión (is_classifier=False)
+    if output_bias is not None:
+        output_bias = tf.keras.initializers.Constant(output_bias)
+    
+    model = tf.keras.Sequential([
+        tf.keras.layers.Dense(256, activation='relu', input_shape=(n_features,)),
+        tf.keras.layers.Dropout(0.3),
+        tf.keras.layers.Dense(128, activation='relu'),
+        tf.keras.layers.Dropout(0.2),
+        tf.keras.layers.Dense(64, activation='relu'),
+        tf.keras.layers.Dense(1, activation='sigmoid' if is_classifier else 'linear', bias_initializer=output_bias)
+    ])
+    
+    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_learning_rate=0.001, decay_steps=10000, decay_rate=0.9)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule, clipnorm=1.0)
+    
+    metrics = [tf.keras.metrics.AUC(name='auc')] if is_classifier else ['mae']
+    model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+    return model
+
+# --- FASE 1: ENTRENAMIENTO DEL MODELO BASELINE (PLANIFICADOR) ---
+def train_planner_model(df_hosting):
+    print("\n" + "="*50); print("--- FASE 1: ENTRENANDO MODELO 1 (EL PLANIFICADOR) v3 ---"); print("="*50)
+    df_base = add_time_parts(df_hosting.copy())
+    df_base['es_dia_de_pago'] = df_base['day'].isin([1, 2, 15, 16, 29, 30, 31]).astype(int)
+    for lag in [24, 48, 72, 168]:
+        df_base[f'lag_{lag}'] = df_base[TARGET_CALLS].shift(lag)
+    for window in [24, 72, 168]:
+        df_base[f'ma_{window}'] = df_base[TARGET_CALLS].rolling(window, min_periods=1).mean()
+    df_base.dropna(inplace=True)
+    
+    features_base = [col for col in df_base.columns if col.startswith(('lag_', 'ma_'))] + ['sin_hour', 'cos_hour', 'sin_dow', 'cos_dow', 'feriados', 'es_dia_de_pago', 'dow', 'month', 'hour']
+    
+    X = pd.get_dummies(df_base[features_base], columns=['dow', 'month', 'hour'])
+    y = df_base[TARGET_CALLS]
+    
+    X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, shuffle=False)
+    
+    scaler = StandardScaler()
+    X_tr_s = scaler.fit_transform(X_tr)
+    X_te_s = scaler.transform(X_te)
+    
+    model = create_nn_model(X_tr_s.shape[1], is_classifier=False) # Aseguramos que es regresión
+    model.fit(X_tr_s, y_tr, validation_data=(X_te_s, y_te), epochs=EPOCHS, batch_size=BATCH_SIZE, verbose=1, 
+              callbacks=[tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)])
+    
+    pred = model.predict(X_te_s).flatten()
+    print(f"\nResultado Planificador v3: MAE={mean_absolute_error(y_te, pred):.2f} | R2={r2_score(y_te, pred):.3f}")
+    
+    model.save(f"{OUTPUT_DIR}modelo_planner.keras")
+    joblib.dump(scaler, f"{OUTPUT_DIR}scaler_planner.pkl")
+    with open(f"{OUTPUT_DIR}training_columns_planner.json", "w") as f: json.dump(list(X.columns), f)
+        
+    # No es necesario retornar los artefactos si solo se va a empaquetar
+    # return model, scaler, list(X.columns) 
+
+# --- FASE 2 y 3 (Analista de Riesgos y TMO) removidas ---
+
+# --- FUNCIÓN PRINCIPAL ORQUESTADORA ---
+def main():
+    if os.path.exists(OUTPUT_DIR):
+        shutil.rmtree(OUTPUT_DIR)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    
+    print("Cargando datos iniciales (Hosting)...")
+    df_hosting = read_data(HOSTING_FILE)
+    df_hosting = ensure_ts(df_hosting)
+    df_hosting = df_hosting.rename(columns={'recibidos': TARGET_CALLS})
+    columna_feriados = 'feriados'
+    if columna_feriados not in df_hosting.columns:
+        raise ValueError(f"No se encontró '{columna_feriados}'.")
+    df_hosting[columna_feriados] = pd.to_numeric(df_hosting[columna_feriados], errors='coerce').fillna(0).astype(int)
+    df_hosting = df_hosting.groupby("ts").agg({TARGET_CALLS: 'sum', columna_feriados: 'max'}).reset_index()
+
+    # Carga de datos de Clima y TMO removida
+    # Alineación de fechas removida (innecesaria)
+    
+    # --- Ejecución del único modelo ---
+    train_planner_model(df_hosting)
+    
+    # --- Empaquetado de artefactos (Solo Planner) ---
+    print("\n" + "="*50); print("--- FASE 2: EMPAQUETANDO ARTEFACTOS (PLANNER) ---"); print("="*50)
+    shutil.make_archive('/kaggle/working/artefactos_planner_v3', 'zip', '/kaggle/working/models')
+    print("¡Proceso completado!")
+    print("\nLos artefactos del Planificador han sido guardados y comprimidos en 'artefactos_planner_v3.zip'.")
+    print("Por favor, busca y descarga este archivo desde la sección 'Output' de tu notebook.")
+
+if __name__ == "__main__":
+    main()
