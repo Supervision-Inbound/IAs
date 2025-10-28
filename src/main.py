@@ -11,7 +11,7 @@ DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
 
 # ======= Ajuste clave: volumen esperado en histórico =======
-TARGET_CALLS_NEW = "contestados"
+TARGET_CALLS_NEW = "recibidos"      # <--- CAMBIO: usar 'recibidos'
 TARGET_TMO_NEW = "tmo_general"
 TZ = "America/Santiago"
 
@@ -61,13 +61,13 @@ def add_es_dia_de_pago(df_idx: pd.DataFrame) -> pd.Series:
 def main(horizonte_dias: int):
     os.makedirs("public", exist_ok=True)
 
-    # 1) Leer histórico principal (contestados + TMO en el MISMO CSV)
+    # 1) Leer histórico principal (recibidos + TMO en el MISMO CSV)
     dfh = smart_read_historical(DATA_FILE)
     dfh.columns = dfh.columns.str.strip()
 
-    # Normalizar columna de volumen a 'contestados'
+    # Normalizar columna de volumen a 'recibidos'
     if TARGET_CALLS_NEW not in dfh.columns:
-        for cand in ["contestados", "recibidos_nacional", "recibidos", "total_llamadas", "llamadas"]:
+        for cand in ["recibidos", "recibidos_nacional", "contestados", "total_llamadas", "llamadas"]:
             if cand in dfh.columns:
                 dfh = dfh.rename(columns={cand: TARGET_CALLS_NEW})
                 break
@@ -102,7 +102,7 @@ def main(horizonte_dias: int):
 
     # 5) Forecast (una sola fuente histórica)
     df_hourly = forecast_120d(
-        dfh.reset_index(),
+        dfh,                      # <--- CAMBIO: NO reset_index(), conservamos el índice ts
         horizon_days=horizonte_dias,
         holidays_set=holidays_set
     )
