@@ -82,7 +82,7 @@ TMO_META     = _paths.get("meta")     or "models/tmo_residual_meta.json"
 # ---------- Negocio ----------
 # Para replicar EXACTO el entrenamiento del planner:
 TARGET_CALLS = "recibidos_nacional"   # <--- clave para coincidir con la inferencia original
-TARGET_TMO   = "tmo_general"          # TMO en segundos
+TARGET_TMO   = "tmo_general"           # TMO en segundos
 
 HIST_WINDOW_DAYS = 90
 
@@ -261,10 +261,10 @@ def _try_build_tmo_artifacts_from_history(df_hist: pd.DataFrame):
     if TARGET_TMO in d.columns:
         tmo = pd.to_numeric(d[TARGET_TMO], errors="coerce")
         base = (d.assign(tmo_s=tmo)
-                  .groupby(["dow","hour"])["tmo_s"]
-                  .median()
-                  .rename("tmo_baseline")
-                  .reset_index())
+                 .groupby(["dow","hour"])["tmo_s"]
+                 .median()
+                 .rename("tmo_baseline")
+                 .reset_index())
         merged = d.merge(base, on=["dow","hour"], how="left")
         resid = pd.to_numeric(merged[TARGET_TMO], errors="coerce") - merged["tmo_baseline"]
         resid_mean = float(np.nanmean(resid))
@@ -312,12 +312,15 @@ def _add_tmo_resid_features(df_in: pd.DataFrame) -> pd.DataFrame:
     return d
 
 # ---------- Núcleo ----------
-def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holidays_set: set | None = None):
+def forecast_120d(df_hist_joined: pd.DataFrame, df_hist_tmo_only: pd.DataFrame | None, # <--- Acepta el segundo DF
+                  horizon_days: int = 120, holidays_set: set | None = None):
     """
     - Volumen iterativo (recibidos_nacional) con planner.
     - TMO residual iterativo = baseline(dow,hour) + (z*std + mean).
+    - *** CORREGIDO ***: El planner (volumen) recibe los lags de TMO TOTAL (TARGET_TMO).
+    - *** CORREGIDO ***: El TMO residual recibe los lags de RESIDUO (tmo_resid).
     - Ajustes por feriados / post-feriados y CAP de outliers.
-    - Erlang C y salidas JSON (diaria ponderada por 'recibidos_nacional').
+    - Erlang C y salidas JSON.
     """
     # Artefactos
     m_pl = tf.keras.models.load_model(PLANNER_MODEL, compile=False)
@@ -347,6 +350,21 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
         df["feriados"] = 0
     if "es_dia_de_pago" not in df.columns:
         df["es_dia_de_pago"] = 0
+    else:
+        # Forzar 'es_dia_de_pago' a 0 si existe (lógica de tu script antiguo)
+        df["es_dia_de_pago"] = 0
+
+    # IMPORTANTE: Rellenar TMO y proporciones con los datos del TMO puro
+    # (Esto viene de tu script antiguo 'main.py' y es buena idea mantenerlo)
+    if df_hist_tmo_only is not None and not df_hist_tmo_only.empty:
+        try:
+            df_tmo_pure = ensure_ts(df_hist_tmo_only).ffill()
+            if not df_tmo_pure.empty:
+                print("INFO: Sobrescribiendo features TMO con HISTORICO_TMO.csv")
+                # 'update' alinea por índice y rellena
+                df.update(df_tmo_pure, overwrite=True)
+        except Exception as e:
+            print(f"WARN: Error procesando df_hist_tmo_only ({e}), usando datos unidos).")
 
     # Baseline/meta TMO
     tmo_base_table, resid_mean, resid_std = _load_tmo_residual_artifacts_or_fallback(df)
@@ -385,6 +403,19 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
     if dfp["tmo_resid"].isna().all():
         dfp["tmo_resid"] = 0.0
 
+    ### INICIO PARCHE 1: Asegurar TMO TOTAL (TARGET_TMO) para lags del PLANNER ###
+    # El script 'antiguo' usaba TARGET_TMO para los lags del planner.
+    # Debemos asegurar que esta columna exista en dfp para los lags históricos.
+    if TARGET_TMO not in dfp.columns:
+        print(f"WARN: {TARGET_TMO} no encontrado en histórico. Creando desde baseline+resid.")
+        # Si no está, crearlo desde baseline + resid (mejor que 0.0)
+        dfp[TARGET_TMO] = dfp["tmo_baseline"].fillna(180.0) + dfp["tmo_resid"].fillna(0.0)
+    else:
+        # Si existe, rellenarlo como en la ANTIGUA
+        print(f"INFO: Rellenando {TARGET_TMO} para lags (compatibilidad planner).")
+        dfp[TARGET_TMO] = pd.to_numeric(dfp[TARGET_TMO], errors="coerce").ffill().fillna(0.0)
+    ### FIN PARCHE 1 ###
+
     # ===== Horizonte futuro =====
     future_ts = pd.date_range(
         last_ts + pd.Timedelta(hours=1),
@@ -396,17 +427,50 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
     # ===== Bucle iterativo: Volumen + TMO residual =====
     print("Iniciando predicción iterativa (Recibidos_nacional + TMO residual)...")
     for ts in future_ts:
-        # ------- Volumen (PLANNER) -------
-        tmp_calls = dfp[[TARGET_CALLS, "feriados","es_dia_de_pago"]].copy()
-        tmp_calls = add_lags_mas(tmp_calls, TARGET_CALLS)   # nombres genéricos lag_24/48/72/168 y ma_24/72/168
-        tmp_calls = add_time_parts(tmp_calls)
+        
+        ### INICIO PARCHE 2: Lógica del PLANNER (Llamadas) tomada del script ANTIGUO ###
+        # 1. Necesitamos un dataframe temporal que *incluya* TARGET_TMO para los lags
+        cols_planner = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"]
+        
+        # Filtramos solo las columnas que realmente existen en dfp
+        cols_planner_exist = [c for c in cols_planner if c in dfp.columns]
+        tmp_planner = dfp[cols_planner_exist].copy()
 
-        # NADA de alias/inyectar columnas: usamos exactamente los nombres del entrenamiento
-        X_pl = dummies_and_reindex(tmp_calls.tail(1), cols_pl)
+        # 2. Añadir fila vacía para 'ts' (necesario para add_lags)
+        tmp_planner = pd.concat([tmp_planner, pd.DataFrame(index=[ts])])
+        
+        # 3. ffill de los targets (para que los lags se basen en t-1)
+        tmp_planner[TARGET_CALLS] = tmp_planner[TARGET_CALLS].ffill()
+        if TARGET_TMO in tmp_planner.columns:
+             tmp_planner[TARGET_TMO] = tmp_planner[TARGET_TMO].ffill() # <--- ¡CLAVE!
+
+        # Forzar feriados/dia_pago en la fila actual (ts)
+        if "feriados" in tmp_planner.columns:
+            tmp_planner.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
+        if "es_dia_de_pago" in tmp_planner.columns:
+            tmp_planner.loc[ts, "es_dia_de_pago"] = 0 # Forzado a 0
+
+        # 4. Crear features de LLAMADAS (add_lags_mas)
+        tmp_planner = add_lags_mas(tmp_planner, TARGET_CALLS) 
+        
+        # 5. (¡¡¡ESTO FALTABA!!!) Crear features de TMO (Tomado de ANTIGUA)
+        if TARGET_TMO in tmp_planner.columns:
+            for lag in [24, 48, 72, 168]:
+                tmp_planner[f'tmo_lag_{lag}'] = tmp_planner[TARGET_TMO].shift(lag)
+            for window in [24, 72, 168]:
+                tmp_planner[f'tmo_ma_{window}'] = tmp_planner[TARGET_TMO].rolling(window, min_periods=1).mean()
+        
+        # 6. Crear features de TIEMPO
+        tmp_planner = add_time_parts(tmp_planner)
+        
+        # 7. Predecir LLAMADAS
+        X_pl = dummies_and_reindex(tmp_planner.tail(1), cols_pl) # <--- Usar tmp_planner
         yhat_calls = float(m_pl.predict(sc_pl.transform(X_pl), verbose=0).flatten()[0])
         yhat_calls = max(0.0, yhat_calls)
+        ### FIN PARCHE 2 ###
 
         # ------- Baseline TMO (dow,hour) -------
+        # (Esta sección es del script NUEVO y está CORRECTA)
         try:
             dow = int(ts.tz_convert(TIMEZONE).weekday())
             hour = int(ts.tz_convert(TIMEZONE).hour)
@@ -418,6 +482,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
         )
 
         # ------- TMO residual (modelo) -------
+        # (Esta sección es del script NUEVO y está CORRECTA)
         tmp_tmo = dfp[["tmo_resid","feriados","es_dia_de_pago"]].copy()
         tmp_tmo.loc[ts, ["tmo_resid","feriados","es_dia_de_pago"]] = [tmp_tmo["tmo_resid"].iloc[-1], 0, 0]
         tmp_tmo = _add_tmo_resid_features(tmp_tmo)
@@ -431,8 +496,14 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
         dfp.loc[ts, TARGET_CALLS] = yhat_calls
         dfp.loc[ts, "tmo_baseline"] = tmo_base
         dfp.loc[ts, "tmo_resid"] = yhat_tmo - tmo_base
+        
+        ### INICIO PARCHE 3: Guardar el TMO TOTAL para los lags del PLANNER ###
+        # Guardar el TMO total para que los lags (tmo_lag_24) funcionen en la sig. iteración
+        dfp.loc[ts, TARGET_TMO] = yhat_tmo 
+        ### FIN PARCHE 3 ###
+        
         dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
-        dfp.loc[ts, "es_dia_de_pago"] = 0
+        dfp.loc[ts, "es_dia_de_pago"] = 0 # Forzado a 0
 
     print("Predicción iterativa completada.")
 
@@ -449,7 +520,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
         df_hourly = apply_holiday_adjustment(df_hourly, holidays_set, f_calls_by_hour, f_tmo_by_hour,
                                              col_calls_future="calls", col_tmo_future="tmo_s")
         df_hourly = apply_post_holiday_adjustment(df_hourly, holidays_set, post_calls_by_hour,
-                                                  col_calls_future="calls")
+                                                col_calls_future="calls")
 
     # ===== CAP outliers (llamadas) =====
     if ENABLE_OUTLIER_CAP:
@@ -471,4 +542,3 @@ def forecast_120d(df_hist_joined: pd.DataFrame, horizon_days: int = 120, holiday
                      weights_col="calls")  # ponderado por recibidos_nacional
 
     return df_hourly
-
