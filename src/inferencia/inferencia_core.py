@@ -312,10 +312,9 @@ def _add_tmo_resid_features(df_in: pd.DataFrame) -> pd.DataFrame:
     return d
 
 # ---------- Núcleo ----------
-### INICIO CAMBIO 1: Corregir firma de función (acepta 1 DF) ###
+# Firma de función corregida para aceptar 1 solo DF (compatible con main nuevo)
 def forecast_120d(df_hist_joined: pd.DataFrame, 
                   horizon_days: int = 120, holidays_set: set | None = None):
-### FIN CAMBIO 1 ###
     """
     - Volumen iterativo (recibidos_nacional) con planner.
     - TMO residual iterativo = baseline(dow,hour) + (z*std + mean).
@@ -330,7 +329,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     cols_pl = _load_cols(PLANNER_COLS)
 
     m_tmo = tf.keras.models.load_model(TMO_MODEL, compile=False)
-    sc_tmo = joblib.load(SCALER_TMO)
+    sc_tmo = joblib.load(TMO_SCALER) # <--- ¡CORREGIDO! (Era SCALER_TMO)
     cols_tmo = _load_cols(TMO_COLS)
 
     # Base histórica única
@@ -356,9 +355,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         # Forzar 'es_dia_de_pago' a 0 si existe (lógica de tu script antiguo)
         df["es_dia_de_pago"] = 0
 
-    ### INICIO CAMBIO 2: Eliminar bloque df_hist_tmo_only ###
-    # (Ya no es necesario, main.py nos pasa un solo DF unido)
-    ### FIN CAMBIO 2 ###
+    # Bloque df_hist_tmo_only eliminado (ya no es necesario)
 
     # Baseline/meta TMO
     tmo_base_table, resid_mean, resid_std = _load_tmo_residual_artifacts_or_fallback(df)
