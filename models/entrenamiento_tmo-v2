@@ -1,11 +1,13 @@
 # =================================================================================
-# TRAIN TMO (KAGGLE) v8-DIRECTO (¡NUEVA LÓGICA!)
+# TRAIN TMO (KAGGLE) v8-DIRECTO-AFINADO (¡LÓGICA FINAL!)
 # - Estrategia: Directa (igual que el Planner de Llamadas)
 # - Objetivo: "tmo_s" (Valor Total)
 # - NO USA BASELINE, NO USA RESIDUAL.
 # - Loss Function: MSE (para "perseguir" picos y valles).
-# - Features: Tiempo + Lags(TMO Total) + Lags(Volumen) + Contexto
-# - Artefactos: Genera 3 archivos (modelo, scaler, columns).
+# - Features: Tiempo + Lags/MAs/STD(TMO Total) + Lags/MAs/STD(Volumen) + Contexto
+# --- MEJORAS (AFINADO FINAL) ---
+# 1. (NUEVO) Agrega "sensores de volatilidad" (STD) a TMO Total y Volumen.
+# 2. (NUEVO) "Suelta los frenos": reduce Dropout y L2 para predicciones más agresivas.
 # =================================================================================
 
 import os, re, json, warnings, unicodedata
@@ -121,24 +123,30 @@ def find_col_by_candidates(df: pd.DataFrame, candidates: list) -> str | None:
 
 # ---------------- Modelo ----------------
 def create_model(n_features: int) -> tf.keras.Model:
+    
+    # --- INICIO MODIFICACIÓN (AFINADO: Ajuste 1 - "Soltar Frenos") ---
+    l2_reg = 1e-6 # (Era 1e-5)
+    
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=(n_features,)),
         tf.keras.layers.Dense(256, activation='relu',
-                               kernel_regularizer=regularizers.l2(1e-5)),
-        tf.keras.layers.Dropout(0.25),
+                               kernel_regularizer=regularizers.l2(l2_reg)),
+        tf.keras.layers.Dropout(0.20), # (Era 0.25)
         tf.keras.layers.Dense(128, activation='relu',
-                               kernel_regularizer=regularizers.l2(1e-5)),
-        tf.keras.layers.Dropout(0.20),
+                               kernel_regularizer=regularizers.l2(l2_reg)),
+        tf.keras.layers.Dropout(0.15), # (Era 0.20)
         tf.keras.layers.Dense(64, activation='relu',
-                               kernel_regularizer=regularizers.l2(1e-5)),
+                               kernel_regularizer=regularizers.l2(l2_reg)),
         tf.keras.layers.Dense(1, activation='linear'),
     ])
+    # --- FIN MODIFICACIÓN ---
+    
     lr = tf.keras.optimizers.schedules.ExponentialDecay(
         initial_learning_rate=1e-3, decay_steps=10000, decay_rate=0.9
     )
     opt = tf.keras.optimizers.Adam(learning_rate=lr, clipnorm=1.0)
 
-    # --- ESTRATEGIA DIRECTA: Usamos MSE (igual que el Planner) ---
+    # (Mantenemos MSE, que es la estrategia correcta para "Directo")
     loss_function = 'mean_squared_error' 
     print(f"INFO: Usando función de pérdida: {loss_function}")
     model.compile(optimizer=opt, loss=loss_function, metrics=['mae'])
@@ -148,7 +156,7 @@ def create_model(n_features: int) -> tf.keras.Model:
 # ---------------- Entrenamiento ----------------
 def train_tmo_from_hosting_kaggle_direct():
     print("\n" + "="*70)
-    print("ENTRENAMIENTO TMO v8-DIRECTO (Tipo Planner) | objetivo = 'TMO (s)'")
+    print("ENTRENAMIENTO TMO v8-DIRECTO-AFINADO | objetivo = 'TMO (s)'")
     print("="*70)
 
     # 1) Cargar Hosting
@@ -198,55 +206,52 @@ def train_tmo_from_hosting_kaggle_direct():
     # 3) partes de tiempo
     d = add_time_parts(d)
     
-    # --- INICIO MODIFICACIÓN: Lógica Residual ELIMINADA ---
-    # Ya no calculamos baseline.
-    # Ya no calculamos tmo_resid.
-    # --- FIN MODIFICACIÓN ---
+    # (Lógica Residual eliminada)
 
     # 4) autorregresivas (Bloque de 2 tipos de features)
     
-    # --- INICIO MODIFICACIÓN: ELIMINADOS features de Residuo ---
-    # 4a) PISTA 1: Lags/MAs del TMO TOTAL (¡Ahora es la pista principal!)
-    print("INFO: Creando features Pista 1 (TMO Total) con lags RÁPIDOS...")
+    # --- INICIO MODIFICACIÓN (AFINADO: Ajuste 2 - "Sensor de Volatilidad") ---
+    # 4a) PISTA 1: Lags/MAs/STD del TMO TOTAL
+    print("INFO: Creando features Pista 1 (TMO Total) con lags RÁPIDOS y STD...")
     s_tmo_total = d["tmo_s"]
     for lag in [1, 2, 3, 6, 12, 24, 168]:
         d[f"lag_tmo_total_{lag}"] = s_tmo_total.shift(lag)
     s_tmo_total_s1 = s_tmo_total.shift(1)
     for w in [6, 12, 24, 72]:
         d[f"ma_tmo_total_{w}"] = s_tmo_total_s1.rolling(w, min_periods=1).mean()
-    
-    # 4b) PISTA 2: Lags/MAs de VOLUMEN (El "contexto" de llamadas)
-    print("INFO: Creando features Pista 2 (Volumen/Contestadas)...")
+        d[f"std_tmo_total_{w}"] = s_tmo_total_s1.rolling(w, min_periods=2).std() # <-- SENSOR AÑADIDO
+
+    # 4b) PISTA 2: Lags/MAs/STD de VOLUMEN
+    print("INFO: Creando features Pista 2 (Volumen/Contestadas) con STD...")
     s_contest = pd.to_numeric(d["contestadas"], errors="coerce").fillna(0)
     for lag in [1, 24, 48, 168]:
          d[f"lag_contest_{lag}"] = s_contest.shift(lag)
     s_contest_s1 = s_contest.shift(1)
     for w in [6, 24, 72]:
         d[f"ma_contest_{w}"] = s_contest_s1.rolling(w, min_periods=1).mean()
+        d[f"std_contest_{w}"] = s_contest_s1.rolling(w, min_periods=2).std() # <-- SENSOR AÑADIDO
     # --- FIN MODIFICACIÓN ---
+
 
     # 5) features (Lista de features combinada)
     cyc_feats   = ["sin_hour","cos_hour","sin_dow","cos_dow", FERIADOS_COL, "es_dia_de_pago", "dow","month","hour"]
     
-    tmo_total_feats = [c for c in d.columns if c.startswith("lag_tmo_total_") or c.startswith("ma_tmo_total_")]
-    contest_feats   = [c for c in d.columns if c.startswith("lag_contest_") or c.startswith("ma_contest_")]
+    # --- INICIO MODIFICACIÓN (AFINADO: Ajuste 2 - Agregar STD a la lista) ---
+    tmo_total_feats = [c for c in d.columns if c.startswith(("lag_tmo_total_", "ma_tmo_total_", "std_tmo_total_"))]
+    contest_feats   = [c for c in d.columns if c.startswith(("lag_contest_", "ma_contest_", "std_contest_"))]
+    # --- FIN MODIFICACIÓN ---
     context_feats   = loaded_context_cols 
 
-    # --- INICIO MODIFICACIÓN: Lista de features sin residuo ---
     features = (
         cyc_feats + tmo_total_feats + contest_feats + context_feats
     )
-    # --- FIN MODIFICACIÓN ---
     
     print(f"\nINFO: Total features a usar: {len(features)}")
 
-    # 6) dataset modelable
-    # --- INICIO MODIFICACIÓN: Target es 'tmo_s' (Valor Total) ---
+    # 6) dataset modelable (Target es 'tmo_s')
     dm = d.dropna(subset=features + ["tmo_s"]).copy()
-
     X = pd.get_dummies(dm[features], columns=["dow","month","hour"], drop_first=False)
-    y = dm["tmo_s"].loc[X.index].astype(float) # <-- ¡OBJETIVO CAMBIADO A VALOR TOTAL!
-    # --- FIN MODIFICACIÓN ---
+    y = dm["tmo_s"].loc[X.index].astype(float)
 
     # sample_weight (opcional, no es feature)
     if USE_SAMPLE_WEIGHT and "contestadas" in dm.columns:
@@ -286,15 +291,13 @@ def train_tmo_from_hosting_kaggle_direct():
         epochs=EPOCHS, batch_size=BATCH_SIZE, verbose=1, callbacks=[es]
     )
 
-    # 9) métricas
-    # --- INICIO MODIFICACIÓN: Métrica directa (ya no se reconstruye) ---
+    # 9) métricas (directas)
     yhat_sec = model.predict(X_te_s, verbose=0).flatten()
     y_true_sec = y_te.values
 
     mae = mean_absolute_error(y_true_sec, yhat_sec)
     r2  = r2_score(y_true_sec, yhat_sec)
-    print(f"\nResultado TMO v8-DIRECTO: MAE={mae:.2f} | R2={r2:.3f}")
-    # --- FIN MODIFICACIÓN ---
+    print(f"\nResultado TMO v8-DIRECTO-AFINADO: MAE={mae:.2f} | R2={r2:.3f}")
     
     print(f"Distrib y_te : med={np.median(y_true_sec):.1f} | p90={np.percentile(y_true_sec,90):.1f} | p99={np.percentile(y_true_sec,99):.1f}")
     print(f"Distrib pred: med={np.median(yhat_sec):.1f} | p90={np.percentile(yhat_sec,90):.1f} | p99={np.percentile(yhat_sec,99):.1f}")
@@ -305,9 +308,7 @@ def train_tmo_from_hosting_kaggle_direct():
     (out / "training_columns_tmo.json").write_text(json.dumps(list(X.columns), ensure_ascii=False, indent=2), encoding="utf-8")
     joblib.dump(scaler, out / "scaler_tmo.pkl")
     
-    # --- INICIO MODIFICACIÓN: Ya no se guardan artefactos residuales ---
     # (No hay baseline.csv, No hay meta.json)
-    # --- FIN MODIFICACIÓN ---
     
     # modelo
     model.save(str(out / "modelo_tmo.keras"))
