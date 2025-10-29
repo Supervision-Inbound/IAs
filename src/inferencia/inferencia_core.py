@@ -1,4 +1,4 @@
-# src/inferencia/inferencia_core.py
+# src/inferencia/inferencia_core.py (¡NUEVA LÓGICA DIRECTA!)
 import os
 import glob
 import pathlib
@@ -56,16 +56,15 @@ def _find_one(patterns, search_dirs=None):
     return None
 
 def _resolve_tmo_artifacts():
+    # --- INICIO MODIFICACIÓN: Ya no buscamos baseline/meta ---
     return {
         "keras": _find_one(["modelo_tmo.keras", "tmo*.keras", "*_tmo*.keras"]),
         "scaler": _find_one(["scaler_tmo.pkl", "*tmo*scaler*.pkl", "*scaler*_tmo*.pkl"]),
         "cols": _find_one(["training_columns_tmo.json", "*tmo*columns*.json", "*training*columns*to*.json"]),
-        "baseline": _find_one(["tmo_baseline_dow_hour.csv", "*baseline*dw*hour*.csv", "*tmo*baseline*.csv"]),
-        "meta": _find_one(["tmo_residual_meta.json", "*tmo*residual*meta*.json"]),
     }
+    # --- FIN MODIFICACIÓN ---
 
 _paths = _resolve_tmo_artifacts()
-# print("INFO TMO artifacts:", {k: (v if v else "DEFAULT") for k, v in _paths.items()})
 
 # ---------- Planner (dejamos rutas por defecto) ----------
 PLANNER_MODEL = "models/modelo_planner.keras"
@@ -76,30 +75,26 @@ PLANNER_COLS   = "models/training_columns_planner.json"
 TMO_MODEL    = _paths.get("keras")    or "models/modelo_tmo.keras"
 TMO_SCALER   = _paths.get("scaler")   or "models/scaler_tmo.pkl"
 TMO_COLS     = _paths.get("cols")     or "models/training_columns_tmo.json"
-TMO_BASELINE = _paths.get("baseline") or "models/tmo_baseline_dow_hour.csv"
-TMO_META     = _paths.get("meta")     or "models/tmo_residual_meta.json"
+# --- INICIO MODIFICACIÓN: Baseline/Meta eliminados ---
+# TMO_BASELINE = ... (eliminado)
+# TMO_META     = ... (eliminado)
+# --- FIN MODIFICACIÓN ---
 
 # ---------- Negocio ----------
-# Para replicar EXACTO el entrenamiento del planner:
-TARGET_CALLS = "recibidos_nacional"   # <--- clave para coincidir con la inferencia original
-TARGET_TMO   = "tmo_general"           # TMO en segundos
-
+TARGET_CALLS = "recibidos_nacional"
+TARGET_TMO   = "tmo_general"
 HIST_WINDOW_DAYS = 90
-
 ENABLE_OUTLIER_CAP = True
 K_WEEKDAY = 6.0
 K_WEEKEND = 7.0
 
-# --- INICIO MODIFICACIÓN: Columnas de Contexto ---
-# (Las mismas que definimos en el entrenamiento v7-recalibrado)
-# La inferencia las buscará en dfp y las pasará al modelo TMO
+# (Columnas de contexto del entrenamiento v8)
 CONTEXT_FEATURES = [
     "proporcion_comercial", "proporcion_tecnica",
     "tmo_comercial", "tmo_tecnico"
 ]
-# --- FIN MODIFICACIÓN ---
 
-# ---------- Utils feriados / outliers ----------
+# ---------- Utils feriados / outliers (Sin cambios) ----------
 def _load_cols(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -261,59 +256,10 @@ def _is_holiday(ts, holidays_set: set) -> int:
         d = ts.date()
     return 1 if d in holidays_set else 0
 
-# ---------- TMO residual: artefactos + fallback ----------
-def _try_build_tmo_artifacts_from_history(df_hist: pd.DataFrame):
-    print("WARN: Artefactos TMO no encontrados. Construyendo baseline y meta desde histórico...")
-    d = ensure_ts(df_hist.copy())
-    d = add_time_parts(d)
-
-    if TARGET_TMO in d.columns:
-        tmo = pd.to_numeric(d[TARGET_TMO], errors="coerce")
-        base = (d.assign(tmo_s=tmo)
-                 .groupby(["dow","hour"])["tmo_s"]
-                 .median()
-                 .rename("tmo_baseline")
-                 .reset_index())
-        merged = d.merge(base, on=["dow","hour"], how="left")
-        resid = pd.to_numeric(merged[TARGET_TMO], errors="coerce") - merged["tmo_baseline"]
-        resid_mean = float(np.nanmean(resid))
-        resid_std  = float(np.nanstd(resid)) or 1.0
-    else:
-        base = pd.DataFrame({"dow": np.repeat(np.arange(7), 24),
-                             "hour": list(np.tile(np.arange(24), 7)),
-                             "tmo_baseline": 180.0})
-        resid_mean = 0.0
-        resid_std  = 1.0
-
-    base["dow"]  = base["dow"].astype(int)
-    base["hour"] = base["hour"].astype(int)
-    print(f"INFO: baseline TMO generado (rows={len(base)}), resid_mean={resid_mean:.3f}, resid_std={resid_std:.3f}")
-    return base, resid_mean, resid_std
-
-def _load_tmo_residual_artifacts_or_fallback(df_hist: pd.DataFrame):
-    has_meta = os.path.exists(TMO_META)
-    has_base = os.path.exists(TMO_BASELINE)
-    if has_meta and has_base:
-        with open(TMO_META, "r", encoding="utf-8") as f:
-            meta = json.load(f)
-        base = pd.read_csv(TMO_BASELINE)
-        base = base[["dow","hour","tmo_baseline"]].copy()
-        base["dow"]  = base["dow"].astype(int)
-        base["hour"] = base["hour"].astype(int)
-        resid_mean = float(meta.get("resid_mean", 0.0))
-        resid_std  = float(meta.get("resid_std",  1.0)) or 1.0
-        return base, resid_mean, resid_std
-    return _try_build_tmo_artifacts_from_history(df_hist)
-
-# --- INICIO MODIFICACIÓN: Esta función ahora está deprecada ---
-# La lógica de features de TMO se hará inline en el bucle
-# para poder manejar todas las nuevas "pistas" (volumen, tmo_total, etc.)
-def _add_tmo_resid_features(df_in: pd.DataFrame) -> pd.DataFrame:
-    # d = df_in.copy()
-    # ... (lógica antigua de solo residuo) ...
-    # return d
-    print("WARN: _add_tmo_resid_features() no debe ser llamada. Lógica inline.")
-    return df_in
+# --- INICIO MODIFICACIÓN: Funciones de Baseline/Residual ELIMINADAS ---
+# def _try_build_tmo_artifacts_from_history(df_hist: pd.DataFrame): ...
+# def _load_tmo_residual_artifacts_or_fallback(df_hist: pd.DataFrame): ...
+# def _add_tmo_resid_features(df_in: pd.DataFrame) -> pd.DataFrame: ...
 # --- FIN MODIFICACIÓN ---
 
 
@@ -321,12 +267,10 @@ def _add_tmo_resid_features(df_in: pd.DataFrame) -> pd.DataFrame:
 def forecast_120d(df_hist_joined: pd.DataFrame, 
                   horizon_days: int = 120, holidays_set: set | None = None):
     """
+    - Estrategia: Directa (v8) para TMO, igual que Planner.
     - Volumen iterativo (recibidos_nacional) con planner.
-    - TMO residual iterativo = baseline(dow,hour) + (z*std + mean).
-    - *** CORREGIDO ***: El planner (volumen) recibe los lags de TMO TOTAL (TARGET_TMO).
-    - *** CORREGIDO ***: El TMO residual recibe los lags de RESIDUO (tmo_resid).
-    - *** CORREGIDO V2 ***: El TMO residual AHORA TAMBIÉN recibe lags de TMO TOTAL,
-    -   VOLUMEN (recibidos_nacional) y CONTEXTO (proporciones).
+    - TMO iterativo (tmo_general) con modelo directo v8.
+    - AMBOS modelos reciben "pistas" del otro (Llamadas <-> TMO).
     """
     # Artefactos
     m_pl = tf.keras.models.load_model(PLANNER_MODEL, compile=False)
@@ -359,78 +303,44 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     else:
         df["es_dia_de_pago"] = 0 # Forzado a 0
 
-    # Baseline/meta TMO
-    tmo_base_table, resid_mean, resid_std = _load_tmo_residual_artifacts_or_fallback(df)
+    # --- INICIO MODIFICACIÓN: Eliminar lógica de Baseline/Residual ---
+    # (Ya no se cargan artefactos residuales)
+    # (Ya no se calcula 'tmo_resid' histórico)
+    # --- FIN MODIFICACIÓN ---
 
-    # Base + residuo histórico
-    keep_cols = [TARGET_CALLS, "feriados", "es_dia_de_pago"]
-    if TARGET_TMO in df.columns:
-        keep_cols.append(TARGET_TMO)
-    
-    # --- INICIO MODIFICACIÓN: Asegurar columnas de Contexto y 'contestadas' ---
-    # (El entrenamiento de TMO las usa)
-    
-    # 'contestadas' (Pista de Volumen): Usaremos TARGET_CALLS como proxy
-    # ya que el entrenamiento (v7-recalibrado) se entrenó con 'contestadas'
-    # y TARGET_CALLS ('recibidos_nacional') es lo más parecido que tenemos aquí.
-    # El modelo espera features llamadas 'lag_contest_...'
-    # ¡Las crearemos usando TARGET_CALLS!
-    
-    # Contexto (Pistas de Tipo de Llamada)
-    # Asegurarnos de que existan en el DF, aunque sea con NaNs
+    # Columnas de Contexto (Pistas de Tipo de Llamada)
     static_context_features = {}
     for c in CONTEXT_FEATURES:
         if c not in df.columns:
             df[c] = np.nan
         else:
-            # Guardar el último valor no-nulo para propagar
             last_val = df[c].ffill().iloc[-1]
             static_context_features[c] = float(last_val) if pd.notna(last_val) else 0.0
-    
-    keep_cols.extend(CONTEXT_FEATURES)
-    # --- FIN MODIFICACIÓN ---
-
-    df_tmp = add_time_parts(df[keep_cols].copy())
-    df_tmp["ts"] = df.index
-    df_tmp = df_tmp.merge(tmo_base_table, on=["dow","hour"], how="left")
-    df_tmp = df_tmp.sort_values("ts").set_index("ts")
-
-    if TARGET_TMO in df_tmp.columns:
-        df_tmp["tmo_resid"] = pd.to_numeric(df_tmp[TARGET_TMO], errors="coerce") - df_tmp["tmo_baseline"]
-    else:
-        df_tmp["tmo_resid"] = np.nan
 
     # Ventana reciente
-    idx = df_tmp.index
+    keep_cols = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"] + CONTEXT_FEATURES
+    keep_cols_exist = [c for c in keep_cols if c in df.columns]
+    
+    idx = df.index
     last_ts = pd.to_datetime(idx.max())
     mask_recent = idx >= (last_ts - pd.Timedelta(days=HIST_WINDOW_DAYS))
-    dfp = df_tmp.loc[mask_recent].copy()
+    dfp = df.loc[mask_recent, keep_cols_exist].copy()
     if dfp.empty:
-        dfp = df_tmp.copy()
+        dfp = df.loc[:, keep_cols_exist].copy() # Usar todo si el window es muy chico
 
+    # ffill inicial de datos históricos
     dfp[TARGET_CALLS] = pd.to_numeric(dfp[TARGET_CALLS], errors="coerce").ffill().fillna(0.0)
-    dfp["tmo_resid"] = pd.to_numeric(dfp["tmo_resid"], errors="coerce")
-    if dfp["tmo_resid"].isna().all():
-        dfp["tmo_resid"] = 0.0
-
-    # (Parche 1: Asegurar TMO TOTAL para lags del PLANNER)
-    if TARGET_TMO not in dfp.columns:
-        dfp[TARGET_TMO] = dfp["tmo_baseline"].fillna(180.0) + dfp["tmo_resid"].fillna(0.0)
-    else:
-        dfp[TARGET_TMO] = pd.to_numeric(dfp[TARGET_TMO], errors="coerce").ffill().fillna(0.0)
-        
-    # --- INICIO MODIFICACIÓN: Rellenar y guardar valores estáticos de contexto ---
+    dfp[TARGET_TMO] = pd.to_numeric(dfp[TARGET_TMO], errors="coerce").ffill().fillna(0.0)
+    
     static_context_vals = {}
     for c in CONTEXT_FEATURES:
         if c in dfp.columns:
             dfp[c] = pd.to_numeric(dfp[c], errors="coerce").ffill()
-            # Guardar el último valor conocido para propagar al futuro
             last_val = dfp[c].iloc[-1]
             static_context_vals[c] = float(last_val) if pd.notna(last_val) else 0.0
         else:
-             static_context_vals[c] = 0.0 # Fallback
+             static_context_vals[c] = 0.0
     print(f"INFO: Usando valores de contexto estáticos: {static_context_vals}")
-    # --- FIN MODIFICACIÓN ---
 
     # ===== Horizonte futuro =====
     future_ts = pd.date_range(
@@ -440,12 +350,12 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         tz=TIMEZONE
     )
 
-    # ===== Bucle iterativo: Volumen + TMO residual =====
-    print("Iniciando predicción iterativa (Recibidos_nacional + TMO residual)...")
+    # ===== Bucle iterativo: Volumen + TMO (ambos Directos) =====
+    print("Iniciando predicción iterativa (Llamadas Directas + TMO Directo)...")
     for ts in future_ts:
         
         # --- 1. PREDECIR LLAMADAS (PLANNER) ---
-        # (Parche 2: Lógica del PLANNER (Llamadas) tomada del script ANTIGUO)
+        # (Esta lógica se mantiene, el Planner sigue siendo el mismo)
         cols_planner = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"]
         cols_planner_exist = [c for c in cols_planner if c in dfp.columns]
         tmp_planner = dfp[cols_planner_exist].copy()
@@ -469,27 +379,14 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         yhat_calls = max(0.0, yhat_calls)
 
 
-        # --- 2. PREDECIR TMO (RESIDUAL) ---
+        # --- 2. PREDECIR TMO (DIRECTO v8) ---
         
-        # 2a. Baseline TMO (dow,hour)
-        try:
-            dow = int(ts.tz_convert(TIMEZONE).weekday())
-            hour = int(ts.tz_convert(TIMEZONE).hour)
-        except Exception:
-            dow = int(ts.weekday()); hour = int(ts.hour)
-        base_row = tmo_base_table[(tmo_base_table["dow"]==dow)&(tmo_base_table["hour"]==hour)]
-        tmo_base = float(base_row["tmo_baseline"].iloc[0]) if not base_row.empty else (
-            float(np.nanmedian(tmo_base_table["tmo_baseline"])) if "tmo_baseline" in tmo_base_table.columns else 180.0
-        )
-
-        # --- INICIO MODIFICACIÓN: Crear TODOS los features para el modelo TMO ---
+        # --- INICIO MODIFICACIÓN: Lógica de predicción TMO (Directa) ---
         
         # 2b. Crear Dataframe temporal para TMO
-        # Necesitamos las 3 Pistas + Contexto + Tiempo
         cols_tmo_model = [
-            "tmo_resid",      # Pista 1 (Residual)
-            TARGET_TMO,       # Pista 2 (TMO Total)
-            TARGET_CALLS,     # Pista 3 (Volumen - usando recibidos como proxy de contestadas)
+            TARGET_TMO,       # Pista 1 (TMO Total)
+            TARGET_CALLS,     # Pista 2 (Volumen)
             "feriados", 
             "es_dia_de_pago"
         ]
@@ -498,44 +395,29 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         
         # Añadir fila vacía y ffill (para que lags se basen en t-1)
         tmp_tmo = pd.concat([tmp_tmo, pd.DataFrame(index=[ts])])
-        tmp_tmo["tmo_resid"] = tmp_tmo["tmo_resid"].ffill()
         tmp_tmo[TARGET_TMO] = tmp_tmo[TARGET_TMO].ffill()
         tmp_tmo[TARGET_CALLS] = tmp_tmo[TARGET_CALLS].ffill()
         
         # Añadir features de contexto (estáticos)
         for c, val in static_context_vals.items():
-            tmp_tmo[c] = val # Se propaga el valor a todas las filas (incluida 'ts')
+            tmp_tmo[c] = val 
 
         # Forzar feriados/dia_pago en la fila actual (ts)
         tmp_tmo.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
         tmp_tmo.loc[ts, "es_dia_de_pago"] = 0 # Forzado a 0
 
-        # 2c. Crear Pistas de Lags/MAs (¡Esta es la parte que faltaba!)
+        # 2c. Crear Pistas de Lags/MAs (¡Debe coincidir con el Entrenamiento v8!)
 
-        # Pista 1: Residual (la que ya teníamos)
-        for lag in [1,2,3,6,12,24,48,72,168]:
-            tmp_tmo[f"lag_resid_{lag}"] = tmp_tmo["tmo_resid"].shift(lag)
-        resid_shift1 = tmp_tmo["tmo_resid"].shift(1)
-        for w in [6,12,24,72,168]:
-            tmp_tmo[f"ma_resid_{w}"] = resid_shift1.rolling(w, min_periods=1).mean()
-        for span in [6,12,24]:
-            tmp_tmo[f"ema_resid_{span}"] = resid_shift1.ewm(span=span, adjust=False, min_periods=1).mean()
-        for w in [24,72]:
-            tmp_tmo[f"std_resid_{w}"] = resid_shift1.rolling(w, min_periods=2).std()
-            tmp_tmo[f"max_resid_{w}"] = resid_shift1.rolling(w, min_periods=1).max()
-
-        # Pista 2: TMO Total (del entrenamiento v7-recalibrado)
+        # Pista 1: TMO Total (Lags "rápidos")
         s_tmo_total = tmp_tmo[TARGET_TMO]
-        for lag in [24, 48, 72, 168]:
+        for lag in [1, 2, 3, 6, 12, 24, 168]:
             tmp_tmo[f"lag_tmo_total_{lag}"] = s_tmo_total.shift(lag)
         s_tmo_total_s1 = s_tmo_total.shift(1)
-        for w in [24, 72, 168]:
+        for w in [6, 12, 24, 72]:
             tmp_tmo[f"ma_tmo_total_{w}"] = s_tmo_total_s1.rolling(w, min_periods=1).mean()
 
-        # Pista 3: Volumen (del entrenamiento v7-recalibrado)
-        # Usamos TARGET_CALLS como fuente, pero nombramos los features "lag_contest_..."
-        # para que coincida con el entrenamiento.
-        s_contest = tmp_tmo[TARGET_CALLS] 
+        # Pista 2: Volumen (Lags "rápidos")
+        s_contest = tmp_tmo[TARGET_CALLS] # Usamos 'recibidos' como proxy
         for lag in [1, 24, 48, 168]:
              tmp_tmo[f"lag_contest_{lag}"] = s_contest.shift(lag)
         s_contest_s1 = s_contest.shift(1)
@@ -545,26 +427,22 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         # 2d. Crear Pistas de Tiempo
         tmp_tmo = add_time_parts(tmp_tmo)
         
-        # 2e. Predecir TMO Residual
+        # 2e. Predecir TMO (Directo)
         X_tmo = dummies_and_reindex(tmp_tmo.tail(1), cols_tmo)
-        yhat_z = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
-        yhat_resid = yhat_z * resid_std + resid_mean
-        yhat_tmo = max(0.0, tmo_base + yhat_resid)
+        yhat_tmo = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
+        yhat_tmo = max(0.0, yhat_tmo) # TMO no puede ser negativo
         # --- FIN MODIFICACIÓN ---
 
 
         # --- 3. ACTUALIZACIÓN ITERATIVA ---
         dfp.loc[ts, TARGET_CALLS] = yhat_calls
-        dfp.loc[ts, "tmo_baseline"] = tmo_base
-        dfp.loc[ts, "tmo_resid"] = yhat_tmo - tmo_base
+        dfp.loc[ts, TARGET_TMO] = yhat_tmo # <-- Guardar predicción directa
         
-        # (Parche 3: Guardar el TMO TOTAL para los lags del PLANNER)
-        dfp.loc[ts, TARGET_TMO] = yhat_tmo 
+        # (Ya no hay 'tmo_baseline' ni 'tmo_resid')
         
         dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
         dfp.loc[ts, "es_dia_de_pago"] = 0 # Forzado a 0
         
-        # Propagar valores de contexto
         for c, val in static_context_vals.items():
             dfp.loc[ts, c] = val
 
@@ -574,7 +452,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     # ===== Salida horaria =====
     df_hourly = pd.DataFrame(index=future_ts)
     df_hourly["calls"] = np.round(dfp.loc[future_ts, TARGET_CALLS]).astype(int)
-    df_hourly["tmo_s"] = np.round(dfp.loc[future_ts, "tmo_baseline"] + dfp.loc[future_ts, "tmo_resid"]).astype(int)
+    # --- INICIO MODIFICACIÓN: Leer TMO directo de dfp ---
+    df_hourly["tmo_s"] = np.round(dfp.loc[future_ts, TARGET_TMO]).astype(int)
+    # --- FIN MODIFICACIÓN ---
 
     # ===== Ajustes feriados / post-feriados =====
     if holidays_set and len(holidays_set) > 0:
