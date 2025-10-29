@@ -1,13 +1,11 @@
 # =================================================================================
-# TRAIN TMO (KAGGLE) v7-residual-AFINADO
-# - Objetivo: "tmo (segundos)" o "tmo (s)" desde Hosting ia.xlsx
-# - Aprende el RESIDUO contra baseline por (dow, hour) y lo estandariza (z-score)
-# --- MEJORAS (AFINADO) ---
-# 1. Agrega Lags/MAs de 'contestadas' (Volumen) como feature.
-# 2. Agrega Lags/MAs de 'tmo_s' (TMO Total) como feature.
-# 3. MANTIENE sample_weight (USE_SAMPLE_WEIGHT = True).
-# 4. (NUEVO) Usa "lags rápidos" (1h, 2h, 3h) para TMO Total.
-# 5. (NUEVO) Usa loss='mean_squared_error' para "perseguir" picos/valles.
+# TRAIN TMO (KAGGLE) v8-DIRECTO (¡NUEVA LÓGICA!)
+# - Estrategia: Directa (igual que el Planner de Llamadas)
+# - Objetivo: "tmo_s" (Valor Total)
+# - NO USA BASELINE, NO USA RESIDUAL.
+# - Loss Function: MSE (para "perseguir" picos y valles).
+# - Features: Tiempo + Lags(TMO Total) + Lags(Volumen) + Contexto
+# - Artefactos: Genera 3 archivos (modelo, scaler, columns).
 # =================================================================================
 
 import os, re, json, warnings, unicodedata
@@ -50,7 +48,7 @@ np.random.seed(SEED)
 tf.random.set_seed(SEED)
 warnings.filterwarnings("once", category=UserWarning)
 
-# ---------------- Utils ----------------
+# ---------------- Utils (Sin cambios) ----------------
 def read_any(path: str, sheet: int | str | None = None) -> pd.DataFrame:
     p = str(path).lower()
     if p.endswith(".csv"):
@@ -107,11 +105,6 @@ def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     d["es_dia_de_pago"] = d["day"].isin([1,2,15,16,29,30,31]).astype(int)
     return d
 
-def make_tmo_autoreg_features(df: pd.DataFrame) -> pd.DataFrame:
-    # Esta función (antigua) no se usa, el código está inline
-    # para mayor claridad de las 3 pistas.
-    pass
-
 def find_col_by_candidates(df: pd.DataFrame, candidates: list) -> str | None:
     cols_norm = {_norm(c): c for c in df.columns}
     for cand in candidates:
@@ -145,20 +138,17 @@ def create_model(n_features: int) -> tf.keras.Model:
     )
     opt = tf.keras.optimizers.Adam(learning_rate=lr, clipnorm=1.0)
 
-    # --- INICIO MODIFICACIÓN (AFINADO: Ajuste 2) ---
-    # Cambiamos de Huber a MSE para forzar al modelo a "perseguir"
-    # los picos y valles (errores grandes).
+    # --- ESTRATEGIA DIRECTA: Usamos MSE (igual que el Planner) ---
     loss_function = 'mean_squared_error' 
     print(f"INFO: Usando función de pérdida: {loss_function}")
     model.compile(optimizer=opt, loss=loss_function, metrics=['mae'])
-    # --- FIN MODIFICACIÓN ---
     
     return model
 
 # ---------------- Entrenamiento ----------------
-def train_tmo_from_hosting_kaggle_residual():
+def train_tmo_from_hosting_kaggle_direct():
     print("\n" + "="*70)
-    print("ENTRENAMIENTO TMO v7-residual-AFINADO | objetivo = 'TMO (s)' / 'TMO (segundos)'")
+    print("ENTRENAMIENTO TMO v8-DIRECTO (Tipo Planner) | objetivo = 'TMO (s)'")
     print("="*70)
 
     # 1) Cargar Hosting
@@ -205,82 +195,58 @@ def train_tmo_from_hosting_kaggle_residual():
             d[cand_norm] = d[cand_norm].ffill().bfill().fillna(d[cand_norm].mean()) # Relleno robusto
             loaded_context_cols.append(cand_norm)
 
-    # 3) partes de tiempo + baseline por (dow,hour)
+    # 3) partes de tiempo
     d = add_time_parts(d)
-    baseline = (d.groupby(["dow","hour"])["tmo_s"]
-                 .median().rename("tmo_baseline")
-                 .reset_index())
-    d = d.merge(baseline, on=["dow","hour"], how="left")
-
-    # residuo
-    d["tmo_resid"] = d["tmo_s"] - d["tmo_baseline"]
-
-    # 4) autorregresivas (Bloque de 3 tipos de features)
     
-    # 4a) PISTA 1: Lags/MAs del RESIDUO (La "sorpresa" reciente)
-    print("INFO: Creando features Pista 1 (Residual)...")
-    for lag in [1,2,3,6,12,24,48,72,168]:
-        d[f"lag_resid_{lag}"] = d["tmo_resid"].shift(lag)
-    resid_shift1 = d["tmo_resid"].shift(1)
-    for w in [6,12,24,72,168]:
-        d[f"ma_resid_{w}"] = resid_shift1.rolling(w, min_periods=1).mean()
-    for span in [6,12,24]:
-        d[f"ema_resid_{span}"] = resid_shift1.ewm(span=span, adjust=False, min_periods=1).mean()
-    for w in [24,72]:
-        d[f"std_resid_{w}"] = resid_shift1.rolling(w, min_periods=2).std()
-        d[f"max_resid_{w}"] = resid_shift1.rolling(w, min_periods=1).max()
+    # --- INICIO MODIFICACIÓN: Lógica Residual ELIMINADA ---
+    # Ya no calculamos baseline.
+    # Ya no calculamos tmo_resid.
+    # --- FIN MODIFICACIÓN ---
 
+    # 4) autorregresivas (Bloque de 2 tipos de features)
     
-    # --- INICIO MODIFICACIÓN (AFINADO: Ajuste 1) ---
-    # 4b) PISTA 2: Lags/MAs del TMO TOTAL (La "tendencia" reciente)
-    print("INFO: Creando features Pista 2 (TMO Total) con lags RÁPIDOS...")
+    # --- INICIO MODIFICACIÓN: ELIMINADOS features de Residuo ---
+    # 4a) PISTA 1: Lags/MAs del TMO TOTAL (¡Ahora es la pista principal!)
+    print("INFO: Creando features Pista 1 (TMO Total) con lags RÁPIDOS...")
     s_tmo_total = d["tmo_s"]
-    # Agregamos lags "rápidos" (1, 2, 3, 6, 12) para reaccionar a picos/valles
     for lag in [1, 2, 3, 6, 12, 24, 168]:
         d[f"lag_tmo_total_{lag}"] = s_tmo_total.shift(lag)
     s_tmo_total_s1 = s_tmo_total.shift(1)
-    # Agregamos MAs "rápidas" (6, 12)
     for w in [6, 12, 24, 72]:
         d[f"ma_tmo_total_{w}"] = s_tmo_total_s1.rolling(w, min_periods=1).mean()
-    # --- FIN MODIFICACIÓN ---
-
-    # 4c) PISTA 3: Lags/MAs de VOLUMEN (El "contexto" de llamadas)
-    print("INFO: Creando features Pista 3 (Volumen/Contestadas)...")
+    
+    # 4b) PISTA 2: Lags/MAs de VOLUMEN (El "contexto" de llamadas)
+    print("INFO: Creando features Pista 2 (Volumen/Contestadas)...")
     s_contest = pd.to_numeric(d["contestadas"], errors="coerce").fillna(0)
     for lag in [1, 24, 48, 168]:
          d[f"lag_contest_{lag}"] = s_contest.shift(lag)
     s_contest_s1 = s_contest.shift(1)
     for w in [6, 24, 72]:
         d[f"ma_contest_{w}"] = s_contest_s1.rolling(w, min_periods=1).mean()
-
+    # --- FIN MODIFICACIÓN ---
 
     # 5) features (Lista de features combinada)
-    resid_feats = [c for c in d.columns if c.startswith("lag_resid_") or c.startswith("ma_resid_")]
-    ema_feats   = [f"ema_resid_{s}" for s in [6,12,24]]
-    vol_feats   = [f"std_resid_{w}" for w in [24,72]] + [f"max_resid_{w}" for w in [24,72]]
     cyc_feats   = ["sin_hour","cos_hour","sin_dow","cos_dow", FERIADOS_COL, "es_dia_de_pago", "dow","month","hour"]
     
-    # Listas de features nuevas
     tmo_total_feats = [c for c in d.columns if c.startswith("lag_tmo_total_") or c.startswith("ma_tmo_total_")]
     contest_feats   = [c for c in d.columns if c.startswith("lag_contest_") or c.startswith("ma_contest_")]
-    context_feats   = loaded_context_cols # Las columnas de contexto que cargamos
+    context_feats   = loaded_context_cols 
 
+    # --- INICIO MODIFICACIÓN: Lista de features sin residuo ---
     features = (
-        resid_feats + ema_feats + vol_feats + cyc_feats + 
-        tmo_total_feats + contest_feats + context_feats
+        cyc_feats + tmo_total_feats + contest_feats + context_feats
     )
+    # --- FIN MODIFICACIÓN ---
     
     print(f"\nINFO: Total features a usar: {len(features)}")
 
-    # 6) dataset modelable (objetivo = z-score del residuo)
-    dm = d.dropna(subset=features + ["tmo_resid", "tmo_baseline"]).copy()
-    # estandarización de objetivo (residuo)
-    resid_mean = dm["tmo_resid"].mean()
-    resid_std  = dm["tmo_resid"].std(ddof=0) or 1.0
-    dm["tmo_resid_z"] = (dm["tmo_resid"] - resid_mean) / resid_std
+    # 6) dataset modelable
+    # --- INICIO MODIFICACIÓN: Target es 'tmo_s' (Valor Total) ---
+    dm = d.dropna(subset=features + ["tmo_s"]).copy()
 
     X = pd.get_dummies(dm[features], columns=["dow","month","hour"], drop_first=False)
-    y = dm["tmo_resid_z"].loc[X.index].astype(float)
+    y = dm["tmo_s"].loc[X.index].astype(float) # <-- ¡OBJETIVO CAMBIADO A VALOR TOTAL!
+    # --- FIN MODIFICACIÓN ---
 
     # sample_weight (opcional, no es feature)
     if USE_SAMPLE_WEIGHT and "contestadas" in dm.columns:
@@ -320,17 +286,16 @@ def train_tmo_from_hosting_kaggle_residual():
         epochs=EPOCHS, batch_size=BATCH_SIZE, verbose=1, callbacks=[es]
     )
 
-    # 9) métricas (reconstruyendo a segundos)
-    yhat_z = model.predict(X_te_s, verbose=0).flatten()
-    yhat_resid = yhat_z * resid_std + resid_mean
-    # baseline para test
-    base_te = dm.loc[X_te.index, "tmo_baseline"].values
-    yhat_sec = base_te + yhat_resid
-    y_true_sec = dm.loc[X_te.index, "tmo_s"].values
+    # 9) métricas
+    # --- INICIO MODIFICACIÓN: Métrica directa (ya no se reconstruye) ---
+    yhat_sec = model.predict(X_te_s, verbose=0).flatten()
+    y_true_sec = y_te.values
 
     mae = mean_absolute_error(y_true_sec, yhat_sec)
     r2  = r2_score(y_true_sec, yhat_sec)
-    print(f"\nResultado TMO v7-residual-AFINADO: MAE={mae:.2f} | R2={r2:.3f}")
+    print(f"\nResultado TMO v8-DIRECTO: MAE={mae:.2f} | R2={r2:.3f}")
+    # --- FIN MODIFICACIÓN ---
+    
     print(f"Distrib y_te : med={np.median(y_true_sec):.1f} | p90={np.percentile(y_true_sec,90):.1f} | p99={np.percentile(y_true_sec,99):.1f}")
     print(f"Distrib pred: med={np.median(yhat_sec):.1f} | p90={np.percentile(yhat_sec,90):.1f} | p99={np.percentile(yhat_sec,99):.1f}")
 
@@ -339,32 +304,20 @@ def train_tmo_from_hosting_kaggle_residual():
     # columnas + scaler de features
     (out / "training_columns_tmo.json").write_text(json.dumps(list(X.columns), ensure_ascii=False, indent=2), encoding="utf-8")
     joblib.dump(scaler, out / "scaler_tmo.pkl")
-    # baseline por (dow,hour)
-    base_df = baseline.sort_values(["dow","hour"])
-    base_df.to_csv(out / "tmo_baseline_dow_hour.csv", index=False)
-    # meta de residuo
-    meta = {
-        "resid_mean": float(resid_mean),
-        "resid_std":  float(resid_std),
-        "use_sample_weight": bool(USE_SAMPLE_WEIGHT),
-        "contestadas_col_used": contest_col,
-        # --- INICIO MODIFICACIÓN (AFINADO: Ajuste 2) ---
-        "loss": "mean_squared_error", # <-- Actualizado
-        "delta": None # <-- Huber ya no se usa
-        # --- FIN MODIFICACIÓN ---
-    }
-    (out / "tmo_residual_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    
+    # --- INICIO MODIFICACIÓN: Ya no se guardan artefactos residuales ---
+    # (No hay baseline.csv, No hay meta.json)
+    # --- FIN MODIFICACIÓN ---
+    
     # modelo
-    model.save(str(out / "modelo_tmo.keras"))  # en inferencia: load_model(..., compile=False)
+    model.save(str(out / "modelo_tmo.keras"))
 
     print("\nArtefactos guardados en:", str(out.resolve()))
     print(" - modelo_tmo.keras")
     print(" - scaler_tmo.pkl")
     print(" - training_columns_tmo.json")
-    print(" - tmo_baseline_dow_hour.csv")
-    print(" - tmo_residual_meta.json")
     print("\n¡Listo! Descárgalos desde la pestaña 'Output'.")
 
 # ---------------- Run ----------------
 if __name__ == "__main__":
-    train_tmo_from_hosting_kaggle_residual()
+    train_tmo_from_hosting_kaggle_direct()
