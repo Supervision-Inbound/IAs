@@ -406,10 +406,10 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         
         # --- INICIO MODIFICACIÓN: Rellenar NaNs antes de escalar ---
         # Los 'std' pueden generar NaNs en las primeras horas del bucle
+        # ¡Esta es la corrección clave para el ValueError!
         X_tmo = X_tmo.fillna(0.0) 
         # --- FIN MODIFICACIÓN ---
 
-        # (El parche 'inf' ya no es necesario, el entrenamiento CORREGIDO lo arregló)
         yhat_tmo = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
         yhat_tmo = max(0.0, yhat_tmo) 
         # --- FIN MODIFICACIÓN ---
