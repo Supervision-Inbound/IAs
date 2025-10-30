@@ -1,10 +1,8 @@
 # =========================================================================
-# src/inferencia/inferencia_core.py (¡Actualizado para v10.4 - Robusto!)
-# - AJUSTE: Nombres de columnas (TARGET_CALLS, TARGET_TMO)
-# - AJUSTE: Eliminados CONTEXT_FEATURES (v8)
-# - AJUSTE: Añadidos features de Volatilidad (v10.2) en el Paso 2
-# - FIX (v10.3): Añadido parche de robustez para limpiar Inf/NaN del INPUT (X_tmo)
-# - FIX (v10.4): Añadido parche de robustez para limpiar Inf/NaN del OUTPUT (yhat_tmo)
+# src/inferencia/inferencia_core.py (¡Actualizado para v10.5 - RÁPIDO!)
+# - FIX (v10.5): Optimizado el bucle de predicción (O(n^2) -> O(n))
+#                usando una ventana de 'lookback' (MAX_LOOKBACK_WINDOW).
+# - Mantiene todos los parches de robustez (v10.4)
 # =========================================================================
 import os
 import glob
@@ -89,6 +87,12 @@ ENABLE_OUTLIER_CAP = True
 K_WEEKDAY = 6.0
 K_WEEKEND = 7.0
 CONTEXT_FEATURES = []
+
+# --- FIX v10.5: Constante de optimización ---
+# El lag más grande que usamos es 168 (para TMO y Planner).
+# Le damos un búfer (168 + 72 de MA = 240). 250 es seguro.
+MAX_LOOKBACK_WINDOW = 250
+# --- FIN FIX ---
 
 
 # ---------- Utils feriados / outliers (Sin cambios) ----------
@@ -260,10 +264,10 @@ def _is_holiday(ts, holidays_set: set) -> int:
 def forecast_120d(df_hist_joined: pd.DataFrame, 
                   horizon_days: int = 120, holidays_set: set | None = None):
     """
-    - Estrategia: Directa (v10.4) para TMO, igual que Planner.
+    - Estrategia: Directa (v10.5) para TMO, igual que Planner.
     - Volumen iterativo (con planner).
-    - TMO iterativo (con modelo directo v10.4).
-    - AMBOS modelos reciben "pistas" del otro (Llamadas <-> TMO).
+    - TMO iterativo (con modelo directo v10.5).
+    - BUCLE OPTIMIZADO (v10.5)
     """
     # Artefactos
     m_pl = tf.keras.models.load_model(PLANNER_MODEL, compile=False)
@@ -296,7 +300,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     if "es_dia_de_pago" not in df.columns:
         df["es_dia_de_pago"] = 0
     else:
-        df["es_dia_de_pago"] = 0 # Forzado a 0
+        df["es_dia_de_pago"] = 0 
 
     static_context_features = {}
     for c in CONTEXT_FEATURES: 
@@ -312,19 +316,21 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     
     idx = df.index
     last_ts = pd.to_datetime(idx.max())
-    mask_recent = idx >= (last_ts - pd.Timedelta(days=HIST_WINDOW_DAYS))
+    
+    # --- FIX v10.5: Usar una ventana histórica MÁS PEQUEÑA ---
+    # Usar HIST_WINDOW_DAYS (90) es demasiado y crea el bucle O(n^2)
+    # Usamos MAX_LOOKBACK_WINDOW (250h) que es suficiente para los lags
+    mask_recent = idx >= (last_ts - pd.Timedelta(hours=MAX_LOOKBACK_WINDOW))
     dfp = df.loc[mask_recent, keep_cols_exist].copy()
-    if dfp.empty:
-        dfp = df.loc[:, keep_cols_exist].copy()
-
-    # ffill inicial de datos históricos
-    dfp[TARGET_CALLS] = pd.to_numeric(dfp[TARGET_CALLS], errors="coerce").ffill().fillna(0.0)
-    dfp[TARGET_TMO] = pd.to_numeric(dfp[TARGET_TMO], errors="coerce").ffill().fillna(0.0)
+    
+    # Rellenamos por si acaso el historial real tiene NaNs
+    dfp[TARGET_CALLS] = pd.to_numeric(dfp[TARGET_CALLS], errors="coerce").ffill().bfill().fillna(0.0)
+    dfp[TARGET_TMO] = pd.to_numeric(dfp[TARGET_TMO], errors="coerce").ffill().bfill().fillna(0.0)
     
     static_context_vals = {}
     for c in CONTEXT_FEATURES: 
         if c in dfp.columns:
-            dfp[c] = pd.to_numeric(dfp[c], errors="coerce").ffill()
+            dfp[c] = pd.to_numeric(dfp[c], errors="coerce").ffill().bfill().fillna(0.0)
             last_val = dfp[c].iloc[-1]
             static_context_vals[c] = float(last_val) if pd.notna(last_val) else 0.0
         else:
@@ -342,13 +348,20 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
 
     # ===== Bucle iterativo: Volumen + TMO (ambos Directos) =====
     print("Iniciando predicción iterativa (Llamadas Directas + TMO Directo)...")
+    
+    # Creamos un DataFrame para los resultados (más rápido que loc)
+    future_results = []
+    
     for ts in future_ts:
         
         # --- 1. PREDECIR LLAMADAS (PLANNER) ---
-        # (¡SIN CAMBIOS!)
+        
         cols_planner = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"]
         cols_planner_exist = [c for c in cols_planner if c in dfp.columns]
-        tmp_planner = dfp[cols_planner_exist].copy()
+        
+        # --- FIX v10.5: Usar solo la ventana de lookback ---
+        tmp_planner = dfp.iloc[-MAX_LOOKBACK_WINDOW:][cols_planner_exist].copy()
+        
         tmp_planner = pd.concat([tmp_planner, pd.DataFrame(index=[ts])])
         tmp_planner[TARGET_CALLS] = tmp_planner[TARGET_CALLS].ffill()
         if TARGET_TMO in tmp_planner.columns:
@@ -376,14 +389,16 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
 
         # --- 2. PREDECIR TMO (DIRECTO v10.4) ---
         
-        # 2b. Crear Dataframe temporal para TMO
         cols_tmo_model = [TARGET_TMO, TARGET_CALLS, "feriados", "es_dia_de_pago"]
         cols_tmo_model_exist = [c for c in cols_tmo_model if c in dfp.columns]
-        tmp_tmo = dfp[cols_tmo_model_exist].copy()
+        
+        # --- FIX v10.5: Usar solo la ventana de lookback ---
+        tmp_tmo = dfp.iloc[-MAX_LOOKBACK_WINDOW:][cols_tmo_model_exist].copy()
         
         tmp_tmo = pd.concat([tmp_tmo, pd.DataFrame(index=[ts])])
         tmp_tmo[TARGET_TMO] = tmp_tmo[TARGET_TMO].ffill()
-        tmp_tmo[TARGET_CALLS] = tmp_tmo[TARGET_CALLS].ffill()
+        # Rellenar la Pista 2 (Volumen) con la predicción de yhat_calls
+        tmp_tmo.loc[ts, TARGET_CALLS] = yhat_calls # <-- Importante: Pista cruzada
         
         for c, val in static_context_vals.items():
             tmp_tmo[c] = val 
@@ -426,55 +441,48 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         # --- FIX v10.3: Sanear Infs y NaNs (INPUT) ---
         X_tmo.replace([np.inf, -np.inf], np.nan, inplace=True)
         X_tmo.fillna(0, inplace=True)
-        # --- FIN FIX v10.3 ---
 
         yhat_tmo_raw = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
         
-        # --- INICIO FIX v10.4: Sanear Infs y NaNs (OUTPUT) ---
-        # Si el modelo predice NaN o Inf (debido al scaler corrupto),
-        # usamos el último valor bueno conocido (t-1)
+        # --- FIX v10.4: Sanear Infs y NaNs (OUTPUT) ---
         if not np.isfinite(yhat_tmo_raw):
-            # .iloc[-2] es el último valor real (antes de la fila 'ts' vacía)
             yhat_tmo = tmp_tmo[TARGET_TMO].iloc[-2] 
         else:
-            # Si el valor es bueno, solo nos aseguramos de que no sea negativo
             yhat_tmo = max(0.0, yhat_tmo_raw)
-        # --- FIN FIX v10.4 ---
-
 
         # --- 3. ACTUALIZACIÓN ITERATIVA ---
-        dfp.loc[ts, TARGET_CALLS] = yhat_calls
-        dfp.loc[ts, TARGET_TMO] = yhat_tmo # <-- Guardar predicción saneada
         
-        dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
-        dfp.loc[ts, "es_dia_de_pago"] = 0 
-        
+        # Preparamos la nueva fila para añadir a dfp
+        new_row = {
+            TARGET_CALLS: yhat_calls,
+            TARGET_TMO: yhat_tmo,
+            "feriados": _is_holiday(ts, holidays_set),
+            "es_dia_de_pago": 0
+        }
         for c, val in static_context_vals.items():
-            dfp.loc[ts, c] = val
+            new_row[c] = val
+            
+        future_results.append(pd.Series(new_row, name=ts))
 
 
     print("Predicción iterativa completada.")
+
+    # --- FIX v10.5: Concatenar resultados al final (mucho más rápido) ---
+    if future_results:
+        df_future = pd.DataFrame(future_results)
+        dfp = pd.concat([dfp, df_future])
+    # --- FIN FIX ---
 
     # ===== Salida horaria =====
     df_hourly = pd.DataFrame(index=future_ts)
     df_hourly["calls"] = np.round(dfp.loc[future_ts, TARGET_CALLS]).astype(int)
     
-    # --- FIX v10.4 (B): Sanitizar la salida final ANTES de .astype(int) ---
-    # Aunque el bucle ahora es seguro, hacemos una limpieza final
-    # por si acaso (ej. el último valor histórico era NaN)
     tmo_s_series = np.round(dfp.loc[future_ts, TARGET_TMO])
     tmo_s_series.replace([np.inf, -np.inf], np.nan, inplace=True)
-    
-    # Rellenar cualquier NaN restante con ffill (último valor bueno)
-    # y bfill (primer valor bueno) por si el primer valor es NaN
     tmo_s_series = tmo_s_series.ffill().bfill()
-    
-    # Si todo sigue siendo NaN (datos de entrada muy malos), rellenar con 0
     tmo_s_series = tmo_s_series.fillna(0) 
     
     df_hourly["tmo_s"] = tmo_s_series.astype(int)
-    # --- FIN FIX v10.4 (B) ---
-
 
     # ===== Ajustes feriados / post-feriados =====
     if holidays_set and len(holidays_set) > 0:
@@ -496,11 +504,10 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     # ===== Erlang =====
     df_hourly["agents_prod"] = 0
     for ts in df_hourly.index:
-        # Asegurarnos de que Erlang no reciba NaNs (aunque ya lo corregimos)
         calls_val = float(df_hourly.at[ts, "calls"])
         tmo_val = float(df_hourly.at[ts, "tmo_s"])
         if not np.isfinite(calls_val): calls_val = 0
-        if not np.isfinite(tmo_val) or tmo_val <= 0: tmo_val = 1 # Evitar TMO=0
+        if not np.isfinite(tmo_val) or tmo_val <= 0: tmo_val = 1 
         
         a, _ = required_agents(calls_val, tmo_val)
         df_hourly.at[ts, "agents_prod"] = int(a)
