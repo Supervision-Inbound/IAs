@@ -254,9 +254,7 @@ def _is_holiday(ts, holidays_set: set) -> int:
         d = ts.date()
     return 1 if d in holidays_set else 0
 
-# --- INICIO MODIFICACIÓN: Funciones de Baseline/Residual ELIMINADAS ---
-# (Ya no son necesarias para la lógica Directa)
-# --- FIN MODIFICACIÓN ---
+# (Funciones de Baseline/Residual ELIMINADAS)
 
 
 # ---------- Núcleo ----------
@@ -349,6 +347,10 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
                 tmp_planner[f'tmo_ma_{window}'] = tmp_planner[TARGET_TMO].rolling(window, min_periods=1).mean()
         tmp_planner = add_time_parts(tmp_planner)
         X_pl = dummies_and_reindex(tmp_planner.tail(1), cols_pl)
+        # --- INICIO PARCHE: Rellenar NaNs para el scaler del Planner ---
+        # (Buena práctica, por si los lags/MAs de TMO fallan al inicio)
+        X_pl = X_pl.fillna(0.0)
+        # --- FIN PARCHE ---
         yhat_calls = float(m_pl.predict(sc_pl.transform(X_pl), verbose=0).flatten()[0])
         yhat_calls = max(0.0, yhat_calls)
 
