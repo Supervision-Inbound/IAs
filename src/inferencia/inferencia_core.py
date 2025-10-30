@@ -263,9 +263,9 @@ def _is_holiday(ts, holidays_set: set) -> int:
 def forecast_120d(df_hist_joined: pd.DataFrame, 
                   horizon_days: int = 120, holidays_set: set | None = None):
     """
-    - Estrategia: Directa (v8-Afinado) para TMO, igual que Planner.
+    - Estrategia: Directa (v8-Afinado-Corregido) para TMO, igual que Planner.
     - Volumen iterativo (recibidos_nacional) con planner.
-    - TMO iterativo (tmo_general) con modelo directo v8-Afinado.
+    - TMO iterativo (tmo_general) con modelo directo v8-Afinado-Corregido.
     - AMBOS modelos reciben "pistas" del otro (Llamadas <-> TMO).
     """
     # Artefactos
@@ -299,10 +299,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     else:
         df["es_dia_de_pago"] = 0 # Forzado a 0
 
-    # --- INICIO MODIFICACIÓN: Eliminar lógica de Contexto/Residual ---
-    # (Ya no se cargan artefactos residuales)
-    # (Ya no se cargan columnas de contexto)
-    # --- FIN MODIFICACIÓN ---
+    # (Lógica de Contexto/Residual eliminada)
 
     # Ventana reciente
     keep_cols = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"]
@@ -375,8 +372,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         tmp_tmo[TARGET_TMO] = tmp_tmo[TARGET_TMO].ffill()
         tmp_tmo[TARGET_CALLS] = tmp_tmo[TARGET_CALLS].ffill()
         
-        # (Columnas de contexto eliminadas)
-
         # Forzar feriados/dia_pago en la fila actual (ts)
         tmp_tmo.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
         tmp_tmo.loc[ts, "es_dia_de_pago"] = 0 # Forzado a 0
@@ -412,7 +407,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         X_tmo = X_tmo.fillna(0.0) 
         # --- FIN MODIFICACIÓN ---
 
-        # (Ya no es necesario el parche 'inf' porque el entrenamiento fue corregido)
+        # (El parche 'inf' ya no es necesario, el entrenamiento CORREGIDO lo arregló)
         yhat_tmo = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
         yhat_tmo = max(0.0, yhat_tmo) 
         # --- FIN MODIFICACIÓN ---
