@@ -117,4 +117,3 @@ if __name__ == "__main__":
     ap.add_argument("--horizonte", type=int, default=120)
     args = ap.parse_args()
     main(args.horizonte)
-
