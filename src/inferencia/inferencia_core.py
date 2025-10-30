@@ -1,9 +1,10 @@
 # =========================================================================
-# src/inferencia/inferencia_core.py (¡Actualizado para v10.2!)
+# src/inferencia/inferencia_core.py (¡Actualizado para v10.3 - Robusto!)
 # - AJUSTE: Nombres de columnas (TARGET_CALLS, TARGET_TMO)
 # - AJUSTE: Eliminados CONTEXT_FEATURES (v8)
 # - AJUSTE: Añadidos features de Volatilidad (v10.2) en el Paso 2
-# - SIN CAMBIOS: La lógica del Paso 1 (Planner) sigue intacta.
+# - FIX (v10.3): Añadido parche de robustez para limpiar np.inf y np.nan
+#                antes de llamar a sc_tmo.transform()
 # =========================================================================
 import os
 import glob
@@ -70,31 +71,26 @@ def _resolve_tmo_artifacts():
 
 _paths = _resolve_tmo_artifacts()
 
-# ---------- Planner (dejamos rutas por defecto) ----------
+# ---------- Planner (Sin cambios) ----------
 PLANNER_MODEL = "models/modelo_planner.keras"
 PLANNER_SCALER = "models/scaler_planner.pkl"
 PLANNER_COLS   = "models/training_columns_planner.json"
 
-# ---------- TMO (usamos lo que encuentre el release) ----------
+# ---------- TMO (Sin cambios) ----------
 TMO_MODEL    = _paths.get("keras")    or "models/modelo_tmo.keras"
 TMO_SCALER   = _paths.get("scaler")   or "models/scaler_tmo.pkl"
 TMO_COLS     = _paths.get("cols")     or "models/training_columns_tmo.json"
-# (Lógica residual eliminada)
 
-# ---------- Negocio ----------
-# <-- AJUSTE v10.2: Alineado con los nombres de tu 'Hosting ia.xlsx'
+# ---------- Negocio (Ajustado a v10.2) ----------
 TARGET_CALLS = "recibidos"
 TARGET_TMO   = "tmo (segundos)"
-# --- FIN AJUSTE ---
-
 HIST_WINDOW_DAYS = 90
 ENABLE_OUTLIER_CAP = True
 K_WEEKDAY = 6.0
 K_WEEKEND = 7.0
 
-# <-- AJUSTE v10.2: Eliminados features de contexto
+# (Eliminados features de contexto v8)
 CONTEXT_FEATURES = []
-# --- FIN AJUSTE ---
 
 
 # ---------- Utils feriados / outliers (Sin cambios) ----------
@@ -266,9 +262,9 @@ def _is_holiday(ts, holidays_set: set) -> int:
 def forecast_120d(df_hist_joined: pd.DataFrame, 
                   horizon_days: int = 120, holidays_set: set | None = None):
     """
-    - Estrategia: Directa (v10.2) para TMO, igual que Planner.
+    - Estrategia: Directa (v10.3) para TMO, igual que Planner.
     - Volumen iterativo (con planner).
-    - TMO iterativo (con modelo directo v10.2).
+    - TMO iterativo (con modelo directo v10.3).
     - AMBOS modelos reciben "pistas" del otro (Llamadas <-> TMO).
     """
     # Artefactos
@@ -281,22 +277,26 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     cols_tmo = _load_cols(TMO_COLS)
 
     # Base histórica única
-    # Asumimos que ensure_ts maneja la carga de df_hist_joined
-    df = ensure_ts(df_hist_joined)
+    # Asumimos que ensure_ts fue llamado desde main.py
+    # Aquí solo aseguramos el índice
+    df = df_hist_joined.copy() 
 
     # --- GUARD: asegurar que el índice es DatetimeIndex TZ-aware ---
     if not isinstance(df.index, pd.DatetimeIndex):
-        df.index = pd.to_datetime(df.index, errors="coerce", utc=True)
-        df.index = df.index.tz_convert(TIMEZONE)
+        raise ValueError("df_hist_joined debe tener un DatetimeIndex (ensure_ts falló en main.py)")
     elif df.index.tz is None:
         df.index = df.index.tz_localize(TIMEZONE)
     else:
         df.index = df.index.tz_convert(TIMEZONE)
     # ---------------------------------------------------------------
 
-    # <-- AJUSTE v10.2: TARGET_CALLS ahora es "recibidos"
+    # (main.py ahora se encarga de renombrar a 'recibidos')
     if TARGET_CALLS not in df.columns:
-        raise ValueError(f"Falta columna '{TARGET_CALLS}' en historical_data.csv")
+        raise ValueError(f"Falta columna '{TARGET_CALLS}' en historical_data.csv (main.py falló en renombrar)")
+    # (main.py ahora se encarga de renombrar a 'tmo (segundos)')
+    if TARGET_TMO not in df.columns:
+        raise ValueError(f"Falta columna '{TARGET_TMO}' en historical_data.csv (main.py falló en renombrar)")
+        
     if "feriados" not in df.columns:
         df["feriados"] = 0
     if "es_dia_de_pago" not in df.columns:
@@ -304,11 +304,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     else:
         df["es_dia_de_pago"] = 0 # Forzado a 0
 
-    # (Lógica residual eliminada)
-
-    # <-- AJUSTE v10.2: CONTEXT_FEATURES ahora está vacía
+    # (CONTEXT_FEATURES está vacío, bucles de abajo no hacen nada)
     static_context_features = {}
-    for c in CONTEXT_FEATURES: # Este bucle ahora no hará nada, lo cual es correcto
+    for c in CONTEXT_FEATURES: 
         if c not in df.columns:
             df[c] = np.nan
         else:
@@ -331,7 +329,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     dfp[TARGET_TMO] = pd.to_numeric(dfp[TARGET_TMO], errors="coerce").ffill().fillna(0.0)
     
     static_context_vals = {}
-    for c in CONTEXT_FEATURES: # Este bucle tampoco hará nada
+    for c in CONTEXT_FEATURES: 
         if c in dfp.columns:
             dfp[c] = pd.to_numeric(dfp[c], errors="coerce").ffill()
             last_val = dfp[c].iloc[-1]
@@ -339,7 +337,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         else:
             static_context_vals[c] = 0.0
     
-    # Imprimirá un diccionario vacío, lo cual es correcto
     print(f"INFO: Usando valores de contexto estáticos: {static_context_vals}")
 
     # ===== Horizonte futuro =====
@@ -369,6 +366,8 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
             tmp_planner.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
         if "es_dia_de_pago" in tmp_planner.columns:
             tmp_planner.loc[ts, "es_dia_de_pago"] = 0
+            
+        # (Asumimos que add_lags_mas es de .features y está correcto)
         tmp_planner = add_lags_mas(tmp_planner, TARGET_CALLS) 
         if TARGET_TMO in tmp_planner.columns:
             for lag in [24, 48, 72, 168]:
@@ -376,12 +375,17 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
             for window in [24, 72, 168]:
                 tmp_planner[f'tmo_ma_{window}'] = tmp_planner[TARGET_TMO].rolling(window, min_periods=1).mean()
         tmp_planner = add_time_parts(tmp_planner)
+        
         X_pl = dummies_and_reindex(tmp_planner.tail(1), cols_pl)
+        # (Parche v10.3 para el Planner también, por si acaso)
+        X_pl.replace([np.inf, -np.inf], np.nan, inplace=True)
+        X_pl.fillna(0, inplace=True)
+        
         yhat_calls = float(m_pl.predict(sc_pl.transform(X_pl), verbose=0).flatten()[0])
         yhat_calls = max(0.0, yhat_calls)
 
 
-        # --- 2. PREDECIR TMO (DIRECTO v10.2) ---
+        # --- 2. PREDECIR TMO (DIRECTO v10.3) ---
         
         # 2b. Crear Dataframe temporal para TMO
         cols_tmo_model = [
@@ -397,14 +401,12 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         tmp_tmo[TARGET_TMO] = tmp_tmo[TARGET_TMO].ffill()
         tmp_tmo[TARGET_CALLS] = tmp_tmo[TARGET_CALLS].ffill()
         
-        # Añadir features de contexto (estará vacío, correcto)
         for c, val in static_context_vals.items():
             tmp_tmo[c] = val 
 
         tmp_tmo.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
-        tmp_tmo.loc[ts, "es_dia_de_pago"] = 0 # Forzado a 0
+        tmp_tmo.loc[ts, "es_dia_de_pago"] = 0 
 
-        # <-- AJUSTE v10.2: Generar los mismos features que el entrenamiento
         # 2c. Crear Pistas de Lags/MAs (¡Debe coincidir con el Entrenamiento v10.2!)
 
         # Pista 1: TMO Total (Lags "rápidos" + Volatilidad)
@@ -429,29 +431,35 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         # --- FIN AJUSTE v10.2 ---
 
         # Pista 2: Volumen (Lags "rápidos" - Alineado con "recibidos")
-        s_contest = tmp_tmo[TARGET_CALLS] # Usa "recibidos" (TARGET_CALLS)
+        s_contest = tmp_tmo[TARGET_CALLS] 
         for lag in [1, 24, 48, 168]:
              tmp_tmo[f"lag_contest_{lag}"] = s_contest.shift(lag)
         s_contest_s1 = s_contest.shift(1)
         for w in [6, 24, 72]:
             tmp_tmo[f"ma_contest_{w}"] = s_contest_s1.rolling(w, min_periods=1).mean()
-        # --- FIN AJUSTES v10.2 ---
 
         # 2d. Crear Pistas de Tiempo
         tmp_tmo = add_time_parts(tmp_tmo)
         
         # 2e. Predecir TMO (Directo)
         X_tmo = dummies_and_reindex(tmp_tmo.tail(1), cols_tmo)
+        
+        # --- INICIO PARCHE v10.3: Sanear Infs y NaNs ---
+        # Resuelve el ValueError de Infinitos y futuros NaNs
+        X_tmo.replace([np.inf, -np.inf], np.nan, inplace=True)
+        X_tmo.fillna(0, inplace=True)
+        # --- FIN PARCHE v10.3 ---
+
         yhat_tmo = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
         yhat_tmo = max(0.0, yhat_tmo) # TMO no puede ser negativo
 
 
         # --- 3. ACTUALIZACIÓN ITERATIVA ---
         dfp.loc[ts, TARGET_CALLS] = yhat_calls
-        dfp.loc[ts, TARGET_TMO] = yhat_tmo # <-- Guardar predicción directa
+        dfp.loc[ts, TARGET_TMO] = yhat_tmo 
         
         dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
-        dfp.loc[ts, "es_dia_de_pago"] = 0 # Forzado a 0
+        dfp.loc[ts, "es_dia_de_pago"] = 0 
         
         for c, val in static_context_vals.items():
             dfp.loc[ts, c] = val
