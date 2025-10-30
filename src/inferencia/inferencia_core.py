@@ -1,4 +1,4 @@
-# src/inferencia/inferencia_core.py (¡NUEVA LÓGICA DIRECTA!)
+# src/inferencia/inferencia_core.py (¡NUEVA LÓGICA DIRECTA v8-AFINADA!)
 import os
 import glob
 import pathlib
@@ -88,11 +88,9 @@ ENABLE_OUTLIER_CAP = True
 K_WEEKDAY = 6.0
 K_WEEKEND = 7.0
 
-# (Columnas de contexto del entrenamiento v8)
-CONTEXT_FEATURES = [
-    "proporcion_comercial", "proporcion_tecnica",
-    "tmo_comercial", "tmo_tecnico"
-]
+# --- INICIO MODIFICACIÓN: Columnas de Contexto ELIMINADAS ---
+# CONTEXT_FEATURES = [ ... ] (Eliminado)
+# --- FIN MODIFICACIÓN ---
 
 # ---------- Utils feriados / outliers (Sin cambios) ----------
 def _load_cols(path: str):
@@ -257,9 +255,7 @@ def _is_holiday(ts, holidays_set: set) -> int:
     return 1 if d in holidays_set else 0
 
 # --- INICIO MODIFICACIÓN: Funciones de Baseline/Residual ELIMINADAS ---
-# def _try_build_tmo_artifacts_from_history(df_hist: pd.DataFrame): ...
-# def _load_tmo_residual_artifacts_or_fallback(df_hist: pd.DataFrame): ...
-# def _add_tmo_resid_features(df_in: pd.DataFrame) -> pd.DataFrame: ...
+# (Ya no son necesarias para la lógica Directa)
 # --- FIN MODIFICACIÓN ---
 
 
@@ -267,9 +263,9 @@ def _is_holiday(ts, holidays_set: set) -> int:
 def forecast_120d(df_hist_joined: pd.DataFrame, 
                   horizon_days: int = 120, holidays_set: set | None = None):
     """
-    - Estrategia: Directa (v8) para TMO, igual que Planner.
+    - Estrategia: Directa (v8-Afinado) para TMO, igual que Planner.
     - Volumen iterativo (recibidos_nacional) con planner.
-    - TMO iterativo (tmo_general) con modelo directo v8.
+    - TMO iterativo (tmo_general) con modelo directo v8-Afinado.
     - AMBOS modelos reciben "pistas" del otro (Llamadas <-> TMO).
     """
     # Artefactos
@@ -303,22 +299,13 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     else:
         df["es_dia_de_pago"] = 0 # Forzado a 0
 
-    # --- INICIO MODIFICACIÓN: Eliminar lógica de Baseline/Residual ---
+    # --- INICIO MODIFICACIÓN: Eliminar lógica de Contexto/Residual ---
     # (Ya no se cargan artefactos residuales)
-    # (Ya no se calcula 'tmo_resid' histórico)
+    # (Ya no se cargan columnas de contexto)
     # --- FIN MODIFICACIÓN ---
 
-    # Columnas de Contexto (Pistas de Tipo de Llamada)
-    static_context_features = {}
-    for c in CONTEXT_FEATURES:
-        if c not in df.columns:
-            df[c] = np.nan
-        else:
-            last_val = df[c].ffill().iloc[-1]
-            static_context_features[c] = float(last_val) if pd.notna(last_val) else 0.0
-
     # Ventana reciente
-    keep_cols = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"] + CONTEXT_FEATURES
+    keep_cols = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"]
     keep_cols_exist = [c for c in keep_cols if c in df.columns]
     
     idx = df.index
@@ -332,16 +319,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     dfp[TARGET_CALLS] = pd.to_numeric(dfp[TARGET_CALLS], errors="coerce").ffill().fillna(0.0)
     dfp[TARGET_TMO] = pd.to_numeric(dfp[TARGET_TMO], errors="coerce").ffill().fillna(0.0)
     
-    static_context_vals = {}
-    for c in CONTEXT_FEATURES:
-        if c in dfp.columns:
-            dfp[c] = pd.to_numeric(dfp[c], errors="coerce").ffill()
-            last_val = dfp[c].iloc[-1]
-            static_context_vals[c] = float(last_val) if pd.notna(last_val) else 0.0
-        else:
-             static_context_vals[c] = 0.0
-    print(f"INFO: Usando valores de contexto estáticos: {static_context_vals}")
-
     # ===== Horizonte futuro =====
     future_ts = pd.date_range(
         last_ts + pd.Timedelta(hours=1),
@@ -351,7 +328,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     )
 
     # ===== Bucle iterativo: Volumen + TMO (ambos Directos) =====
-    print("Iniciando predicción iterativa (Llamadas Directas + TMO Directo)...")
+    print("Iniciando predicción iterativa (Llamadas Directas + TMO Directo-Afinado)...")
     for ts in future_ts:
         
         # --- 1. PREDECIR LLAMADAS (PLANNER) ---
@@ -379,9 +356,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         yhat_calls = max(0.0, yhat_calls)
 
 
-        # --- 2. PREDECIR TMO (DIRECTO v8) ---
+        # --- 2. PREDECIR TMO (DIRECTO v8-AFINADO) ---
         
-        # --- INICIO MODIFICACIÓN: Lógica de predicción TMO (Directa) ---
+        # --- INICIO MODIFICACIÓN: Lógica de predicción TMO (Directa-Afinada) ---
         
         # 2b. Crear Dataframe temporal para TMO
         cols_tmo_model = [
@@ -398,39 +375,46 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         tmp_tmo[TARGET_TMO] = tmp_tmo[TARGET_TMO].ffill()
         tmp_tmo[TARGET_CALLS] = tmp_tmo[TARGET_CALLS].ffill()
         
-        # Añadir features de contexto (estáticos)
-        for c, val in static_context_vals.items():
-            tmp_tmo[c] = val 
+        # (Columnas de contexto eliminadas)
 
         # Forzar feriados/dia_pago en la fila actual (ts)
         tmp_tmo.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
         tmp_tmo.loc[ts, "es_dia_de_pago"] = 0 # Forzado a 0
 
-        # 2c. Crear Pistas de Lags/MAs (¡Debe coincidir con el Entrenamiento v8!)
+        # 2c. Crear Pistas de Lags/MAs/STD (¡Debe coincidir con el Entrenamiento v8-Afinado!)
 
-        # Pista 1: TMO Total (Lags "rápidos")
+        # Pista 1: TMO Total (Lags "rápidos" + STD)
         s_tmo_total = tmp_tmo[TARGET_TMO]
         for lag in [1, 2, 3, 6, 12, 24, 168]:
             tmp_tmo[f"lag_tmo_total_{lag}"] = s_tmo_total.shift(lag)
         s_tmo_total_s1 = s_tmo_total.shift(1)
         for w in [6, 12, 24, 72]:
             tmp_tmo[f"ma_tmo_total_{w}"] = s_tmo_total_s1.rolling(w, min_periods=1).mean()
+            tmp_tmo[f"std_tmo_total_{w}"] = s_tmo_total_s1.rolling(w, min_periods=2).std()
 
-        # Pista 2: Volumen (Lags "rápidos")
+        # Pista 2: Volumen (Lags + STD)
         s_contest = tmp_tmo[TARGET_CALLS] # Usamos 'recibidos' como proxy
         for lag in [1, 24, 48, 168]:
              tmp_tmo[f"lag_contest_{lag}"] = s_contest.shift(lag)
         s_contest_s1 = s_contest.shift(1)
         for w in [6, 24, 72]:
             tmp_tmo[f"ma_contest_{w}"] = s_contest_s1.rolling(w, min_periods=1).mean()
+            tmp_tmo[f"std_contest_{w}"] = s_contest_s1.rolling(w, min_periods=2).std()
 
         # 2d. Crear Pistas de Tiempo
         tmp_tmo = add_time_parts(tmp_tmo)
         
         # 2e. Predecir TMO (Directo)
         X_tmo = dummies_and_reindex(tmp_tmo.tail(1), cols_tmo)
+        
+        # --- INICIO MODIFICACIÓN: Rellenar NaNs antes de escalar ---
+        # Los 'std' pueden generar NaNs en las primeras horas del bucle
+        X_tmo = X_tmo.fillna(0.0) 
+        # --- FIN MODIFICACIÓN ---
+
+        # (Ya no es necesario el parche 'inf' porque el entrenamiento fue corregido)
         yhat_tmo = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
-        yhat_tmo = max(0.0, yhat_tmo) # TMO no puede ser negativo
+        yhat_tmo = max(0.0, yhat_tmo) 
         # --- FIN MODIFICACIÓN ---
 
 
@@ -438,23 +422,17 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         dfp.loc[ts, TARGET_CALLS] = yhat_calls
         dfp.loc[ts, TARGET_TMO] = yhat_tmo # <-- Guardar predicción directa
         
-        # (Ya no hay 'tmo_baseline' ni 'tmo_resid')
-        
         dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
         dfp.loc[ts, "es_dia_de_pago"] = 0 # Forzado a 0
         
-        for c, val in static_context_vals.items():
-            dfp.loc[ts, c] = val
-
+        # (Propagación de contexto eliminada)
 
     print("Predicción iterativa completada.")
 
     # ===== Salida horaria =====
     df_hourly = pd.DataFrame(index=future_ts)
     df_hourly["calls"] = np.round(dfp.loc[future_ts, TARGET_CALLS]).astype(int)
-    # --- INICIO MODIFICACIÓN: Leer TMO directo de dfp ---
     df_hourly["tmo_s"] = np.round(dfp.loc[future_ts, TARGET_TMO]).astype(int)
-    # --- FIN MODIFICACIÓN ---
 
     # ===== Ajustes feriados / post-feriados =====
     if holidays_set and len(holidays_set) > 0:
