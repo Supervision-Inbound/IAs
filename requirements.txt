@@ -1,9 +1,7 @@
 pandas
-numpy
-tensorflow
 joblib
 requests
-requests-cache
-python-dateutil
-tqdm
-retry-requests
+scikit-learn==1.2.2
+tensorflow==2.12.0
+keras==2.12.0
+numpy==1.23.5
