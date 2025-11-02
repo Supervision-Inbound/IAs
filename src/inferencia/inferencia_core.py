@@ -1,4 +1,4 @@
-# src/inferencia/inferencia_core.py (¡NUEVA LÓGICA DIRECTA!)
+# src/inferencia/inferencia_core.py (¡LÓGICA TMO SIMPLIFICADA!)
 import os
 import glob
 import pathlib
@@ -88,11 +88,8 @@ ENABLE_OUTLIER_CAP = True
 K_WEEKDAY = 6.0
 K_WEEKEND = 7.0
 
-# (Columnas de contexto del entrenamiento v8)
-CONTEXT_FEATURES = [
-    "proporcion_comercial", "proporcion_tecnica",
-    "tmo_comercial", "tmo_tecnico"
-]
+# --- MODIFICACIÓN: ELIMINADAS COLUMNAS DE CONTEXTO ---
+# (CONTEXT_FEATURES = [...] ha sido eliminado)
 
 # ---------- Utils feriados / outliers (Sin cambios) ----------
 def _load_cols(path: str):
@@ -257,9 +254,7 @@ def _is_holiday(ts, holidays_set: set) -> int:
     return 1 if d in holidays_set else 0
 
 # --- INICIO MODIFICACIÓN: Funciones de Baseline/Residual ELIMINADAS ---
-# def _try_build_tmo_artifacts_from_history(df_hist: pd.DataFrame): ...
-# def _load_tmo_residual_artifacts_or_fallback(df_hist: pd.DataFrame): ...
-# def _add_tmo_resid_features(df_in: pd.DataFrame) -> pd.DataFrame: ...
+# (Limpio)
 # --- FIN MODIFICACIÓN ---
 
 
@@ -304,21 +299,15 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         df["es_dia_de_pago"] = 0 # Forzado a 0
 
     # --- INICIO MODIFICACIÓN: Eliminar lógica de Baseline/Residual ---
-    # (Ya no se cargan artefactos residuales)
-    # (Ya no se calcula 'tmo_resid' histórico)
+    # (Limpio)
     # --- FIN MODIFICACIÓN ---
 
-    # Columnas de Contexto (Pistas de Tipo de Llamada)
-    static_context_features = {}
-    for c in CONTEXT_FEATURES:
-        if c not in df.columns:
-            df[c] = np.nan
-        else:
-            last_val = df[c].ffill().iloc[-1]
-            static_context_features[c] = float(last_val) if pd.notna(last_val) else 0.0
+    # --- MODIFICACIÓN: ELIMINADA LÓGICA DE CONTEXTO ---
+    # (static_context_features = {} ... ha sido eliminado)
 
     # Ventana reciente
-    keep_cols = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"] + CONTEXT_FEATURES
+    # --- MODIFICACIÓN: ELIMINADAS COLUMNAS DE CONTEXTO DE keep_cols ---
+    keep_cols = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"]
     keep_cols_exist = [c for c in keep_cols if c in df.columns]
     
     idx = df.index
@@ -332,16 +321,10 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     dfp[TARGET_CALLS] = pd.to_numeric(dfp[TARGET_CALLS], errors="coerce").ffill().fillna(0.0)
     dfp[TARGET_TMO] = pd.to_numeric(dfp[TARGET_TMO], errors="coerce").ffill().fillna(0.0)
     
-    static_context_vals = {}
-    for c in CONTEXT_FEATURES:
-        if c in dfp.columns:
-            dfp[c] = pd.to_numeric(dfp[c], errors="coerce").ffill()
-            last_val = dfp[c].iloc[-1]
-            static_context_vals[c] = float(last_val) if pd.notna(last_val) else 0.0
-        else:
-             static_context_vals[c] = 0.0
-    print(f"INFO: Usando valores de contexto estáticos: {static_context_vals}")
-
+    # --- MODIFICACIÓN: ELIMINADA LÓGICA DE CONTEXTO ---
+    # (static_context_vals = {} ... ha sido eliminado)
+    # (print(f"INFO: Usando valores de contexto estáticos...") ha sido eliminado)
+    
     # ===== Horizonte futuro =====
     future_ts = pd.date_range(
         last_ts + pd.Timedelta(hours=1),
@@ -398,9 +381,8 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         tmp_tmo[TARGET_TMO] = tmp_tmo[TARGET_TMO].ffill()
         tmp_tmo[TARGET_CALLS] = tmp_tmo[TARGET_CALLS].ffill()
         
-        # Añadir features de contexto (estáticos)
-        for c, val in static_context_vals.items():
-            tmp_tmo[c] = val 
+        # --- MODIFICACIÓN: ELIMINADO BLOQUE DE CONTEXTO ---
+        # (for c, val in static_context_vals.items(): ... ha sido eliminado)
 
         # Forzar feriados/dia_pago en la fila actual (ts)
         tmp_tmo.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
@@ -443,8 +425,8 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
         dfp.loc[ts, "es_dia_de_pago"] = 0 # Forzado a 0
         
-        for c, val in static_context_vals.items():
-            dfp.loc[ts, c] = val
+        # --- MODIFICACIÓN: ELIMINADO BLOQUE DE CONTEXTO ---
+        # (for c, val in static_context_vals.items(): ... ha sido eliminado)
 
 
     print("Predicción iterativa completada.")
