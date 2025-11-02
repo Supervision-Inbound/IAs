@@ -1,4 +1,4 @@
-# src/inferencia/inferencia_core.py (¡LÓGICA TMO SIMPLIFICADA!)
+# src/inferencia/inferencia_core.py (¡LÓGICA TMO 100% ALINEADA!)
 import os
 import glob
 import pathlib
@@ -56,13 +56,11 @@ def _find_one(patterns, search_dirs=None):
     return None
 
 def _resolve_tmo_artifacts():
-    # --- INICIO MODIFICACIÓN: Ya no buscamos baseline/meta ---
     return {
         "keras": _find_one(["modelo_tmo.keras", "tmo*.keras", "*_tmo*.keras"]),
         "scaler": _find_one(["scaler_tmo.pkl", "*tmo*scaler*.pkl", "*scaler*_tmo*.pkl"]),
         "cols": _find_one(["training_columns_tmo.json", "*tmo*columns*.json", "*training*columns*to*.json"]),
     }
-    # --- FIN MODIFICACIÓN ---
 
 _paths = _resolve_tmo_artifacts()
 
@@ -75,10 +73,6 @@ PLANNER_COLS   = "models/training_columns_planner.json"
 TMO_MODEL    = _paths.get("keras")    or "models/modelo_tmo.keras"
 TMO_SCALER   = _paths.get("scaler")   or "models/scaler_tmo.pkl"
 TMO_COLS     = _paths.get("cols")     or "models/training_columns_tmo.json"
-# --- INICIO MODIFICACIÓN: Baseline/Meta eliminados ---
-# TMO_BASELINE = ... (eliminado)
-# TMO_META     = ... (eliminado)
-# --- FIN MODIFICACIÓN ---
 
 # ---------- Negocio ----------
 TARGET_CALLS = "recibidos_nacional"
@@ -88,8 +82,7 @@ ENABLE_OUTLIER_CAP = True
 K_WEEKDAY = 6.0
 K_WEEKEND = 7.0
 
-# --- MODIFICACIÓN: ELIMINADAS COLUMNAS DE CONTEXTO ---
-# (CONTEXT_FEATURES = [...] ha sido eliminado)
+# (Columnas de contexto eliminadas)
 
 # ---------- Utils feriados / outliers (Sin cambios) ----------
 def _load_cols(path: str):
@@ -253,10 +246,7 @@ def _is_holiday(ts, holidays_set: set) -> int:
         d = ts.date()
     return 1 if d in holidays_set else 0
 
-# --- INICIO MODIFICACIÓN: Funciones de Baseline/Residual ELIMINADAS ---
-# (Limpio)
-# --- FIN MODIFICACIÓN ---
-
+# (Lógica de Baseline/Residual eliminada)
 
 # ---------- Núcleo ----------
 def forecast_120d(df_hist_joined: pd.DataFrame, 
@@ -298,15 +288,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     else:
         df["es_dia_de_pago"] = 0 # Forzado a 0
 
-    # --- INICIO MODIFICACIÓN: Eliminar lógica de Baseline/Residual ---
-    # (Limpio)
-    # --- FIN MODIFICACIÓN ---
-
-    # --- MODIFICACIÓN: ELIMINADA LÓGICA DE CONTEXTO ---
-    # (static_context_features = {} ... ha sido eliminado)
+    # (Lógica de contexto eliminada)
 
     # Ventana reciente
-    # --- MODIFICACIÓN: ELIMINADAS COLUMNAS DE CONTEXTO DE keep_cols ---
     keep_cols = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"]
     keep_cols_exist = [c for c in keep_cols if c in df.columns]
     
@@ -321,9 +305,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     dfp[TARGET_CALLS] = pd.to_numeric(dfp[TARGET_CALLS], errors="coerce").ffill().fillna(0.0)
     dfp[TARGET_TMO] = pd.to_numeric(dfp[TARGET_TMO], errors="coerce").ffill().fillna(0.0)
     
-    # --- MODIFICACIÓN: ELIMINADA LÓGICA DE CONTEXTO ---
-    # (static_context_vals = {} ... ha sido eliminado)
-    # (print(f"INFO: Usando valores de contexto estáticos...") ha sido eliminado)
+    # (Lógica de contexto eliminada)
     
     # ===== Horizonte futuro =====
     future_ts = pd.date_range(
@@ -364,8 +346,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
 
         # --- 2. PREDECIR TMO (DIRECTO v8) ---
         
-        # --- INICIO MODIFICACIÓN: Lógica de predicción TMO (Directa) ---
-        
         # 2b. Crear Dataframe temporal para TMO
         cols_tmo_model = [
             TARGET_TMO,       # Pista 1 (TMO Total)
@@ -380,9 +360,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         tmp_tmo = pd.concat([tmp_tmo, pd.DataFrame(index=[ts])])
         tmp_tmo[TARGET_TMO] = tmp_tmo[TARGET_TMO].ffill()
         tmp_tmo[TARGET_CALLS] = tmp_tmo[TARGET_CALLS].ffill()
-        
-        # --- MODIFICACIÓN: ELIMINADO BLOQUE DE CONTEXTO ---
-        # (for c, val in static_context_vals.items(): ... ha sido eliminado)
 
         # Forzar feriados/dia_pago en la fila actual (ts)
         tmp_tmo.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
@@ -397,6 +374,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         s_tmo_total_s1 = s_tmo_total.shift(1)
         for w in [6, 12, 24, 72]:
             tmp_tmo[f"ma_tmo_total_{w}"] = s_tmo_total_s1.rolling(w, min_periods=1).mean()
+            # --- INICIO MODIFICACIÓN ---
+            tmp_tmo[f"std_tmo_total_{w}"] = s_tmo_total_s1.rolling(w, min_periods=2).std()
+            # --- FIN MODIFICACIÓN ---
 
         # Pista 2: Volumen (Lags "rápidos")
         s_contest = tmp_tmo[TARGET_CALLS] # Usamos 'recibidos' como proxy
@@ -405,6 +385,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         s_contest_s1 = s_contest.shift(1)
         for w in [6, 24, 72]:
             tmp_tmo[f"ma_contest_{w}"] = s_contest_s1.rolling(w, min_periods=1).mean()
+            # --- INICIO MODIFICACIÓN ---
+            tmp_tmo[f"std_contest_{w}"] = s_contest_s1.rolling(w, min_periods=2).std()
+            # --- FIN MODIFICACIÓN ---
 
         # 2d. Crear Pistas de Tiempo
         tmp_tmo = add_time_parts(tmp_tmo)
@@ -413,20 +396,14 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         X_tmo = dummies_and_reindex(tmp_tmo.tail(1), cols_tmo)
         yhat_tmo = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
         yhat_tmo = max(0.0, yhat_tmo) # TMO no puede ser negativo
-        # --- FIN MODIFICACIÓN ---
 
 
         # --- 3. ACTUALIZACIÓN ITERATIVA ---
         dfp.loc[ts, TARGET_CALLS] = yhat_calls
         dfp.loc[ts, TARGET_TMO] = yhat_tmo # <-- Guardar predicción directa
         
-        # (Ya no hay 'tmo_baseline' ni 'tmo_resid')
-        
         dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
         dfp.loc[ts, "es_dia_de_pago"] = 0 # Forzado a 0
-        
-        # --- MODIFICACIÓN: ELIMINADO BLOQUE DE CONTEXTO ---
-        # (for c, val in static_context_vals.items(): ... ha sido eliminado)
 
 
     print("Predicción iterativa completada.")
@@ -434,9 +411,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     # ===== Salida horaria =====
     df_hourly = pd.DataFrame(index=future_ts)
     df_hourly["calls"] = np.round(dfp.loc[future_ts, TARGET_CALLS]).astype(int)
-    # --- INICIO MODIFICACIÓN: Leer TMO directo de dfp ---
     df_hourly["tmo_s"] = np.round(dfp.loc[future_ts, TARGET_TMO]).astype(int)
-    # --- FIN MODIFICACIÓN ---
 
     # ===== Ajustes feriados / post-feriados =====
     if holidays_set and len(holidays_set) > 0:
