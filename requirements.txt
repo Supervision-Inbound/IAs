@@ -1,7 +1,6 @@
 pandas
+numpy
+tensorflow
+scikit-learn
 joblib
 requests
-scikit-learn==1.2.2
-tensorflow==2.12.0
-keras==2.12.0
-numpy==1.23.5
