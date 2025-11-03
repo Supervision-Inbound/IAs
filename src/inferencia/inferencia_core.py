@@ -16,7 +16,7 @@ PUBLIC_DIR = "public"
 
 # --- Constantes LSTM deben coincidir con el entrenamiento ---
 LOOKBACK_STEPS = 168 # 7 días de historia
-HORIZON_STEPS = 24    # 1 día de predicción
+HORIZON_STEPS = 24 # 1 día de predicción
 
 # --- Rutas de Artefactos ---
 # (Asumiendo que las funciones _candidate_dirs, _find_one, _resolve_tmo_artifacts se mantienen)
