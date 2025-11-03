@@ -1,4 +1,4 @@
-# src/inferencia/inferencia_core.py (¡LÓGICA TMO v8 CORREGIDA - SIN CONTEXTO!)
+# src/inferencia/inferencia_core.py (¡LÓGICA TMO v8 CORREGIDA v3 - SIN CONTEXTO!)
 import os
 import glob
 import pathlib
@@ -81,7 +81,7 @@ ENABLE_OUTLIER_CAP = True
 K_WEEKDAY = 6.0
 K_WEEKEND = 7.0
 
-# <-- MODIFICADO: Lista de contexto vacía
+# --- MODIFICADO: Lista de contexto vacía ---
 CONTEXT_FEATURES = []
 
 # --- Utils feriados / outliers (Sin cambios) ---
@@ -279,11 +279,10 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     else:
         df["es_dia_de_pago"] = 0
 
-    # <-- MODIFICADO: Bloque de medianas de contexto eliminado
+    # (Contexto eliminado)
     # print("INFO: Omitiendo features de contexto TMO.")
 
     # Ventana reciente
-    # <-- MODIFICADO: 'CONTEXT_FEATURES' está vacía, así que esto no añade nada
     keep_cols = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"] + CONTEXT_FEATURES
     keep_cols_exist = [c for c in keep_cols if c in df.columns]
     
@@ -298,7 +297,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     dfp[TARGET_CALLS] = pd.to_numeric(dfp[TARGET_CALLS], errors="coerce").ffill().fillna(0.0)
     dfp[TARGET_TMO] = pd.to_numeric(dfp[TARGET_TMO], errors="coerce").ffill().fillna(0.0)
     
-    # <-- MODIFICADO: Bloque de ffill de contexto eliminado
+    # (ffill de contexto eliminado)
             
     # ===== Horizonte futuro =====
     future_ts = pd.date_range(
@@ -345,7 +344,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
             TARGET_CALLS,     # Pista 2 (Volumen)
             "feriados", 
             "es_dia_de_pago"
-        ] # <-- MODIFICADO: 'CONTEXT_FEATURES' eliminado
+        ] # (Contexto eliminado)
         cols_tmo_model_exist = [c for c in cols_tmo_model if c in dfp.columns]
         tmp_tmo = dfp[cols_tmo_model_exist].copy()
         
@@ -356,7 +355,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         # 2c. Crear Pistas de Tiempo
         tmp_tmo = add_time_parts(tmp_tmo)
         
-        # <-- MODIFICADO: Bloque de asignación de contexto (medianas) eliminado
+        # (Asignación de contexto eliminada)
 
         # Forzar feriados/dia_pago en la fila actual (ts)
         tmp_tmo.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
@@ -385,7 +384,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         # 2f. Predecir TMO (Directo)
         X_tmo = dummies_and_reindex(tmp_tmo.tail(1), cols_tmo)
         
-        # <-- MODIFICADO: Saneamiento robusto para 'inf' y 'nan'
+        # Saneamiento robusto para 'inf' y 'nan'
         X_tmo = X_tmo.replace([np.inf, -np.inf], np.nan).fillna(0.0)
         
         yhat_tmo = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
@@ -398,14 +397,20 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
         dfp.loc[ts, "es_dia_de_pago"] = 0
         
-        # <-- MODIFICADO: Bucle de actualización de contexto eliminado
+        # (Actualización de contexto eliminada)
 
     print("Predicción iterativa completada.")
 
-    # ===== Salida horaria (Sin cambios) =====
+    # ===== Salida horaria =====
     df_hourly = pd.DataFrame(index=future_ts)
     df_hourly["calls"] = np.round(dfp.loc[future_ts, TARGET_CALLS]).astype(int)
-    df_hourly["tmo_s"] = np.round(dfp.loc[future_ts, TARGET_TMO]).astype(int)
+    
+    # --- INICIO NUEVA MODIFICACIÓN (v3) ---
+    # Saneamiento de NaNs/infs ANTES de convertir a int
+    tmo_series = dfp.loc[future_ts, TARGET_TMO]
+    tmo_series_clean = tmo_series.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    df_hourly["tmo_s"] = np.round(tmo_series_clean).astype(int)
+    # --- FIN NUEVA MODIFICACIÓN (v3) ---
 
     # ===== Ajustes feriados / post-feriados (Sin cambios) =====
     if holidays_set and len(holidays_set) > 0:
