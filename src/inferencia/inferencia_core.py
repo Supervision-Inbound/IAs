@@ -1,4 +1,4 @@
-# src/inferencia/inferencia_core.py (¡LÓGICA TMO v8 CORREGIDA!)
+# src/inferencia/inferencia_core.py (¡LÓGICA TMO v8 CORREGIDA - SIN CONTEXTO!)
 import os
 import glob
 import pathlib
@@ -15,8 +15,7 @@ from .utils_io import write_daily_json, write_hourly_json
 TIMEZONE = "America/Santiago"
 PUBLIC_DIR = "public"
 
-# ---------- Resolver flexible: detecta artefactos en release ----------
-# (Esta sección no cambia)
+# --- Resolver flexible (Sin cambios) ---
 def _candidate_dirs():
     here = pathlib.Path(".").resolve()
     bases = [
@@ -57,7 +56,6 @@ def _find_one(patterns, search_dirs=None):
     return None
 
 def _resolve_tmo_artifacts():
-    # Estrategia v8 (directa)
     return {
         "keras": _find_one(["modelo_tmo.keras", "tmo*.keras", "*_tmo*.keras"]),
         "scaler": _find_one(["scaler_tmo.pkl", "*tmo*scaler*.pkl", "*scaler*_tmo*.pkl"]),
@@ -66,18 +64,16 @@ def _resolve_tmo_artifacts():
 
 _paths = _resolve_tmo_artifacts()
 
-# ---------- Planner (dejamos rutas por defecto) ----------
+# --- Rutas de Artefactos (Sin cambios) ---
 PLANNER_MODEL = "models/modelo_planner.keras"
 PLANNER_SCALER = "models/scaler_planner.pkl"
 PLANNER_COLS   = "models/training_columns_planner.json"
 
-# ---------- TMO (v8) ----------
 TMO_MODEL    = _paths.get("keras")    or "models/modelo_tmo.keras"
 TMO_SCALER   = _paths.get("scaler")   or "models/scaler_tmo.pkl"
 TMO_COLS     = _paths.get("cols")     or "models/training_columns_tmo.json"
-# (Lógica Baseline/Meta eliminada)
 
-# ---------- Negocio ----------
+# --- Negocio (Sin cambios) ---
 TARGET_CALLS = "recibidos_nacional"
 TARGET_TMO   = "tmo_general"
 HIST_WINDOW_DAYS = 90
@@ -85,13 +81,10 @@ ENABLE_OUTLIER_CAP = True
 K_WEEKDAY = 6.0
 K_WEEKEND = 7.0
 
-# (Columnas de contexto del entrenamiento v8)
-CONTEXT_FEATURES = [
-    "proporcion_comercial", "proporcion_tecnica",
-    "tmo_comercial", "tmo_tecnico"
-]
+# <-- MODIFICADO: Lista de contexto vacía
+CONTEXT_FEATURES = []
 
-# ---------- Utils feriados / outliers (Sin cambios) ----------
+# --- Utils feriados / outliers (Sin cambios) ---
 def _load_cols(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -253,17 +246,10 @@ def _is_holiday(ts, holidays_set: set) -> int:
         d = ts.date()
     return 1 if d in holidays_set else 0
 
-# (Funciones de Baseline/Residual eliminadas)
-
 # ---------- Núcleo ----------
 def forecast_120d(df_hist_joined: pd.DataFrame, 
                   horizon_days: int = 120, holidays_set: set | None = None):
-    """
-    - Estrategia: Directa (v8) para TMO, igual que Planner.
-    - Volumen iterativo (recibidos_nacional) con planner.
-    - TMO iterativo (tmo_general) con modelo directo v8.
-    - AMBOS modelos reciben "pistas" del otro (Llamadas <-> TMO).
-    """
+    
     # Artefactos
     m_pl = tf.keras.models.load_model(PLANNER_MODEL, compile=False)
     sc_pl = joblib.load(PLANNER_SCALER)
@@ -276,7 +262,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     # Base histórica única
     df = ensure_ts(df_hist_joined)
 
-    # --- GUARD: asegurar que el índice es DatetimeIndex TZ-aware ---
     if not isinstance(df.index, pd.DatetimeIndex):
         df.index = pd.to_datetime(df.index, errors="coerce", utc=True)
         df.index = df.index.tz_convert(TIMEZONE)
@@ -284,7 +269,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         df.index = df.index.tz_localize(TIMEZONE)
     else:
         df.index = df.index.tz_convert(TIMEZONE)
-    # ---------------------------------------------------------------
 
     if TARGET_CALLS not in df.columns:
         raise ValueError(f"Falta columna {TARGET_CALLS} en historical_data.csv")
@@ -293,29 +277,13 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     if "es_dia_de_pago" not in df.columns:
         df["es_dia_de_pago"] = 0
     else:
-        df["es_dia_de_pago"] = 0 # Forzado a 0
+        df["es_dia_de_pago"] = 0
 
-    # (Lógica Baseline/Residual eliminada)
-
-    # --- INICIO MODIFICACIÓN: Calcular medianas de contexto ---
-    # En lugar de usar un solo valor estático, usaremos la mediana histórica
-    # para ese (dia_semana, hora) como un proxy mucho más realista.
-    print("INFO: Calculando medianas históricas para features de contexto TMO...")
-    df_hist_with_time = add_time_parts(df.copy())
-    context_feature_medians = {}
-    for c in CONTEXT_FEATURES:
-        if c in df_hist_with_time.columns:
-            # Calcular mediana por (dow, hour) y rellenar NaNs
-            medians = df_hist_with_time.groupby(['dow', 'hour'])[c].median()
-            # Rellenar cualquier (dow, hour) faltante con la media global
-            medians = medians.fillna(df_hist_with_time[c].median())
-            context_feature_medians[c] = medians
-            print(f"  -> Medianas para '{c}' calculadas.")
-        else:
-            print(f"  -> WARN: Feature de contexto '{c}' no encontrado en histórico.")
-    # --- FIN MODIFICACIÓN ---
+    # <-- MODIFICADO: Bloque de medianas de contexto eliminado
+    # print("INFO: Omitiendo features de contexto TMO.")
 
     # Ventana reciente
+    # <-- MODIFICADO: 'CONTEXT_FEATURES' está vacía, así que esto no añade nada
     keep_cols = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"] + CONTEXT_FEATURES
     keep_cols_exist = [c for c in keep_cols if c in df.columns]
     
@@ -324,17 +292,13 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     mask_recent = idx >= (last_ts - pd.Timedelta(days=HIST_WINDOW_DAYS))
     dfp = df.loc[mask_recent, keep_cols_exist].copy()
     if dfp.empty:
-        dfp = df.loc[:, keep_cols_exist].copy() # Usar todo
+        dfp = df.loc[:, keep_cols_exist].copy() 
 
-    # ffill inicial de datos históricos
+    # ffill inicial
     dfp[TARGET_CALLS] = pd.to_numeric(dfp[TARGET_CALLS], errors="coerce").ffill().fillna(0.0)
     dfp[TARGET_TMO] = pd.to_numeric(dfp[TARGET_TMO], errors="coerce").ffill().fillna(0.0)
     
-    for c in CONTEXT_FEATURES:
-        if c in dfp.columns:
-            dfp[c] = pd.to_numeric(dfp[c], errors="coerce").ffill()
-        else:
-            dfp[c] = 0.0 # Asegurar que la columna exista para el bucle
+    # <-- MODIFICADO: Bloque de ffill de contexto eliminado
             
     # ===== Horizonte futuro =====
     future_ts = pd.date_range(
@@ -344,12 +308,12 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         tz=TIMEZONE
     )
 
-    # ===== Bucle iterativo: Volumen + TMO (ambos Directos) =====
+    # ===== Bucle iterativo =====
     print("Iniciando predicción iterativa (Llamadas Directas + TMO Directo)...")
     for ts in future_ts:
         
         # --- 1. PREDECIR LLAMADAS (PLANNER) ---
-        # (ESTA LÓGICA NO SE TOCA, FUNCIONA BIEN)
+        # (LÓGICA SIN CAMBIOS)
         cols_planner = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"]
         cols_planner_exist = [c for c in cols_planner if c in dfp.columns]
         tmp_planner = dfp[cols_planner_exist].copy()
@@ -361,7 +325,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
             tmp_planner.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
         if "es_dia_de_pago" in tmp_planner.columns:
             tmp_planner.loc[ts, "es_dia_de_pago"] = 0
-        tmp_planner = add_lags_mas(tmp_planner, TARGET_CALLS) # Usa features.py
+        tmp_planner = add_lags_mas(tmp_planner, TARGET_CALLS) 
         if TARGET_TMO in tmp_planner.columns:
             for lag in [24, 48, 72, 168]:
                 tmp_planner[f'tmo_lag_{lag}'] = tmp_planner[TARGET_TMO].shift(lag)
@@ -373,9 +337,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         yhat_calls = max(0.0, yhat_calls)
 
 
-        # --- 2. PREDECIR TMO (DIRECTO v8) ---
-        
-        # --- INICIO MODIFICACIÓN: Lógica de predicción TMO (Directa) ---
+        # --- 2. PREDECIR TMO (DIRECTO v8 - SIN CONTEXTO) ---
         
         # 2b. Crear Dataframe temporal para TMO
         cols_tmo_model = [
@@ -383,34 +345,24 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
             TARGET_CALLS,     # Pista 2 (Volumen)
             "feriados", 
             "es_dia_de_pago"
-        ] + CONTEXT_FEATURES # Añadir contexto
+        ] # <-- MODIFICADO: 'CONTEXT_FEATURES' eliminado
         cols_tmo_model_exist = [c for c in cols_tmo_model if c in dfp.columns]
         tmp_tmo = dfp[cols_tmo_model_exist].copy()
         
-        # Añadir fila vacía y ffill (para que lags se basen en t-1)
         tmp_tmo = pd.concat([tmp_tmo, pd.DataFrame(index=[ts])])
         tmp_tmo[TARGET_TMO] = tmp_tmo[TARGET_TMO].ffill()
         tmp_tmo[TARGET_CALLS] = tmp_tmo[TARGET_CALLS].ffill()
-        # (ffill de contexto se hace abajo)
 
-        # 2c. Crear Pistas de Tiempo (TEMPRANO, para buscar medianas)
+        # 2c. Crear Pistas de Tiempo
         tmp_tmo = add_time_parts(tmp_tmo)
-
-        # 2d. Añadir features de contexto (DINÁMICOS por mediana dow, hour)
-        current_dow = tmp_tmo.at[ts, 'dow']
-        current_hour = tmp_tmo.at[ts, 'hour']
-        for c, medians_map in context_feature_medians.items():
-            # Buscar la mediana para (dow, hour) y asignarla
-            val = medians_map.get((current_dow, current_hour))
-            if pd.isna(val): # Fallback si (dow,hour) no existe
-                val = medians_map.mean() 
-            tmp_tmo.loc[ts, c] = val
+        
+        # <-- MODIFICADO: Bloque de asignación de contexto (medianas) eliminado
 
         # Forzar feriados/dia_pago en la fila actual (ts)
         tmp_tmo.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
         tmp_tmo.loc[ts, "es_dia_de_pago"] = 0 # Forzado a 0
 
-        # 2e. Crear Pistas de Lags/MAs/STDs (¡Debe coincidir con el Entrenamiento v8!)
+        # 2e. Crear Pistas de Lags/MAs/STDs (Igual que el entrenamiento v8)
 
         # Pista 1: TMO Total (Lags "rápidos" + STD)
         s_tmo_total = tmp_tmo[TARGET_TMO]
@@ -419,51 +371,43 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         s_tmo_total_s1 = s_tmo_total.shift(1)
         for w in [6, 12, 24, 72]:
             tmp_tmo[f"ma_tmo_total_{w}"] = s_tmo_total_s1.rolling(w, min_periods=1).mean()
-            # <-- ¡AÑADIDO! feature de volatilidad faltante
             tmp_tmo[f"std_tmo_total_{w}"] = s_tmo_total_s1.rolling(w, min_periods=2).std()
 
         # Pista 2: Volumen (Lags "rápidos" + STD)
-        s_contest = tmp_tmo[TARGET_CALLS] # Usamos 'recibidos' como proxy
+        s_contest = tmp_tmo[TARGET_CALLS]
         for lag in [1, 24, 48, 168]:
              tmp_tmo[f"lag_contest_{lag}"] = s_contest.shift(lag)
         s_contest_s1 = s_contest.shift(1)
         for w in [6, 24, 72]:
             tmp_tmo[f"ma_contest_{w}"] = s_contest_s1.rolling(w, min_periods=1).mean()
-            # <-- ¡AÑADIDO! feature de volatilidad faltante
             tmp_tmo[f"std_contest_{w}"] = s_contest_s1.rolling(w, min_periods=2).std()
         
         # 2f. Predecir TMO (Directo)
         X_tmo = dummies_and_reindex(tmp_tmo.tail(1), cols_tmo)
         
-        # Saneo final (los STD pueden crear NaNs al inicio si min_periods=2)
+        # <-- MODIFICADO: Saneamiento robusto para 'inf' y 'nan'
         X_tmo = X_tmo.replace([np.inf, -np.inf], np.nan).fillna(0.0)
         
         yhat_tmo = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
-        yhat_tmo = max(0.0, yhat_tmo) # TMO no puede ser negativo
-        # --- FIN MODIFICACIÓN ---
+        yhat_tmo = max(0.0, yhat_tmo)
 
 
         # --- 3. ACTUALIZACIÓN ITERATIVA ---
         dfp.loc[ts, TARGET_CALLS] = yhat_calls
         dfp.loc[ts, TARGET_TMO] = yhat_tmo 
-        
         dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
         dfp.loc[ts, "es_dia_de_pago"] = 0
         
-        # <-- MODIFICADO: Actualizar también los valores de contexto
-        for c in context_feature_medians.keys():
-            dfp.loc[ts, c] = tmp_tmo.at[ts, c]
-
+        # <-- MODIFICADO: Bucle de actualización de contexto eliminado
 
     print("Predicción iterativa completada.")
 
-    # ===== Salida horaria =====
+    # ===== Salida horaria (Sin cambios) =====
     df_hourly = pd.DataFrame(index=future_ts)
     df_hourly["calls"] = np.round(dfp.loc[future_ts, TARGET_CALLS]).astype(int)
     df_hourly["tmo_s"] = np.round(dfp.loc[future_ts, TARGET_TMO]).astype(int)
 
-    # ===== Ajustes feriados / post-feriados =====
-    # (Sin cambios)
+    # ===== Ajustes feriados / post-feriados (Sin cambios) =====
     if holidays_set and len(holidays_set) > 0:
         (f_calls_by_hour, f_tmo_by_hour, _gc, _gt, post_calls_by_hour) = compute_holiday_factors(
             df, holidays_set, col_calls=TARGET_CALLS, col_tmo=TARGET_TMO
@@ -473,24 +417,21 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         df_hourly = apply_post_holiday_adjustment(df_hourly, holidays_set, post_calls_by_hour,
                                                 col_calls_future="calls")
 
-    # ===== CAP outliers (llamadas) =====
-    # (Sin cambios)
+    # ===== CAP outliers (llamadas) (Sin cambios) =====
     if ENABLE_OUTLIER_CAP:
         base_mad = _baseline_median_mad(df, col=TARGET_CALLS)
         df_hourly = apply_outlier_cap(df_hourly, base_mad, holidays_set,
                                       col_calls_future="calls",
                                       k_weekday=K_WEEKDAY, k_weekend=K_WEEKEND)
 
-    # ===== Erlang =====
-    # (Sin cambios)
+    # ===== Erlang (Sin cambios) =====
     df_hourly["agents_prod"] = 0
     for ts in df_hourly.index:
         a, _ = required_agents(float(df_hourly.at[ts, "calls"]), float(df_hourly.at[ts, "tmo_s"]))
         df_hourly.at[ts, "agents_prod"] = int(a)
     df_hourly["agents_sched"] = df_hourly["agents_prod"].apply(schedule_agents)
 
-    # ===== Salidas JSON =====
-    # (Sin cambios)
+    # ===== Salidas JSON (Sin cambios) =====
     write_hourly_json(f"{PUBLIC_DIR}/prediccion_horaria.json", df_hourly, "calls", "tmo_s", "agents_sched")
     write_daily_json(f"{PUBLIC_DIR}/prediccion_diaria.json", df_hourly, "calls", "tmo_s",
                      weights_col="calls")
