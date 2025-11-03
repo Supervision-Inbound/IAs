@@ -8,19 +8,28 @@ TIMEZONE = "America/Santiago"
 # Utils de parseo temporal
 # ------------------------------------------------------------
 def _coerce_ts_series(s: pd.Series) -> pd.Series:
-    """Parsea una serie de strings a datetime CONSCIENTE (UTC inicial)"""
+    """
+    Parsea una serie de strings a datetime CONSCIENTE.
+    Utiliza utc=True para garantizar una base segura y luego convierte a TIMEZONE.
+    """
     if s.dtype == "datetime64[ns]" or np.issubdtype(s.dtype, np.datetime64):
+        # Si ya es datetime, lo convertimos a UTC.
         dt = pd.to_datetime(s, errors="coerce", utc=True)
     else:
+        # Si es string, intentamos parsear con día primero y luego sin.
         dt = pd.to_datetime(s, errors="coerce", dayfirst=True, utc=True)
         if dt.isna().any():
             dt2 = pd.to_datetime(s, errors="coerce", dayfirst=False, utc=True)
             dt = dt.fillna(dt2)
     
-    # Convertimos a la zona horaria final. 'dt' sale de aquí tz-aware.
+    # CORRECCIÓN: Como 'dt' ya es tz-aware (UTC), solo necesitamos tz_convert.
     return dt.dt.tz_convert(TIMEZONE)
 
 def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Asegura que el DataFrame tenga un índice DatetimeIndex redondeado a la hora,
+    consciente de la zona horaria y libre de duplicados.
+    """
     d = df.copy()
     
     # Caso 1: El índice ya es DatetimeIndex
@@ -29,25 +38,26 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
         idx = d.index
         # 1. Quitar la zona horaria actual (convertir a ingenuo/naive basado en UTC)
         if idx.tz is not None:
+             # Convertir a UTC antes de quitar la TZ para tener una base consistente
              idx_naive = idx.tz_convert('UTC').tz_localize(None) 
         else:
              idx_naive = idx # Asumir que ya es ingenuo si no tiene TZ
         
-        # 2. Redondear el tiempo ingenuo
+        # 2. Redondear el tiempo ingenuo a la hora más cercana
         idx_naive_rounded = idx_naive.round('h') 
         
-        # 3. 🚨 LÓGICA CORREGIDA: Localizar de nuevo a UTC (seguro) y CONVERTIR a TIMEZONE
+        # 3. LÓGICA FINAL DE TZ: Localizar de nuevo a UTC (seguro, sin DST) y CONVERTIR a TIMEZONE
         idx_aware = idx_naive_rounded.tz_localize('UTC').tz_convert(TIMEZONE)
         
         d.index = idx_aware
         if "ts" in d.columns: d = d.drop(columns=["ts"])
         d = d.sort_index()
         d.index.name = "ts"
-        # Limpieza de duplicados
+        # Limpieza de duplicados en el índice
         d = d[~d.index.duplicated(keep='last')] 
         return d
 
-    # Caso 2: El índice no es DatetimeIndex (El que estaba fallando)
+    # Caso 2: El índice no es DatetimeIndex (Construir desde columnas)
     cols = {c.lower().strip(): c for c in d.columns}
     ts_col = None
     for cand in ["ts"]:
@@ -72,10 +82,9 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(d.index, pd.MultiIndex) and "ts" in d.index.names:
         d.index = d.index.droplevel(d.index.names.index("ts"))
     
-    # 🚨 LÓGICA CORREGIDA (Idéntica al Caso 1):
-    # 'ts' es tz-aware (America/Santiago), no podemos redondearlo directamente.
+    # LÓGICA FINAL DE TZ (idéntica al Caso 1):
     
-    # 1. Convertir a naive (UTC-based)
+    # 1. Convertir 'ts' a naive (UTC-based)
     ts_naive = ts.dt.tz_convert('UTC').dt.tz_localize(None)
     
     # 2. Redondear (naive)
@@ -84,8 +93,9 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     # 3. Localizar de nuevo a UTC (seguro) y CONVERTIR a TIMEZONE
     ts_rounded_aware = ts_naive_rounded.dt.tz_localize('UTC').dt.tz_convert(TIMEZONE)
     
-    d = d.dropna(subset=["ts"]).sort_values("ts").set_index(ts_rounded_aware) # Usar la versión final
-    # Limpieza de duplicados
+    # Establecer índice y limpiar
+    d = d.dropna(subset=["ts"]).sort_values("ts").set_index(ts_rounded_aware) 
+    # Limpieza de duplicados en el índice
     d = d[~d.index.duplicated(keep='last')] 
     return d
 
@@ -95,13 +105,24 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
 def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     if not isinstance(df.index, pd.DatetimeIndex):
         if "ts" in df.columns:
+            # Asegurar base UTC antes de set_index
             df = df.set_index(pd.to_datetime(df["ts"], errors="coerce", utc=True)).drop(columns=["ts"], errors="ignore")
         else:
             raise ValueError("add_time_parts requiere un índice datetime o una columna 'ts'.")
 
     d = df.copy()
-    try: idx = d.index.tz_convert(TIMEZONE)
-    except Exception: idx = d.index.tz_localize("UTC").tz_convert(TIMEZONE)
+    
+    # Asegurar que el índice esté en la TIMEZONE correcta para extraer las partes.
+    idx = d.index
+    if idx.tz is None:
+        try: 
+            idx = idx.tz_localize('UTC').tz_convert(TIMEZONE)
+        except Exception: 
+            # Si hay un error de DST, ignorar y convertir directamente si es posible
+            idx = idx.tz_localize('UTC', ambiguous='infer', nonexistent='shift_forward').tz_convert(TIMEZONE)
+    else:
+        idx = idx.tz_convert(TIMEZONE)
+
 
     d["dow"] = idx.weekday
     d["month"] = idx.month
@@ -129,7 +150,7 @@ def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     return d
 
 # ------------------------------------------------------------
-# Dummies + reindex (sin cambios)
+# Dummies + reindex (CORREGIDO)
 # ------------------------------------------------------------
 def dummies_and_reindex(df: pd.DataFrame, training_cols: list) -> pd.DataFrame:
     d = df.copy()
@@ -138,6 +159,10 @@ def dummies_and_reindex(df: pd.DataFrame, training_cols: list) -> pd.DataFrame:
         if c in d.columns: cat_cols.append(c)
     if cat_cols: d = pd.get_dummies(d, columns=cat_cols, drop_first=False)
     for c in d.columns: d[c] = pd.to_numeric(d[c], errors="coerce")
-    X = d.reindex(columns=training_cols, fill_value=0.0)
+    
+    # CORRECCIÓN: Eliminar duplicados de la lista de columnas esperadas
+    unique_training_cols = list(dict.fromkeys(training_cols))
+    
+    X = d.reindex(columns=unique_training_cols, fill_value=0.0)
     X = X.ffill().fillna(0.0)
     return X
