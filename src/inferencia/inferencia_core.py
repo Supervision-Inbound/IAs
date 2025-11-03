@@ -1,4 +1,4 @@
-# src/inferencia/inferencia_core.py (¡LÓGICA TMO v8 CORREGIDA v3 - SIN CONTEXTO!)
+# src/inferencia/inferencia_core.py (¡LÓGICA TMO v8 CORREGIDA v4 - SIN VOLATILIDAD!)
 import os
 import glob
 import pathlib
@@ -81,8 +81,7 @@ ENABLE_OUTLIER_CAP = True
 K_WEEKDAY = 6.0
 K_WEEKEND = 7.0
 
-# --- MODIFICADO: Lista de contexto vacía ---
-CONTEXT_FEATURES = []
+CONTEXT_FEATURES = [] # Vacío
 
 # --- Utils feriados / outliers (Sin cambios) ---
 def _load_cols(path: str):
@@ -283,7 +282,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     # print("INFO: Omitiendo features de contexto TMO.")
 
     # Ventana reciente
-    keep_cols = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"] + CONTEXT_FEATURES
+    keep_cols = [TARGET_CALLS, TARGET_TMO, "feriados", "es_dia_de_pago"] # Contexto eliminado
     keep_cols_exist = [c for c in keep_cols if c in df.columns]
     
     idx = df.index
@@ -336,7 +335,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         yhat_calls = max(0.0, yhat_calls)
 
 
-        # --- 2. PREDECIR TMO (DIRECTO v8 - SIN CONTEXTO) ---
+        # --- 2. PREDECIR TMO (DIRECTO v8 - SIN VOLATILIDAD) ---
         
         # 2b. Crear Dataframe temporal para TMO
         cols_tmo_model = [
@@ -361,30 +360,30 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         tmp_tmo.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
         tmp_tmo.loc[ts, "es_dia_de_pago"] = 0 # Forzado a 0
 
-        # 2e. Crear Pistas de Lags/MAs/STDs (Igual que el entrenamiento v8)
+        # 2e. Crear Pistas de Lags/MAs (SIN STDs)
 
-        # Pista 1: TMO Total (Lags "rápidos" + STD)
+        # Pista 1: TMO Total
         s_tmo_total = tmp_tmo[TARGET_TMO]
         for lag in [1, 2, 3, 6, 12, 24, 168]:
             tmp_tmo[f"lag_tmo_total_{lag}"] = s_tmo_total.shift(lag)
         s_tmo_total_s1 = s_tmo_total.shift(1)
         for w in [6, 12, 24, 72]:
             tmp_tmo[f"ma_tmo_total_{w}"] = s_tmo_total_s1.rolling(w, min_periods=1).mean()
-            tmp_tmo[f"std_tmo_total_{w}"] = s_tmo_total_s1.rolling(w, min_periods=2).std()
+            # <-- 'std_tmo_total' eliminado
 
-        # Pista 2: Volumen (Lags "rápidos" + STD)
+        # Pista 2: Volumen
         s_contest = tmp_tmo[TARGET_CALLS]
         for lag in [1, 24, 48, 168]:
              tmp_tmo[f"lag_contest_{lag}"] = s_contest.shift(lag)
         s_contest_s1 = s_contest.shift(1)
         for w in [6, 24, 72]:
             tmp_tmo[f"ma_contest_{w}"] = s_contest_s1.rolling(w, min_periods=1).mean()
-            tmp_tmo[f"std_contest_{w}"] = s_contest_s1.rolling(w, min_periods=2).std()
+            # <-- 'std_contest' eliminado
         
         # 2f. Predecir TMO (Directo)
         X_tmo = dummies_and_reindex(tmp_tmo.tail(1), cols_tmo)
         
-        # Saneamiento robusto para 'inf' y 'nan'
+        # Saneamiento (ya no debería haber 'inf', pero lo dejamos para 'NaN')
         X_tmo = X_tmo.replace([np.inf, -np.inf], np.nan).fillna(0.0)
         
         yhat_tmo = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
@@ -405,12 +404,10 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     df_hourly = pd.DataFrame(index=future_ts)
     df_hourly["calls"] = np.round(dfp.loc[future_ts, TARGET_CALLS]).astype(int)
     
-    # --- INICIO NUEVA MODIFICACIÓN (v3) ---
-    # Saneamiento de NaNs/infs ANTES de convertir a int
+    # --- Saneamiento de NaNs/infs ANTES de convertir a int ---
     tmo_series = dfp.loc[future_ts, TARGET_TMO]
     tmo_series_clean = tmo_series.replace([np.inf, -np.inf], np.nan).fillna(0.0)
     df_hourly["tmo_s"] = np.round(tmo_series_clean).astype(int)
-    # --- FIN NUEVA MODIFICACIÓN (v3) ---
 
     # ===== Ajustes feriados / post-feriados (Sin cambios) =====
     if holidays_set and len(holidays_set) > 0:
