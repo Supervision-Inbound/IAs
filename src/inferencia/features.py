@@ -15,22 +15,26 @@ def _coerce_ts_series(s: pd.Series) -> pd.Series:
         if dt.isna().any():
             dt2 = pd.to_datetime(s, errors="coerce", dayfirst=False, utc=True)
             dt = dt.fillna(dt2)
-    try:
-        dt = dt.dt.tz_convert(TIMEZONE)
-    except Exception:
-        dt = dt.dt.tz_localize("UTC").dt.tz_convert(TIMEZONE)
-    return dt
+    # Ya no forzamos la conversión a TIMEZONE aquí, lo hacemos en ensure_ts
+    return dt.dt.tz_localize('UTC', ambiguous='infer', nonexistent='shift-forward').dt.tz_convert(TIMEZONE)
 
 def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     d = df.copy()
     
     # Caso 1: El índice ya es DatetimeIndex
     if isinstance(d.index, pd.DatetimeIndex):
-        try: idx = d.index.tz_convert(TIMEZONE)
-        except Exception: idx = d.index.tz_localize("UTC").tz_convert(TIMEZONE)
         
-        # 🚨 CAMBIO CLAVE: Redondeamos a la hora más cercana para evitar duplicados por minutos/segundos.
-        idx = idx.round('H') 
+        idx = d.index
+        # 1. Quitar la zona horaria actual (convertir a ingenuo)
+        if idx.tz is not None:
+             # Convertir a UTC y luego a naive (sin tz) para simplificar el round
+             idx = idx.tz_convert('UTC').tz_localize(None) 
+        
+        # 2. Redondear a la hora más cercana 
+        idx = idx.round('h') 
+        
+        # 3. Localizar la zona horaria, forzando la inferencia de DST
+        idx = idx.tz_localize(TIMEZONE, ambiguous='infer', nonexistent='shift-forward')
         
         d.index = idx
         if "ts" in d.columns: d = d.drop(columns=["ts"])
@@ -65,8 +69,8 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(d.index, pd.MultiIndex) and "ts" in d.index.names:
         d.index = d.index.droplevel(d.index.names.index("ts"))
     
-    # 🚨 CAMBIO CLAVE: Redondeamos a la hora antes de establecer como índice
-    ts_rounded = ts.round('H')
+    # Redondeamos a la hora antes de establecer como índice
+    ts_rounded = ts.dt.round('h')
     
     d = d.dropna(subset=["ts"]).sort_values("ts").set_index(ts_rounded)
     # Limpieza de duplicados, tomando el último valor si hay múltiples en la misma hora
