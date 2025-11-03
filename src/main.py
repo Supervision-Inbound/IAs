@@ -1,4 +1,3 @@
-# src/main.py
 import argparse
 import os
 import numpy as np
@@ -12,17 +11,15 @@ HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
 
 # ======= Claves de negocio =======
 TARGET_CALLS_NEW = "recibidos_nacional"
-TARGET_TMO_NEW   = "tmo_general"
-FERIADOS_COL = "feriados" # <-- Nombre estandarizado
+TARGET_TMO_NEW = "tmo_general"
+FERIADOS_COL = "feriados" 
 TZ = "America/Santiago"
 
 def smart_read_historical(path: str) -> pd.DataFrame:
     try:
         df = pd.read_csv(path, low_memory=False)
-        if df.shape[1] > 1:
-            return df
-    except Exception:
-        pass
+        if df.shape[1] > 1: return df
+    except Exception: pass
     return pd.read_csv(path, delimiter=';', low_memory=False)
 
 def parse_tmo_to_seconds(val):
@@ -45,8 +42,7 @@ def load_holidays(csv_path: str) -> set:
     cols_map = {c.lower().strip(): c for c in fer.columns}
     fecha_col = None
     for cand in ["fecha", "date", "dia", "día"]:
-        if cand in cols_map:
-            fecha_col = cols_map[cand]; break
+        if cand in cols_map: fecha_col = cols_map[cand]; break
     if not fecha_col: return set()
     fechas = pd.to_datetime(fer[fecha_col].astype(str), dayfirst=True, errors="coerce").dropna().dt.date
     return set(fechas)
@@ -60,28 +56,30 @@ def mark_holidays_index(dt_index, holidays_set: set) -> pd.Series:
 def main(horizonte_dias: int):
     os.makedirs("public", exist_ok=True)
 
-    # 1) Leer histórico único (volumen + TMO)
+    # 1) Leer histórico
     dfh = smart_read_historical(DATA_FILE)
     dfh.columns = dfh.columns.str.strip()
 
-    # 2) Normalizar columna de volumen
+    # 2) Normalizar volumen
     if TARGET_CALLS_NEW not in dfh.columns:
         for cand in ["recibidos_nacional", "recibidos", "contestados", "total_llamadas", "llamadas"]:
             if cand in dfh.columns:
                 dfh = dfh.rename(columns={cand: TARGET_CALLS_NEW})
                 break
 
-    # 3) Normalizar TMO a segundos
+    # 3) Normalizar TMO
     if TARGET_TMO_NEW not in dfh.columns:
         tmo_source = None
         for cand in ["tmo_general", "tmo (segundos)", "tmo (s)", "tmo_seg", "tmo", "aht"]:
-            if cand in dfh.columns:
-                tmo_source = cand; break
+            if cand in dfh.columns: tmo_source = cand; break
         if tmo_source:
             dfh[TARGET_TMO_NEW] = dfh[tmo_source].apply(parse_tmo_to_seconds)
 
     # 4) Asegurar índice temporal
     dfh = ensure_ts(dfh)
+
+    # 🚨 Limpieza crítica en el Main: Asegurar que el índice inicial es único.
+    dfh = dfh[~dfh.index.duplicated(keep='last')]
 
     # 5) Derivar calendario (feriados)
     holidays_set = load_holidays(HOLIDAYS_FILE)
@@ -89,14 +87,12 @@ def main(horizonte_dias: int):
         dfh[FERIADOS_COL] = mark_holidays_index(dfh.index, holidays_set).values
     dfh[FERIADOS_COL] = pd.to_numeric(dfh[FERIADOS_COL], errors="coerce").fillna(0).astype(int)
     
-    # <-- MODIFICADO: Añadir features pre/post feriado a los datos históricos
-    # Esto debe hacerse DESPUÉS de asegurar el índice 'ts' y 'feriados'
-    dfh = dfh.sort_index() # Asegurar orden temporal
+    # Añadir features pre/post feriado
+    dfh = dfh.sort_index()
     dfh['es_post_feriado'] = ((dfh[FERIADOS_COL].shift(1).fillna(0) == 1) & (dfh[FERIADOS_COL] == 0)).astype(int)
     dfh['es_pre_feriado'] = ((dfh[FERIADOS_COL].shift(-1).fillna(0) == 1) & (dfh[FERIADOS_COL] == 0)).astype(int)
 
     # 6) ffill columnas clave
-    # <-- MODIFICADO: Añadir 'es_pre_feriado' y 'es_post_feriado' a la lista
     for c in [TARGET_TMO_NEW, FERIADOS_COL, 'es_pre_feriado', 'es_post_feriado',
               "proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
         if c in dfh.columns:
