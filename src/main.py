@@ -78,7 +78,7 @@ def main(horizonte_dias: int):
     # 4) Asegurar índice temporal
     dfh = ensure_ts(dfh)
 
-    # 🚨 Limpieza crítica en el Main: Asegurar que el índice inicial es único.
+    # Limpieza crítica en el Main: Asegurar que el índice inicial es único.
     dfh = dfh[~dfh.index.duplicated(keep='last')]
 
     # 5) Derivar calendario (feriados)
