@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
-# IMPORTACIONES CORRECTAS: Solo desde otros módulos
+# IMPORTACIONES CORRECTAS
 from .features import ensure_ts, add_time_parts 
 from .erlang import required_agents, schedule_agents
 from .utils_io import write_daily_json, write_hourly_json
@@ -19,13 +19,13 @@ PUBLIC_DIR = "public"
 LOOKBACK_STEPS = 168 
 HORIZON_STEPS = 24 
 
-# --- Rutas de Artefactos (Funciones de Soporte) ---
+# --- Rutas de Artefactos (Funciones de Soporte, Omitido por brevedad, asumiendo que son correctas) ---
 def _candidate_dirs():
     here = pathlib.Path(".").resolve()
     bases = [
         here, here / "models", here / "modelos", here / "release", here / "releases",
         here / "artifacts", here / "outputs", here / "output", here / "dist",
-        here / "build", pathlib.Path(os.environ.get("GITHUB_WORKSPACE", ".")),
+        pathlib.Path(os.environ.get("GITHUB_WORKSPACE", ".")),
         pathlib.Path("/kaggle/working/models"), pathlib.Path("/kaggle/working"),
     ]
     uniq = []
@@ -70,7 +70,7 @@ ENABLE_OUTLIER_CAP = True
 K_WEEKDAY = 6.0
 K_WEEKEND = 7.0
 
-# --- Funciones Auxiliares ---
+# --- Funciones Auxiliares (Omitido por brevedad, asumiendo que son correctas) ---
 def _load_cols(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -200,9 +200,8 @@ def generate_features(df, target_calls, target_tmo, feriados_col):
 def forecast_120d(df_hist_joined: pd.DataFrame, 
                   horizon_days: int = 120, holidays_set: set | None = None):
     
-    # 1. Cargar Artefactos
+    # 1. Cargar Artefactos (Omitido por brevedad, asumiendo que es correcto)
     print("Cargando artefactos LSTM...")
-    # ... (omisión del código de carga de modelos para brevedad, asumiendo que es correcto)
     m_pl = tf.keras.models.load_model(PLANNER_MODEL)
     sc_pl = joblib.load(PLANNER_SCALER)
     cols_pl = _load_cols(PLANNER_COLS)
@@ -211,10 +210,11 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     cols_tmo = _load_cols(TMO_COLS)
     all_cols_expected = list(set(cols_pl) | set(cols_tmo))
 
-
     # 2. Preparar Dataframe Histórico (dfp)
+    # ensure_ts ahora debería haber redondeado el índice a la hora
     df = ensure_ts(df_hist_joined)
     
+    # Manejo de Zona Horaria (Refuerzo)
     if not isinstance(df.index, pd.DatetimeIndex):
         df.index = pd.to_datetime(df.index, errors="coerce", utc=True).tz_convert(TIMEZONE)
     else:
@@ -227,11 +227,17 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     
     dfp = generate_features(df, TARGET_CALLS, TARGET_TMO, "feriados")
     
-    # Limpieza CRÍTICA del índice ANTES de reindexar
-    dfp = dfp[~dfp.index.duplicated(keep='last')]
+    # REFUERZO EXTREMO: Limpieza de duplicados antes de dummies/reindex
+    if dfp.index.duplicated().any():
+        dfp = dfp[~dfp.index.duplicated(keep='last')]
     
     # Generar DUMMIES y Reindexar
     dfp = add_time_parts(dfp)
+    
+    # 🛑 Limpieza Adicional de Índice (Por si acaso)
+    if dfp.index.duplicated().any():
+        dfp = dfp[~dfp.index.duplicated(keep='last')]
+    
     dfp = pd.get_dummies(dfp, columns=['dow', 'month', 'hour'], drop_first=False, dtype=float)
     dfp = dfp.reindex(columns=all_cols_expected, fill_value=np.nan) 
     
@@ -248,10 +254,12 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         print(f"Prediciendo Día {i+1}/{horizon_days}...")
         
         # 1. Preparar Ventana de Entrada (Input)
-        # Aseguramos que solo usamos los LOOKBACK_STEPS requeridos
+        # Limitamos el dfp a la ventana de LOOKBACK + unos días de features
+        dfp = dfp.iloc[-(LOOKBACK_STEPS + 72):] 
+        dfp = dfp[~dfp.index.duplicated(keep='last')] # Limpieza de pre-input
         input_df = dfp.iloc[-LOOKBACK_STEPS:] 
         
-        # Preparar Inputs LSTM (sin cambios)
+        # Preparar Inputs LSTM y Predicción (Omitido por brevedad)
         input_features_pl = input_df[cols_pl]
         input_scaled_pl = sc_pl.transform(input_features_pl)
         input_lstm_pl = input_scaled_pl.reshape((1, LOOKBACK_STEPS, len(cols_pl)))
@@ -279,11 +287,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         
         # 7. Apendizar y preparar para la *siguiente* iteración
         
-        # PASO CRÍTICO: Limitar y limpiar el histórico antes de la concatenación
-        # Limitamos el dfp a la ventana de LOOKBACK + unos días de features
-        dfp = dfp.iloc[-(LOOKBACK_STEPS + 72):] 
-        dfp = dfp[~dfp.index.duplicated(keep='last')]
-        
         # Concatenación
         dfp_with_future = pd.concat([dfp, df_future_day])
         
@@ -297,7 +300,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         dfp_with_future = add_time_parts(dfp_with_future)
         dfp_with_future = pd.get_dummies(dfp_with_future, columns=['dow', 'month', 'hour'], drop_first=False, dtype=float)
         
-        # reindexar columnas
+        # reindexar columnas (punto de error)
         dfp_with_future = dfp_with_future.reindex(columns=all_cols_expected, fill_value=0.0) 
         
         dfp = dfp_with_future
