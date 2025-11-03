@@ -6,7 +6,7 @@ import pandas as pd
 TIMEZONE = "America/Santiago"
 
 # ------------------------------------------------------------
-# Utils de parseo temporal (Sin cambios)
+# Utils de parseo temporal
 # ------------------------------------------------------------
 def _coerce_ts_series(s: pd.Series) -> pd.Series:
     """Intenta parsear a datetime (UTC) de forma robusta y retorna tz-aware (America/Santiago)."""
@@ -81,21 +81,17 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
         s = (d[fecha_col].astype(str).str.strip() + " " + d[hora_col].astype(str).str.strip()).str.strip()
         ts = _coerce_ts_series(s)
     else:
-        # Adaptado para Clima (puede no tener 'hora')
-        date_col = next((c for c in cols if 'time' in c), None)
-        if date_col:
-             ts = _coerce_ts_series(d[date_col].astype(str))
-        else:
-            raise ValueError("No se pudo construir 'ts'. Aporta 'ts' o 'fecha'+'hora' o 'time'.")
+        raise ValueError("No se pudo construir 'ts'. Aporta 'ts' o 'fecha'+'hora'.")
 
     d["ts"] = ts
+    # Antes de ordenar por 'ts', garantizamos que NO exista un índice con el mismo nombre
     if isinstance(d.index, pd.MultiIndex) and "ts" in d.index.names:
         d.index = d.index.droplevel(d.index.names.index("ts"))
     d = d.dropna(subset=["ts"]).sort_values("ts").set_index("ts")
     return d
 
 # ------------------------------------------------------------
-# Partes de tiempo (Sin cambios)
+# Partes de tiempo
 # ------------------------------------------------------------
 def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -108,6 +104,7 @@ def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
             raise ValueError("add_time_parts requiere un índice datetime o una columna 'ts'.")
 
     d = df.copy()
+    # Asegurar tz para .weekday() y .hour consistentes
     try:
         idx = d.index.tz_convert(TIMEZONE)
     except Exception:
@@ -118,24 +115,28 @@ def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     d["hour"]  = idx.hour
     d["day"]   = idx.day
 
+    # ciclos
     d["sin_hour"] = np.sin(2*np.pi*d["hour"]/24.0)
     d["cos_hour"] = np.cos(2*np.pi*d["hour"]/24.0)
     d["sin_dow"]  = np.sin(2*np.pi*d["dow"]/7.0)
     d["cos_dow"]  = np.cos(2*np.pi*d["dow"]/7.0)
 
+    # día de pago (placeholder si no existe)
     if "es_dia_de_pago" not in d.columns:
         d["es_dia_de_pago"] = 0
 
     return d
 
 # ------------------------------------------------------------
-# Features de lags y medias móviles (Tu lógica v3 Original)
+# Features de lags y medias móviles (VERSIÓN "ANTIGUA" COMPATIBLE)
 # ------------------------------------------------------------
 def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     """
-    Versión COMPATIBLE con el entrenamiento original del planner v3:
+    Versión COMPATIBLE con el entrenamiento original del planner:
     - Lags con NOMBRES GENÉRICOS: lag_24, lag_48, lag_72, lag_168
     - MAs con NOMBRES GENÉRICOS:  ma_24,  ma_72,  ma_168
+    - MAs calculadas sobre la serie DESPLAZADA 1 hora (shift(1)) para usar solo pasado.
+    - NO agrega lags 1/2/3/6/12 ni incluye el nombre base del target en el nombre.
     """
     d = df.copy()
     if target_col not in d.columns:
@@ -146,18 +147,19 @@ def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     for k in [24, 48, 72, 168]:
         d[f"lag_{k}"] = s.shift(k)
 
-    # Medias sobre la serie desplazada (shift(1))
+    # >>> Ajuste crítico: medias sobre la serie desplazada (solo pasado)
     s1 = s.shift(1)
     for w in [24, 72, 168]:
         d[f"ma_{w}"] = s1.rolling(w, min_periods=1).mean()
 
+    # Saneo básico
     for c in [f"lag_{k}" for k in [24,48,72,168]] + [f"ma_{w}" for w in [24,72,168]]:
         d[c] = pd.to_numeric(d[c], errors="coerce")
 
     return d
 
 # ------------------------------------------------------------
-# Dummies + reindex contra training columns (¡CORREGIDO!)
+# Dummies + reindex contra training columns
 # ------------------------------------------------------------
 def dummies_and_reindex(df: pd.DataFrame, training_cols: list) -> pd.DataFrame:
     """
@@ -166,26 +168,23 @@ def dummies_and_reindex(df: pd.DataFrame, training_cols: list) -> pd.DataFrame:
     """
     d = df.copy()
 
+    # Si vienen ya agregadas por add_time_parts
     cat_cols = []
     for c in ["dow", "month", "hour"]:
         if c in d.columns:
             cat_cols.append(c)
 
+    # Dummies para las categóricas (sin drop_first)
     if cat_cols:
         d = pd.get_dummies(d, columns=cat_cols, drop_first=False)
 
+    # Asegurar dtype numérico en el resto
     for c in d.columns:
         d[c] = pd.to_numeric(d[c], errors="coerce")
 
     # Reindex exacto a columnas del entrenamiento
     X = d.reindex(columns=training_cols, fill_value=0.0)
 
-    # --- INICIO DE LA CORRECCIÓN ---
-    # Reemplazar infinitos (generados por el bucle) ANTES de rellenar NaNs.
-    X.replace([np.inf, -np.inf], np.nan, inplace=True)
-    # -----------------------------
-    
-    # Relleno forward y luego rellenar cualquier NaN restante con 0
+    # Relleno forward básico (por si quedan NaN en alguna fila intermedia)
     X = X.ffill().fillna(0.0)
     return X
-
