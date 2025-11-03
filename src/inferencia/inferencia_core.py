@@ -436,7 +436,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         X_tmo = dummies_and_reindex(tmp_tmo.tail(1), cols_tmo)
         
         # Saneo final (los STD pueden crear NaNs al inicio si min_periods=2)
-        X_tmo = X_tmo.fillna(0.0) 
+        X_tmo = X_tmo.replace([np.inf, -np.inf], np.nan).fillna(0.0)
         
         yhat_tmo = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
         yhat_tmo = max(0.0, yhat_tmo) # TMO no puede ser negativo
