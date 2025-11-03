@@ -8,6 +8,7 @@ TIMEZONE = "America/Santiago"
 # Utils de parseo temporal
 # ------------------------------------------------------------
 def _coerce_ts_series(s: pd.Series) -> pd.Series:
+    """Parsea una serie de strings a datetime CONSCIENTE (UTC inicial)"""
     if s.dtype == "datetime64[ns]" or np.issubdtype(s.dtype, np.datetime64):
         dt = pd.to_datetime(s, errors="coerce", utc=True)
     else:
@@ -16,8 +17,10 @@ def _coerce_ts_series(s: pd.Series) -> pd.Series:
             dt2 = pd.to_datetime(s, errors="coerce", dayfirst=False, utc=True)
             dt = dt.fillna(dt2)
     
-    # 🚨 CORRECCIÓN DEL TYPO: 'shift_forward' (con guion bajo)
-    return dt.dt.tz_localize('UTC', ambiguous='infer', nonexistent='shift_forward').dt.tz_convert(TIMEZONE)
+    # 🚨 CORRECCIÓN: 'dt' ya es 'tz-aware' (UTC) debido a utc=True.
+    # No podemos usar .tz_localize('UTC') de nuevo.
+    # Solo necesitamos CONVERTIR la zona horaria a la deseada.
+    return dt.dt.tz_convert(TIMEZONE)
 
 def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     d = df.copy()
@@ -26,25 +29,26 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(d.index, pd.DatetimeIndex):
         
         idx = d.index
-        # 1. Quitar la zona horaria actual (convertir a ingenuo)
+        # 1. Quitar la zona horaria actual (convertir a ingenuo/naive)
         if idx.tz is not None:
              idx = idx.tz_convert('UTC').tz_localize(None) 
         
         # 2. Redondear a la hora más cercana (usando 'h' minúscula para el warning)
         idx = idx.round('h') 
         
-        # 3. 🚨 CORRECCIÓN DEL TYPO: 'shift_forward' (con guion bajo)
+        # 3. Localizar la zona horaria (ahora que es ingenuo), manejando DST
+        # 🚨 CORRECCIÓN (Mantenida): 'shift_forward' (con guion bajo)
         idx = idx.tz_localize(TIMEZONE, ambiguous='infer', nonexistent='shift_forward')
         
         d.index = idx
         if "ts" in d.columns: d = d.drop(columns=["ts"])
         d = d.sort_index()
         d.index.name = "ts"
-        # Limpieza de duplicados, tomando el último valor si hay múltiples en la misma hora
+        # Limpieza de duplicados
         d = d[~d.index.duplicated(keep='last')] 
         return d
 
-    # Caso 2: El índice no es DatetimeIndex
+    # Caso 2: El índice no es DatetimeIndex (El que está fallando)
     cols = {c.lower().strip(): c for c in d.columns}
     ts_col = None
     for cand in ["ts"]:
@@ -61,7 +65,7 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
         ts = _coerce_ts_series(d[ts_col].astype(str))
     elif fecha_col is not None and hora_col is not None:
         s = (d[fecha_col].astype(str).str.strip() + " " + d[hora_col].astype(str).str.strip()).str.strip()
-        ts = _coerce_ts_series(s)
+        ts = _coerce_ts_series(s) # <-- Esta llamada falla
     else:
         raise ValueError("No se pudo construir 'ts'. Aporta 'ts' o 'fecha'+'hora'.")
 
@@ -73,7 +77,7 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     ts_rounded = ts.dt.round('h')
     
     d = d.dropna(subset=["ts"]).sort_values("ts").set_index(ts_rounded)
-    # Limpieza de duplicados, tomando el último valor si hay múltiples en la misma hora
+    # Limpieza de duplicados
     d = d[~d.index.duplicated(keep='last')] 
     return d
 
@@ -113,7 +117,7 @@ def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     for k in [24, 48, 72, 168]: d[f"lag_{k}"] = s.shift(k)
     s1 = s.shift(1)
     for w in [24, 72, 168]: d[f"ma_{w}"] = s1.rolling(w, min_periods=1).mean()
-    for c in [f"lag_{k}" for k in [24,48,72,168]] + [f"ma_{w}"for w in [24,72,168]]: d[c] = pd.to_numeric(d[c], errors="coerce")
+    for c in [f"lag_{k}" for k in [24,48,72,168]] + [f"ma_{w}" for w in [24,72,168]]: d[c] = pd.to_numeric(d[c], errors="coerce")
     return d
 
 # ------------------------------------------------------------
