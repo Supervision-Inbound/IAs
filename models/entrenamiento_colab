@@ -4,7 +4,7 @@ drive.mount('/content/drive')
 
 --------------------------------------------------------------------------------------------
 # Celda 2: Forzar la actualización de todo
-!pip install --upgrade pandas numpy tensorflow scikit-learn joblib requests requests-cache
+!pip install --upgrade pandas numpy tensorflow scikit-learn joblib requests requests-cache dill
 
 ----------------------------------------------------------------------------------------------
 # 2. Ahora el script puede importarla y chequear la versión
@@ -16,6 +16,7 @@ import joblib
 import requests
 import keras
 import requests_cache
+import dill
 
 print("--- Pega esto en tu requirements.txt de GitHub ---")
 print(f"pandas=={pandas.__version__}") # Usar __version__ es más estándar
@@ -25,16 +26,17 @@ print(f"keras=={keras.__version__}")
 print(f"scikit-learn=={sklearn.__version__}")
 print(f"joblib=={joblib.__version__}")
 print(f"requests=={requests.__version__}")
+print(f"dill=={dill.__version__}")
 print(f"requests-cache=={requests_cache.__version__}") # ¡Aquí está el cambio!
 print("--------------------------------------------------")
 
 ------------------------------------------------------------------------------------------------------------
 
 # =================================================================================
-# PIPELINE MAESTRO DE ENTRENAMIENTO v3 (COLAB - SIN VOLATILIDAD TMO)
+# PIPELINE MAESTRO DE ENTRENAMIENTO v4 (COLAB - SIN VOLATILIDAD NI DIA DE PAGO)
 # 1. Combina los 3 entrenamientos (Planner, TMO v8, Riesgos v7).
 # 2. GUARDA TODOS LOS ARTEFACTOS EN /content/ARTEFACTOS IA/
-# 3. TMO (v8) ENTRENADO SIN VOLATILIDAD (sin std_...) Y SIN CONTEXTO
+# 3. ELIMINADA la lógica 'es_dia_de_pago' de todos los modelos.
 # 4. Comprime la carpeta y la descarga automáticamente.
 # =================================================================================
 
@@ -85,7 +87,6 @@ warnings.filterwarnings("once", category=UserWarning)
 
 # =================================================================================
 # SECCIÓN 1: FUNCIONES DE UTILIDAD (Combinadas)
-# (Esta sección no cambia)
 # =================================================================================
 
 def read_any(path: str, sheet: int | str | None = None) -> pd.DataFrame:
@@ -152,7 +153,7 @@ def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     d["cos_hour"] = np.cos(2*np.pi*d["hour"]/24.0)
     d["sin_dow"]  = np.sin(2*np.pi*d["dow"]/7.0)
     d["cos_dow"]  = np.cos(2*np.pi*d["dow"]/7.0)
-    d["es_dia_de_pago"] = d["day"].isin([1,2,15,16,29,30,31]).astype(int)
+    # <-- MODIFICADO: 'es_dia_de_pago' eliminado
     return d
 
 def find_col_by_candidates(df: pd.DataFrame, candidates: list) -> str | None:
@@ -219,18 +220,18 @@ def create_tmo_model(n_features: int) -> tf.keras.Model:
 # =================================================================================
 
 # --- FASE 1: PLANIFICADOR (LLAMADAS) ---
-# (Sin cambios)
 def train_planner_model(df_hosting, output_dir):
     print("\n" + "="*50); print("--- FASE 1: ENTRENANDO MODELO 1 (EL PLANIFICADOR) v3 ---"); print("="*50)
     df_base = add_time_parts(df_hosting.copy())
-    df_base['es_dia_de_pago'] = df_base['day'].isin([1, 2, 15, 16, 29, 30, 31]).astype(int)
+    # <-- MODIFICADO: 'es_dia_de_pago' eliminado
     for lag in [24, 48, 72, 168]:
         df_base[f'lag_{lag}'] = df_base[TARGET_CALLS].shift(lag)
     for window in [24, 72, 168]:
         df_base[f'ma_{window}'] = df_base[TARGET_CALLS].rolling(window, min_periods=1).mean()
     df_base.dropna(inplace=True)
     
-    features_base = [col for col in df_base.columns if col.startswith(('lag_', 'ma_'))] + ['sin_hour', 'cos_hour', 'sin_dow', 'cos_dow', 'feriados', 'es_dia_de_pago', 'dow', 'month', 'hour']
+    # <-- MODIFICADO: 'es_dia_de_pago' eliminado de la lista de features
+    features_base = [col for col in df_base.columns if col.startswith(('lag_', 'ma_'))] + ['sin_hour', 'cos_hour', 'sin_dow', 'cos_dow', 'feriados', 'dow', 'month', 'hour']
     
     X = pd.get_dummies(df_base[features_base], columns=['dow', 'month', 'hour'])
     y = df_base[TARGET_CALLS]
@@ -258,12 +259,11 @@ def train_planner_model(df_hosting, output_dir):
     return model, scaler, list(X.columns)
 
 # --- FASE 2: ANALISTA DE RIESGOS (CLIMA) ---
-# (Sin cambios)
 def train_risk_analyst_model(df_hosting, df_clima, planner_model, planner_scaler, planner_cols, output_dir):
     print("\n" + "="*50); print("--- FASE 2: ENTRENANDO MODELO 2 (EL ANALISTA DE RIESGOS) v7 ---"); print("="*50)
     
     df_planner_full = add_time_parts(df_hosting.copy())
-    df_planner_full['es_dia_de_pago'] = df_planner_full['day'].isin([1, 2, 15, 16, 29, 30, 31]).astype(int)
+    # <-- MODIFICADO: 'es_dia_de_pago' eliminado
     for lag in [24, 48, 72, 168]: df_planner_full[f'lag_{lag}'] = df_planner_full[TARGET_CALLS].shift(lag)
     for window in [24, 72, 168]: df_planner_full[f'ma_{window}'] = df_planner_full[TARGET_CALLS].rolling(window, min_periods=1).mean()
     df_planner_full.dropna(inplace=True)
@@ -372,8 +372,6 @@ def train_tmo_model(hosting_file_path, output_dir):
     else:
         print("WARN: No se encontró columna de 'contestadas'. Los features de volumen serán 0.")
         d["contestadas"] = 0
-        
-    # (Contexto eliminado)
     
     # 3) partes de tiempo
     d = add_time_parts(d)
@@ -386,7 +384,6 @@ def train_tmo_model(hosting_file_path, output_dir):
     s_tmo_total_s1 = s_tmo_total.shift(1)
     for w in [6, 12, 24, 72]:
         d[f"ma_tmo_total_{w}"] = s_tmo_total_s1.rolling(w, min_periods=1).mean()
-        # <-- MODIFICADO: 'std_tmo_total' eliminado
 
     # 5) features autorregresivas Volumen
     print("INFO: Creando features Pista 2 (Volumen/Contestadas)...")
@@ -396,11 +393,10 @@ def train_tmo_model(hosting_file_path, output_dir):
     s_contest_s1 = s_contest.shift(1)
     for w in [6, 24, 72]:
         d[f"ma_contest_{w}"] = s_contest_s1.rolling(w, min_periods=1).mean()
-        # <-- MODIFICADO: 'std_contest' eliminado
 
     # 6) features
-    cyc_feats    = ["sin_hour","cos_hour","sin_dow","cos_dow", FERIADOS_COL, "es_dia_de_pago", "dow","month","hour"]
-    # <-- MODIFICADO: Listas de features ya no incluyen 'std'
+    # <-- MODIFICADO: 'es_dia_de_pago' eliminado de la lista
+    cyc_feats    = ["sin_hour","cos_hour","sin_dow","cos_dow", FERIADOS_COL, "dow","month","hour"]
     tmo_total_feats = [c for c in d.columns if c.startswith(("lag_tmo_total_", "ma_tmo_total_"))]
     contest_feats   = [c for c in d.columns if c.startswith(("lag_contest_", "ma_contest_"))]
     
@@ -421,7 +417,7 @@ def train_tmo_model(hosting_file_path, output_dir):
     else:
         sw = None
 
-    # Saneo (los 'inf' ya no deberían generarse, pero lo mantenemos por seguridad)
+    # Saneo
     X.replace([np.inf, -np.inf], np.nan, inplace=True)
     X = X.ffill().dropna()
     y = y.loc[X.index]
@@ -460,7 +456,6 @@ def train_tmo_model(hosting_file_path, output_dir):
     
 # =================================================================================
 # SECCIÓN 3: ORQUESTADOR PRINCIPAL
-# (Sin cambios)
 # =================================================================================
 
 def main():
