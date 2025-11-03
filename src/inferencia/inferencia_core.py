@@ -7,19 +7,19 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
-from .features import ensure_ts, add_time_parts, dummies_and_reindex
+# Nota: Asumo que las funciones importadas (dummies_and_reindex, add_time_parts, etc.) están disponibles.
+from .features import ensure_ts, add_time_parts, dummies_and_reindex 
 from .erlang import required_agents, schedule_agents
 from .utils_io import write_daily_json, write_hourly_json
 
 TIMEZONE = "America/Santiago"
 PUBLIC_DIR = "public"
 
-# --- Constantes LSTM deben coincidir con el entrenamiento ---
-LOOKBACK_STEPS = 168 # 7 días de historia
-HORIZON_STEPS = 24 # 1 día de predicción
+# --- Constantes LSTM ---
+LOOKBACK_STEPS = 168 
+HORIZON_STEPS = 24 # 1 día de predicción 
 
-# --- Rutas de Artefactos ---
-# (Asumiendo que las funciones _candidate_dirs, _find_one, _resolve_tmo_artifacts se mantienen)
+# --- Rutas de Artefactos (Funciones de Soporte) ---
 def _candidate_dirs():
     here = pathlib.Path(".").resolve()
     bases = [
@@ -75,7 +75,7 @@ ENABLE_OUTLIER_CAP = True
 K_WEEKDAY = 6.0
 K_WEEKEND = 7.0
 
-# --- Funciones Auxiliares (Incluye _is_holiday para NameError) ---
+# --- Funciones Auxiliares (Para resolver NameError y soporte) ---
 def _load_cols(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -94,7 +94,6 @@ def _series_is_holiday(idx, holidays_set):
 
 def compute_holiday_factors(df_hist, holidays_set,
                             col_calls=TARGET_CALLS, col_tmo=TARGET_TMO):
-    # ... (Cuerpo de la función)
     cols = [col_calls]
     med_hol_tmo = med_nor_tmo = None
     if col_tmo in df_hist.columns:
@@ -142,7 +141,6 @@ def compute_holiday_factors(df_hist, holidays_set,
 def apply_holiday_adjustment(df_future, holidays_set,
                              factors_calls_by_hour, factors_tmo_by_hour,
                              col_calls_future="calls", col_tmo_future="tmo_s"):
-    # ... (Cuerpo de la función)
     d = add_time_parts(df_future.copy())
     is_hol = _series_is_holiday(d.index, holidays_set)
     hours = d["hour"].astype(int).values
@@ -155,7 +153,6 @@ def apply_holiday_adjustment(df_future, holidays_set,
     return out
 
 def _baseline_median_mad(df_hist, col=TARGET_CALLS):
-    # ... (Cuerpo de la función)
     d = add_time_parts(df_hist[[col]].copy())
     g = d.groupby(["dow", "hour"])[col]
     base = g.median().rename("med").to_frame()
@@ -169,7 +166,6 @@ def _baseline_median_mad(df_hist, col=TARGET_CALLS):
 def apply_outlier_cap(df_future, base_median_mad, holidays_set,
                       col_calls_future="calls",
                       k_weekday=K_WEEKDAY, k_weekend=K_WEEKEND):
-    # ... (Cuerpo de la función)
     if df_future.empty:
         return df_future
     d = add_time_parts(df_future.copy())
@@ -202,7 +198,7 @@ def apply_outlier_cap(df_future, base_median_mad, holidays_set,
     return out
 
 def _is_holiday(ts, holidays_set: set) -> int:
-    """CORRECCIÓN: Esta función fue omitida o mal ubicada, causando NameError."""
+    """Función para verificar si una marca de tiempo es un feriado."""
     if not holidays_set:
         return 0
     try:
@@ -211,7 +207,6 @@ def _is_holiday(ts, holidays_set: set) -> int:
         d = ts.date()
     return 1 if d in holidays_set else 0
 
-# --- NUEVO: Función para generar features en un dataframe
 def generate_features(df, target_calls, target_tmo, feriados_col):
     d = add_time_parts(df.copy())
     
@@ -239,7 +234,7 @@ def generate_features(df, target_calls, target_tmo, feriados_col):
         
     return d
 
-# ---------- Núcleo (MODIFICADO para corregir KeyError y NameError) ----------
+# ---------- NÚCLEO CORREGIDO ----------
 def forecast_120d(df_hist_joined: pd.DataFrame, 
                   horizon_days: int = 120, holidays_set: set | None = None):
     
@@ -271,22 +266,21 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     # Generar *todos* los features en el histórico (Lags, MAs, etc.)
     dfp = generate_features(df, TARGET_CALLS, TARGET_TMO, "feriados")
     
-    # 🚨 CORRECCIÓN del KEY ERROR: Generar DUMMIES y Reindexar antes de fillna
-    dfp = add_time_parts(dfp) # Asegura que las columnas de tiempo existen
-    
-    # Generar las DUMMIES (one-hot encoding)
+    # 🚨 CORRECCIÓN 1: Generar DUMMIES y Reindexar
+    dfp = add_time_parts(dfp)
     dfp = pd.get_dummies(dfp, columns=['dow', 'month', 'hour'], drop_first=False, dtype=float)
 
+    # 🚨 CORRECCIÓN 3: Eliminar duplicados en el índice histórico antes de reindexar
+    dfp = dfp[~dfp.index.duplicated(keep='last')]
+    
     # Reindexar para asegurar que tenga *exactamente* las columnas de entrenamiento
     dfp = dfp.reindex(columns=all_cols_expected, fill_value=np.nan) 
     
-    # Rellenar los NaN (¡ESTA LÍNEA AHORA DEBE FUNCIONAR!)
+    # Rellenar los NaN 
     dfp[cols_pl] = dfp[cols_pl].fillna(0.0)
     dfp[cols_tmo] = dfp[cols_tmo].fillna(0.0)
     
-    last_ts = dfp.index.max()
-    
-    # ===== Bucle de Inferencia (1 paso por DÍA, no por hora) =====
+    # ===== Bucle de Inferencia =====
     print(f"Iniciando predicción iterativa (LSTM) para {horizon_days} días...")
     
     future_predictions = []
@@ -297,17 +291,17 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         # 1. Preparar Ventana de Entrada (Input)
         input_df = dfp.iloc[-LOOKBACK_STEPS:]
         
-        # 2. Preparar Input del Planner (dfp ya tiene las dummies correctas)
+        # 2. Prepara Input Planner
         input_features_pl = input_df[cols_pl]
         input_scaled_pl = sc_pl.transform(input_features_pl)
         input_lstm_pl = input_scaled_pl.reshape((1, LOOKBACK_STEPS, len(cols_pl)))
         
-        # 3. Preparar Input del TMO
+        # 3. Prepara Input TMO
         input_features_tmo = input_df[cols_tmo]
         input_scaled_tmo = sc_tmo.transform(input_features_tmo)
         input_lstm_tmo = input_scaled_tmo.reshape((1, LOOKBACK_STEPS, len(cols_tmo)))
 
-        # 4. Predecir 24 horas de golpe
+        # 4. Predecir 24 horas
         yhat_calls_24h = m_pl.predict(input_lstm_pl, verbose=0).flatten()
         yhat_tmo_24h = m_tmo.predict(input_lstm_tmo, verbose=0).flatten()
         
@@ -323,14 +317,16 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         df_future_day[TARGET_CALLS] = np.maximum(0, yhat_calls_24h) 
         df_future_day[TARGET_TMO] = np.maximum(0, yhat_tmo_24h)  
         
-        # 6. Generar "Known Future Features" (Calendario y Feriados) para este nuevo día
+        # 6. Generar Features de Calendario/Feriados
         df_future_day["ts"] = df_future_day.index
         df_future_day = add_time_parts(df_future_day)
-        # ESTA LÍNEA AHORA FUNCIONA
         df_future_day["feriados"] = df_future_day.index.to_series().apply(lambda ts: _is_holiday(ts, holidays_set))
         
-        # 7. Apendizar al histórico (dfp) para la *siguiente* iteración
+        # 7. Apendizar y preparar para la *siguiente* iteración
         dfp_with_future = pd.concat([dfp, df_future_day])
+
+        # 🚨 CORRECCIÓN 3.1: Eliminar duplicados después de concatenar
+        dfp_with_future = dfp_with_future[~dfp_with_future.index.duplicated(keep='last')]
         
         # Volver a generar features (lags/MAs)
         dfp_with_future = generate_features(dfp_with_future, TARGET_CALLS, TARGET_TMO, "feriados")
@@ -338,7 +334,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         # Volver a generar dummies y reindexar (para el bucle)
         dfp_with_future = add_time_parts(dfp_with_future)
         dfp_with_future = pd.get_dummies(dfp_with_future, columns=['dow', 'month', 'hour'], drop_first=False, dtype=float)
-        dfp_with_future = dfp_with_future.reindex(columns=all_cols_expected, fill_value=0.0)
+        
+        # Línea 341 corregida: Ahora el índice es único
+        dfp_with_future = dfp_with_future.reindex(columns=all_cols_expected, fill_value=0.0) 
         
         # Actualizar dfp para el siguiente bucle
         dfp = dfp_with_future
@@ -348,20 +346,15 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
 
     print("Predicción iterativa completada.")
 
-    # ===== Salida horaria =====
+    # ===== Salida, Ajustes y Erlang =====
     df_hourly = pd.concat(future_predictions)
     
-    # Renombrar columnas a formato de salida
+    # Renombrar y sanear
     df_hourly = df_hourly.rename(columns={TARGET_CALLS: "calls", TARGET_TMO: "tmo_s"})
-    
-    # Saneamiento final
-    df_hourly["calls"] = df_hourly["calls"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    df_hourly["tmo_s"] = df_hourly["tmo_s"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    
-    df_hourly["calls"] = np.round(df_hourly["calls"]).astype(int)
-    df_hourly["tmo_s"] = np.round(df_hourly["tmo_s"]).astype(int)
+    df_hourly["calls"] = np.round(df_hourly["calls"].replace([np.inf, -np.inf], np.nan).fillna(0.0)).astype(int)
+    df_hourly["tmo_s"] = np.round(df_hourly["tmo_s"].replace([np.inf, -np.inf], np.nan).fillna(0.0)).astype(int)
 
-    # ===== Ajustes feriados =====
+    # Ajustes feriados
     if holidays_set and len(holidays_set) > 0:
         (f_calls_by_hour, f_tmo_by_hour, _gc, _gt) = compute_holiday_factors(
             df, holidays_set, col_calls=TARGET_CALLS, col_tmo=TARGET_TMO
@@ -369,21 +362,21 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         df_hourly = apply_holiday_adjustment(df_hourly, holidays_set, f_calls_by_hour, f_tmo_by_hour,
                                               col_calls_future="calls", col_tmo_future="tmo_s")
 
-    # ===== CAP outliers (llamadas) =====
+    # CAP outliers
     if ENABLE_OUTLIER_CAP:
         base_mad = _baseline_median_mad(df, col=TARGET_CALLS)
         df_hourly = apply_outlier_cap(df_hourly, base_mad, holidays_set,
                                       col_calls_future="calls",
                                       k_weekday=K_WEEKDAY, k_weekend=K_WEEKEND)
 
-    # ===== Erlang =====
+    # Erlang
     df_hourly["agents_prod"] = 0
     for ts in df_hourly.index:
         a, _ = required_agents(float(df_hourly.at[ts, "calls"]), float(df_hourly.at[ts, "tmo_s"]))
         df_hourly.at[ts, "agents_prod"] = int(a)
     df_hourly["agents_sched"] = df_hourly["agents_prod"].apply(schedule_agents)
 
-    # ===== Salidas JSON =====
+    # Salidas JSON
     write_hourly_json(f"{PUBLIC_DIR}/prediccion_horaria.json", df_hourly, "calls", "tmo_s", "agents_sched")
     write_daily_json(f"{PUBLIC_DIR}/prediccion_diaria.json", df_hourly, "calls", "tmo_s",
                       weights_col="calls")
