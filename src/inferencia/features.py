@@ -15,8 +15,9 @@ def _coerce_ts_series(s: pd.Series) -> pd.Series:
         if dt.isna().any():
             dt2 = pd.to_datetime(s, errors="coerce", dayfirst=False, utc=True)
             dt = dt.fillna(dt2)
-    # Ya no forzamos la conversión a TIMEZONE aquí, lo hacemos en ensure_ts
-    return dt.dt.tz_localize('UTC', ambiguous='infer', nonexistent='shift-forward').dt.tz_convert(TIMEZONE)
+    
+    # 🚨 CORRECCIÓN DEL TYPO: 'shift_forward' (con guion bajo)
+    return dt.dt.tz_localize('UTC', ambiguous='infer', nonexistent='shift_forward').dt.tz_convert(TIMEZONE)
 
 def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     d = df.copy()
@@ -27,14 +28,13 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
         idx = d.index
         # 1. Quitar la zona horaria actual (convertir a ingenuo)
         if idx.tz is not None:
-             # Convertir a UTC y luego a naive (sin tz) para simplificar el round
              idx = idx.tz_convert('UTC').tz_localize(None) 
         
-        # 2. Redondear a la hora más cercana 
+        # 2. Redondear a la hora más cercana (usando 'h' minúscula para el warning)
         idx = idx.round('h') 
         
-        # 3. Localizar la zona horaria, forzando la inferencia de DST
-        idx = idx.tz_localize(TIMEZONE, ambiguous='infer', nonexistent='shift-forward')
+        # 3. 🚨 CORRECCIÓN DEL TYPO: 'shift_forward' (con guion bajo)
+        idx = idx.tz_localize(TIMEZONE, ambiguous='infer', nonexistent='shift_forward')
         
         d.index = idx
         if "ts" in d.columns: d = d.drop(columns=["ts"])
@@ -78,7 +78,7 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     return d
 
 # ------------------------------------------------------------
-# Partes de tiempo (sin cambios significativos)
+# Partes de tiempo (sin cambios)
 # ------------------------------------------------------------
 def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     if not isinstance(df.index, pd.DatetimeIndex):
@@ -113,7 +113,7 @@ def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     for k in [24, 48, 72, 168]: d[f"lag_{k}"] = s.shift(k)
     s1 = s.shift(1)
     for w in [24, 72, 168]: d[f"ma_{w}"] = s1.rolling(w, min_periods=1).mean()
-    for c in [f"lag_{k}" for k in [24,48,72,168]] + [f"ma_{w}" for w in [24,72,168]]: d[c] = pd.to_numeric(d[c], errors="coerce")
+    for c in [f"lag_{k}" for k in [24,48,72,168]] + [f"ma_{w}"for w in [24,72,168]]: d[c] = pd.to_numeric(d[c], errors="coerce")
     return d
 
 # ------------------------------------------------------------
