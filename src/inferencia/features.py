@@ -28,11 +28,16 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(d.index, pd.DatetimeIndex):
         try: idx = d.index.tz_convert(TIMEZONE)
         except Exception: idx = d.index.tz_localize("UTC").tz_convert(TIMEZONE)
+        
+        # 🚨 CAMBIO CLAVE: Redondeamos a la hora más cercana para evitar duplicados por minutos/segundos.
+        idx = idx.round('H') 
+        
         d.index = idx
         if "ts" in d.columns: d = d.drop(columns=["ts"])
         d = d.sort_index()
         d.index.name = "ts"
-        d = d[~d.index.duplicated(keep='last')] # Limpieza de duplicados
+        # Limpieza de duplicados, tomando el último valor si hay múltiples en la misma hora
+        d = d[~d.index.duplicated(keep='last')] 
         return d
 
     # Caso 2: El índice no es DatetimeIndex
@@ -60,8 +65,12 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(d.index, pd.MultiIndex) and "ts" in d.index.names:
         d.index = d.index.droplevel(d.index.names.index("ts"))
     
-    d = d.dropna(subset=["ts"]).sort_values("ts").set_index("ts")
-    d = d[~d.index.duplicated(keep='last')] # Limpieza de duplicados
+    # 🚨 CAMBIO CLAVE: Redondeamos a la hora antes de establecer como índice
+    ts_rounded = ts.round('H')
+    
+    d = d.dropna(subset=["ts"]).sort_values("ts").set_index(ts_rounded)
+    # Limpieza de duplicados, tomando el último valor si hay múltiples en la misma hora
+    d = d[~d.index.duplicated(keep='last')] 
     return d
 
 # ------------------------------------------------------------
