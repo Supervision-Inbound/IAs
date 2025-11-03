@@ -13,6 +13,7 @@ HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
 # ======= Claves de negocio =======
 TARGET_CALLS_NEW = "recibidos_nacional"
 TARGET_TMO_NEW   = "tmo_general"
+FERIADOS_COL = "feriados" # <-- Nombre estandarizado
 TZ = "America/Santiago"
 
 def smart_read_historical(path: str) -> pd.DataFrame:
@@ -53,9 +54,8 @@ def load_holidays(csv_path: str) -> set:
 def mark_holidays_index(dt_index, holidays_set: set) -> pd.Series:
     tz = getattr(dt_index, "tz", None)
     idx_dates = dt_index.tz_convert(TZ).date if tz is not None else dt_index.date
-    return pd.Series([d in holidays_set for d in idx_dates], index=dt_index, dtype=int, name="feriados")
+    return pd.Series([d in holidays_set for d in idx_dates], index=dt_index, dtype=int, name=FERIADOS_COL)
 
-# <-- MODIFICADO: 'add_es_dia_de_pago' eliminado
 
 def main(horizonte_dias: int):
     os.makedirs("public", exist_ok=True)
@@ -85,15 +85,19 @@ def main(horizonte_dias: int):
 
     # 5) Derivar calendario (feriados)
     holidays_set = load_holidays(HOLIDAYS_FILE)
-    if "feriados" not in dfh.columns:
-        dfh["feriados"] = mark_holidays_index(dfh.index, holidays_set).values
-    dfh["feriados"] = pd.to_numeric(dfh["feriados"], errors="coerce").fillna(0).astype(int)
+    if FERIADOS_COL not in dfh.columns:
+        dfh[FERIADOS_COL] = mark_holidays_index(dfh.index, holidays_set).values
+    dfh[FERIADOS_COL] = pd.to_numeric(dfh[FERIADOS_COL], errors="coerce").fillna(0).astype(int)
     
-    # <-- MODIFICADO: Lógica 'es_dia_de_pago' eliminada
+    # <-- MODIFICADO: Añadir features pre/post feriado a los datos históricos
+    # Esto debe hacerse DESPUÉS de asegurar el índice 'ts' y 'feriados'
+    dfh = dfh.sort_index() # Asegurar orden temporal
+    dfh['es_post_feriado'] = ((dfh[FERIADOS_COL].shift(1).fillna(0) == 1) & (dfh[FERIADOS_COL] == 0)).astype(int)
+    dfh['es_pre_feriado'] = ((dfh[FERIADOS_COL].shift(-1).fillna(0) == 1) & (dfh[FERIADOS_COL] == 0)).astype(int)
 
     # 6) ffill columnas clave
-    # <-- MODIFICADO: 'es_dia_de_pago' eliminado de la lista
-    for c in [TARGET_TMO_NEW, "feriados",
+    # <-- MODIFICADO: Añadir 'es_pre_feriado' y 'es_post_feriado' a la lista
+    for c in [TARGET_TMO_NEW, FERIADOS_COL, 'es_pre_feriado', 'es_post_feriado',
               "proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
         if c in dfh.columns:
             dfh[c] = dfh[c].ffill()
