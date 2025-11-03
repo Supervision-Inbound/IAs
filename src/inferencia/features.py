@@ -188,3 +188,4 @@ def dummies_and_reindex(df: pd.DataFrame, training_cols: list) -> pd.DataFrame:
     # Relleno forward básico (por si quedan NaN en alguna fila intermedia)
     X = X.ffill().fillna(0.0)
     return X
+
