@@ -11,8 +11,7 @@ DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
 
 # ======= Claves de negocio =======
-# -> Para que el planner lea EXACTAMENTE lo mismo que en entrenamiento:
-TARGET_CALLS_NEW = "recibidos_nacional"   # <--- usamos el base name histórico
+TARGET_CALLS_NEW = "recibidos_nacional"
 TARGET_TMO_NEW   = "tmo_general"
 TZ = "America/Santiago"
 
@@ -56,8 +55,7 @@ def mark_holidays_index(dt_index, holidays_set: set) -> pd.Series:
     idx_dates = dt_index.tz_convert(TZ).date if tz is not None else dt_index.date
     return pd.Series([d in holidays_set for d in idx_dates], index=dt_index, dtype=int, name="feriados")
 
-def add_es_dia_de_pago(df_idx: pd.DataFrame) -> pd.Series:
-    return pd.Series(0, index=df_idx.index, name="es_dia_de_pago")
+# <-- MODIFICADO: 'add_es_dia_de_pago' eliminado
 
 def main(horizonte_dias: int):
     os.makedirs("public", exist_ok=True)
@@ -66,14 +64,14 @@ def main(horizonte_dias: int):
     dfh = smart_read_historical(DATA_FILE)
     dfh.columns = dfh.columns.str.strip()
 
-    # 2) Normalizar columna de volumen al nombre EXACTO del entrenamiento
+    # 2) Normalizar columna de volumen
     if TARGET_CALLS_NEW not in dfh.columns:
         for cand in ["recibidos_nacional", "recibidos", "contestados", "total_llamadas", "llamadas"]:
             if cand in dfh.columns:
                 dfh = dfh.rename(columns={cand: TARGET_CALLS_NEW})
                 break
 
-    # 3) Normalizar TMO a segundos -> 'tmo_general'
+    # 3) Normalizar TMO a segundos
     if TARGET_TMO_NEW not in dfh.columns:
         tmo_source = None
         for cand in ["tmo_general", "tmo (segundos)", "tmo (s)", "tmo_seg", "tmo", "aht"]:
@@ -85,30 +83,29 @@ def main(horizonte_dias: int):
     # 4) Asegurar índice temporal
     dfh = ensure_ts(dfh)
 
-    # 5) Derivar calendario (feriados) y 'es_dia_de_pago' (forzado a 0)
+    # 5) Derivar calendario (feriados)
     holidays_set = load_holidays(HOLIDAYS_FILE)
     if "feriados" not in dfh.columns:
         dfh["feriados"] = mark_holidays_index(dfh.index, holidays_set).values
     dfh["feriados"] = pd.to_numeric(dfh["feriados"], errors="coerce").fillna(0).astype(int)
-    if "es_dia_de_pago" not in dfh.columns:
-        dfh["es_dia_de_pago"] = add_es_dia_de_pago(dfh).values
-    else:
-        dfh["es_dia_de_pago"] = 0  # forzado según tu lógica
+    
+    # <-- MODIFICADO: Lógica 'es_dia_de_pago' eliminada
 
     # 6) ffill columnas clave
-    for c in [TARGET_TMO_NEW, "feriados", "es_dia_de_pago",
+    # <-- MODIFICADO: 'es_dia_de_pago' eliminado de la lista
+    for c in [TARGET_TMO_NEW, "feriados",
               "proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
         if c in dfh.columns:
             dfh[c] = dfh[c].ffill()
 
-    # 7) Forecast (sin reset_index: preservamos ts como índice)
+    # 7) Forecast
     df_hourly = forecast_120d(
         dfh,
         horizon_days=horizonte_dias,
         holidays_set=holidays_set
     )
 
-    # 8) Alertas clima (usa la curva de volumen)
+    # 8) Alertas clima
     from src.inferencia.alertas_clima import generar_alertas
     generar_alertas(df_hourly[["calls"]])
 
