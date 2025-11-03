@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
-# Nota: Asumo que las funciones importadas (dummies_and_reindex, add_time_parts, etc.) están disponibles.
+# Nota: Asumo que las funciones importadas existen en los módulos referenciados
 from .features import ensure_ts, add_time_parts, dummies_and_reindex 
 from .erlang import required_agents, schedule_agents
 from .utils_io import write_daily_json, write_hourly_json
@@ -75,7 +75,7 @@ ENABLE_OUTLIER_CAP = True
 K_WEEKDAY = 6.0
 K_WEEKEND = 7.0
 
-# --- Funciones Auxiliares (Para resolver NameError y soporte) ---
+# --- Funciones Auxiliares ---
 def _load_cols(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -234,7 +234,9 @@ def generate_features(df, target_calls, target_tmo, feriados_col):
         
     return d
 
-# ---------- NÚCLEO CORREGIDO ----------
+# -------------------------------------------------------------
+# -------------------- NÚCLEO CORREGIDO FINAL --------------------
+# -------------------------------------------------------------
 def forecast_120d(df_hist_joined: pd.DataFrame, 
                   horizon_days: int = 120, holidays_set: set | None = None):
     
@@ -248,7 +250,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     sc_tmo = joblib.load(TMO_SCALER)
     cols_tmo = _load_cols(TMO_COLS)
 
-    # Definir la lista de todas las columnas esperadas (Planner + TMO)
     all_cols_expected = list(set(cols_pl) | set(cols_tmo))
 
     # 2. Preparar Dataframe Histórico (dfp)
@@ -263,17 +264,16 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     if TARGET_TMO not in df.columns: df[TARGET_TMO] = 0
     if "feriados" not in df.columns: df["feriados"] = 0
     
-    # Generar *todos* los features en el histórico (Lags, MAs, etc.)
     dfp = generate_features(df, TARGET_CALLS, TARGET_TMO, "feriados")
     
-    # 🚨 CORRECCIÓN 1: Generar DUMMIES y Reindexar
+    # 🚨 Generar DUMMIES y Reindexar (Corrección KeyError)
     dfp = add_time_parts(dfp)
     dfp = pd.get_dummies(dfp, columns=['dow', 'month', 'hour'], drop_first=False, dtype=float)
 
-    # 🚨 CORRECCIÓN 3: Eliminar duplicados en el índice histórico antes de reindexar
+    # 🚨 Limpieza inicial de duplicados (Corrección ValueError)
     dfp = dfp[~dfp.index.duplicated(keep='last')]
     
-    # Reindexar para asegurar que tenga *exactamente* las columnas de entrenamiento
+    # Reindexar para asegurar columnas correctas
     dfp = dfp.reindex(columns=all_cols_expected, fill_value=np.nan) 
     
     # Rellenar los NaN 
@@ -323,9 +323,13 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         df_future_day["feriados"] = df_future_day.index.to_series().apply(lambda ts: _is_holiday(ts, holidays_set))
         
         # 7. Apendizar y preparar para la *siguiente* iteración
+        
+        # 🚨 REFUERZO 1: Limpiar duplicados del HISTÓRICO antes de concatenar
+        dfp = dfp[~dfp.index.duplicated(keep='last')]
+        
         dfp_with_future = pd.concat([dfp, df_future_day])
 
-        # 🚨 CORRECCIÓN 3.1: Eliminar duplicados después de concatenar
+        # 🚨 REFUERZO 2: Limpiar duplicados de la CONCATENACIÓN
         dfp_with_future = dfp_with_future[~dfp_with_future.index.duplicated(keep='last')]
         
         # Volver a generar features (lags/MAs)
@@ -335,7 +339,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         dfp_with_future = add_time_parts(dfp_with_future)
         dfp_with_future = pd.get_dummies(dfp_with_future, columns=['dow', 'month', 'hour'], drop_first=False, dtype=float)
         
-        # Línea 341 corregida: Ahora el índice es único
         dfp_with_future = dfp_with_future.reindex(columns=all_cols_expected, fill_value=0.0) 
         
         # Actualizar dfp para el siguiente bucle
