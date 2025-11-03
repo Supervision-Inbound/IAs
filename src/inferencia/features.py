@@ -17,9 +17,7 @@ def _coerce_ts_series(s: pd.Series) -> pd.Series:
             dt2 = pd.to_datetime(s, errors="coerce", dayfirst=False, utc=True)
             dt = dt.fillna(dt2)
     
-    # 🚨 CORRECCIÓN: 'dt' ya es 'tz-aware' (UTC) debido a utc=True.
-    # No podemos usar .tz_localize('UTC') de nuevo.
-    # Solo necesitamos CONVERTIR la zona horaria a la deseada.
+    # Convertimos a la zona horaria final. 'dt' sale de aquí tz-aware.
     return dt.dt.tz_convert(TIMEZONE)
 
 def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
@@ -37,7 +35,6 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
         idx = idx.round('h') 
         
         # 3. Localizar la zona horaria (ahora que es ingenuo), manejando DST
-        # 🚨 CORRECCIÓN (Mantenida): 'shift_forward' (con guion bajo)
         idx = idx.tz_localize(TIMEZONE, ambiguous='infer', nonexistent='shift_forward')
         
         d.index = idx
@@ -48,7 +45,7 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
         d = d[~d.index.duplicated(keep='last')] 
         return d
 
-    # Caso 2: El índice no es DatetimeIndex (El que está fallando)
+    # Caso 2: El índice no es DatetimeIndex (El que estaba fallando)
     cols = {c.lower().strip(): c for c in d.columns}
     ts_col = None
     for cand in ["ts"]:
@@ -65,7 +62,7 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
         ts = _coerce_ts_series(d[ts_col].astype(str))
     elif fecha_col is not None and hora_col is not None:
         s = (d[fecha_col].astype(str).str.strip() + " " + d[hora_col].astype(str).str.strip()).str.strip()
-        ts = _coerce_ts_series(s) # <-- Esta llamada falla
+        ts = _coerce_ts_series(s) # 'ts' es tz-aware
     else:
         raise ValueError("No se pudo construir 'ts'. Aporta 'ts' o 'fecha'+'hora'.")
 
@@ -73,10 +70,19 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(d.index, pd.MultiIndex) and "ts" in d.index.names:
         d.index = d.index.droplevel(d.index.names.index("ts"))
     
-    # Redondeamos a la hora antes de establecer como índice
-    ts_rounded = ts.dt.round('h')
+    # 🚨 CORRECCIÓN APLICADA AL "CASO 2"
+    # 'ts' es tz-aware, no podemos redondearlo directamente.
     
-    d = d.dropna(subset=["ts"]).sort_values("ts").set_index(ts_rounded)
+    # 1. Convertir a naive (UTC-based)
+    ts_naive = ts.dt.tz_convert('UTC').dt.tz_localize(None)
+    
+    # 2. Redondear (naive)
+    ts_naive_rounded = ts_naive.round('h')
+    
+    # 3. Localizar de nuevo a TIMEZONE, manejando DST
+    ts_rounded_aware = ts_naive_rounded.dt.tz_localize(TIMEZONE, ambiguous='infer', nonexistent='shift_forward')
+    
+    d = d.dropna(subset=["ts"]).sort_values("ts").set_index(ts_rounded_aware) # Usar la versión final
     # Limpieza de duplicados
     d = d[~d.index.duplicated(keep='last')] 
     return d
