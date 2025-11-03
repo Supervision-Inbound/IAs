@@ -7,7 +7,8 @@ import pandas as pd
 import tensorflow as tf
 
 from src.inferencia import features
-from src.inferencia import inference_config as config
+# 🚨 CORRECCIÓN: Usar importación local/directa para el módulo dentro del mismo directorio.
+import inference_config as config 
 
 # ----------------------------------------------------------------------
 # Constantes
@@ -211,14 +212,12 @@ def forecast_120d(
     # Crear Dummies y asegurar el orden de las columnas de entrenamiento
     dfp_with_future = features.dummies_and_reindex(dfp_with_future, all_cols_expected)
 
-    # 🚨 CORRECCIÓN FINAL: Aseguramos que el índice de filas sea único antes de reindexar columnas
-    # Esto previene el error 'cannot reindex on an axis with duplicate labels' si el redondeo 
-    # del tiempo introdujo duplicados que no fueron limpiados correctamente.
+    # CORRECCIÓN DE DUPLICADOS EN EL ÍNDICE (para el error anterior)
     if dfp_with_future.index.duplicated().any():
         print("Advertencia: Se encontraron y eliminaron duplicados en el índice antes del reindexado de columnas.")
         dfp_with_future = dfp_with_future[~dfp_with_future.index.duplicated(keep='last')]
     
-    # Reindexar a las columnas esperadas (línea 304 original)
+    # Reindexar a las columnas esperadas
     dfp_with_future = dfp_with_future.reindex(columns=all_cols_expected, fill_value=0.0) 
     
     # 5. Filtrar solo las predicciones y limpiar
@@ -229,4 +228,3 @@ def forecast_120d(
         df_hourly["target_pred"] = 0.0
 
     return df_hourly[["target_pred"]]
-
