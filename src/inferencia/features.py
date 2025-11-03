@@ -27,17 +27,19 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(d.index, pd.DatetimeIndex):
         
         idx = d.index
-        # 1. Quitar la zona horaria actual (convertir a ingenuo/naive)
+        # 1. Quitar la zona horaria actual (convertir a ingenuo/naive basado en UTC)
         if idx.tz is not None:
-             idx = idx.tz_convert('UTC').tz_localize(None) 
+             idx_naive = idx.tz_convert('UTC').tz_localize(None) 
+        else:
+             idx_naive = idx # Asumir que ya es ingenuo si no tiene TZ
         
-        # 2. Redondear a la hora más cercana (usando 'h' minúscula para el warning)
-        idx = idx.round('h') 
+        # 2. Redondear el tiempo ingenuo
+        idx_naive_rounded = idx_naive.round('h') 
         
-        # 3. Localizar la zona horaria (ahora que es ingenuo), manejando DST
-        idx = idx.tz_localize(TIMEZONE, ambiguous='infer', nonexistent='shift_forward')
+        # 3. 🚨 LÓGICA CORREGIDA: Localizar de nuevo a UTC (seguro) y CONVERTIR a TIMEZONE
+        idx_aware = idx_naive_rounded.tz_localize('UTC').tz_convert(TIMEZONE)
         
-        d.index = idx
+        d.index = idx_aware
         if "ts" in d.columns: d = d.drop(columns=["ts"])
         d = d.sort_index()
         d.index.name = "ts"
@@ -62,7 +64,7 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
         ts = _coerce_ts_series(d[ts_col].astype(str))
     elif fecha_col is not None and hora_col is not None:
         s = (d[fecha_col].astype(str).str.strip() + " " + d[hora_col].astype(str).str.strip()).str.strip()
-        ts = _coerce_ts_series(s) # 'ts' es tz-aware
+        ts = _coerce_ts_series(s) # 'ts' es tz-aware (America/Santiago)
     else:
         raise ValueError("No se pudo construir 'ts'. Aporta 'ts' o 'fecha'+'hora'.")
 
@@ -70,8 +72,8 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(d.index, pd.MultiIndex) and "ts" in d.index.names:
         d.index = d.index.droplevel(d.index.names.index("ts"))
     
-    # 🚨 CORRECCIÓN APLICADA AL "CASO 2"
-    # 'ts' es tz-aware, no podemos redondearlo directamente.
+    # 🚨 LÓGICA CORREGIDA (Idéntica al Caso 1):
+    # 'ts' es tz-aware (America/Santiago), no podemos redondearlo directamente.
     
     # 1. Convertir a naive (UTC-based)
     ts_naive = ts.dt.tz_convert('UTC').dt.tz_localize(None)
@@ -79,8 +81,8 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     # 2. Redondear (naive)
     ts_naive_rounded = ts_naive.round('h')
     
-    # 3. Localizar de nuevo a TIMEZONE, manejando DST
-    ts_rounded_aware = ts_naive_rounded.dt.tz_localize(TIMEZONE, ambiguous='infer', nonexistent='shift_forward')
+    # 3. Localizar de nuevo a UTC (seguro) y CONVERTIR a TIMEZONE
+    ts_rounded_aware = ts_naive_rounded.dt.tz_localize('UTC').dt.tz_convert(TIMEZONE)
     
     d = d.dropna(subset=["ts"]).sort_values("ts").set_index(ts_rounded_aware) # Usar la versión final
     # Limpieza de duplicados
