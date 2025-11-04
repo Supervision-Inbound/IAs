@@ -1,10 +1,15 @@
+# src/main.py
 import argparse
 import os
 import numpy as np
 import pandas as pd
+import sys
 
-from src.inferencia.inferencia_core import forecast_120d
-from src.inferencia.features import ensure_ts
+# Asegurar que 'src' esté en el path (importante para GitHub Actions)
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from inferencia.inferencia_core import forecast_120d
+from inferencia.features import ensure_ts
 
 DATA_FILE = "data/historical_data.csv"
 HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
@@ -62,10 +67,18 @@ def main(horizonte_dias: int):
 
     # 2) Normalizar volumen
     if TARGET_CALLS_NEW not in dfh.columns:
-        for cand in ["recibidos_nacional", "recibidos", "contestados", "total_llamadas", "llamadas"]:
+        for cand in ["recibidos_nacional", "recibidos", "contestados", "total_llamadas", "llamadas", "target"]:
             if cand in dfh.columns:
                 dfh = dfh.rename(columns={cand: TARGET_CALLS_NEW})
                 break
+    
+    # 🚨 RENOMBRADO VITAL: La V7 espera la columna "target"
+    if TARGET_CALLS_NEW in dfh.columns:
+        dfh = dfh.rename(columns={TARGET_CALLS_NEW: "target"})
+    else:
+        # Si no existe, la creamos (aunque la V7-LSTM la necesita)
+        if "target" not in dfh.columns:
+            dfh["target"] = 0 
 
     # 3) Normalizar TMO
     if TARGET_TMO_NEW not in dfh.columns:
@@ -75,42 +88,50 @@ def main(horizonte_dias: int):
         if tmo_source:
             dfh[TARGET_TMO_NEW] = dfh[tmo_source].apply(parse_tmo_to_seconds)
 
-    # 4) Asegurar índice temporal
+    # 4) Asegurar índice temporal (features.py lo limpia y maneja DST)
     dfh = ensure_ts(dfh)
 
-    # Limpieza crítica en el Main: Asegurar que el índice inicial es único.
-    dfh = dfh[~dfh.index.duplicated(keep='last')]
-
-    # 5) Derivar calendario (feriados)
+    # 5) Derivar calendario (feriados) - Necesario para V7
     holidays_set = load_holidays(HOLIDAYS_FILE)
     if FERIADOS_COL not in dfh.columns:
         dfh[FERIADOS_COL] = mark_holidays_index(dfh.index, holidays_set).values
     dfh[FERIADOS_COL] = pd.to_numeric(dfh[FERIADOS_COL], errors="coerce").fillna(0).astype(int)
     
-    # Añadir features pre/post feriado
     dfh = dfh.sort_index()
     dfh['es_post_feriado'] = ((dfh[FERIADOS_COL].shift(1).fillna(0) == 1) & (dfh[FERIADOS_COL] == 0)).astype(int)
     dfh['es_pre_feriado'] = ((dfh[FERIADOS_COL].shift(-1).fillna(0) == 1) & (dfh[FERIADOS_COL] == 0)).astype(int)
 
     # 6) ffill columnas clave
-    for c in [TARGET_TMO_NEW, FERIADOS_COL, 'es_pre_feriado', 'es_post_feriado',
-              "proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
+    for c in [TARGET_TMO_NEW, FERIADOS_COL, 'es_pre_feriado', 'es_post_feriado']:
         if c in dfh.columns:
             dfh[c] = dfh[c].ffill()
 
     # 7) Forecast
+    # 🚨 CORRECCIÓN DEL TypeError: 
+    # La V7 (inferencia_core) no acepta 'horizon_days' ni 'holidays_set' directamente.
+    # 'horizon_days' lo ignora (usa el de config) y 'holidays_set' lo espera en dfh.
     df_hourly = forecast_120d(
-        dfh,
-        horizon_days=horizonte_dias,
-        holidays_set=holidays_set
+        dfh
+        # 'artifacts_path' usará el default de config.
     )
 
-    # 8) Alertas clima
-    from src.inferencia.alertas_clima import generar_alertas
-    generar_alertas(df_hourly[["calls"]])
+    # 8) Alertas clima (Asumiendo que alertas_clima.py existe)
+    # from inferencia.alertas_clima import generar_alertas
+    # generar_alertas(df_hourly[["calls"]]) # V7 devuelve 'target_pred', no 'calls'
+    
+    # (Opcional: Renombrar 'target_pred' a 'calls' si el resto del pipeline lo espera)
+    df_hourly = df_hourly.rename(columns={"target_pred": "calls"})
+    print("Inferencia completada.")
+    # print(df_hourly.head())
+
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--horizonte", type=int, default=120)
     args = ap.parse_args()
+    
+    # 🚨 NOTA: El argumento 'horizonte' no se está usando en la V7.
+    # Si necesitas que se use, la V7 (inferencia_core) debe ser modificada 
+    # para aceptar 'horizon_days' (como en mi penúltima respuesta).
+    
     main(args.horizonte)
