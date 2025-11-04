@@ -18,23 +18,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      # --- AÑADIDO: Bloque de caché de dependencias ---
-      - name: Cache de dependencias pip
-        uses: actions/cache@v4
-        with:
-          # La ruta en el 'runner' de Linux donde pip guarda los paquetes
-          path: ~/.cache/pip
-          # La 'llave' única: si requirements.txt no cambia, esta llave es la misma
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          # Un fallback por si no hay un match exacto
-          restore-keys: |
-            ${{ runner.os }}-pip-
-      # --- FIN DEL BLOQUE AÑADIDO ---
-
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          # Esto ahora será casi instantáneo si el caché se encontró
+          # Esto ahora es rápido y seguro, porque lee el requirements.txt
+          # que tiene las versiones fijadas y compatibles.
           pip install -r requirements.txt
 
       - name: Download release assets
