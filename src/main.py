@@ -13,7 +13,6 @@ HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
 # ======= Claves de negocio =======
 TARGET_CALLS_NEW = "recibidos_nacional"
 TARGET_TMO_NEW   = "tmo_general"
-FERIADOS_COL = "feriados" 
 TZ = "America/Santiago"
 
 def smart_read_historical(path: str) -> pd.DataFrame:
@@ -54,8 +53,9 @@ def load_holidays(csv_path: str) -> set:
 def mark_holidays_index(dt_index, holidays_set: set) -> pd.Series:
     tz = getattr(dt_index, "tz", None)
     idx_dates = dt_index.tz_convert(TZ).date if tz is not None else dt_index.date
-    return pd.Series([d in holidays_set for d in idx_dates], index=dt_index, dtype=int, name=FERIADOS_COL)
+    return pd.Series([d in holidays_set for d in idx_dates], index=dt_index, dtype=int, name="feriados")
 
+# <-- MODIFICADO: 'add_es_dia_de_pago' eliminado
 
 def main(horizonte_dias: int):
     os.makedirs("public", exist_ok=True)
@@ -85,33 +85,29 @@ def main(horizonte_dias: int):
 
     # 5) Derivar calendario (feriados)
     holidays_set = load_holidays(HOLIDAYS_FILE)
-    if FERIADOS_COL not in dfh.columns:
-        dfh[FERIADOS_COL] = mark_holidays_index(dfh.index, holidays_set).values
-    dfh[FERIADOS_COL] = pd.to_numeric(dfh[FERIADOS_COL], errors="coerce").fillna(0).astype(int)
+    if "feriados" not in dfh.columns:
+        dfh["feriados"] = mark_holidays_index(dfh.index, holidays_set).values
+    dfh["feriados"] = pd.to_numeric(dfh["feriados"], errors="coerce").fillna(0).astype(int)
     
-    # 6) Añadir features pre/post feriado a los datos históricos
-    dfh = dfh.sort_index() 
-    dfh['es_post_feriado'] = ((dfh[FERIADOS_COL].shift(1).fillna(0) == 1) & (dfh[FERIADOS_COL] == 0)).astype(int)
-    dfh['es_pre_feriado'] = ((dfh[FERIADOS_COL].shift(-1).fillna(0) == 1) & (dfh[FERIADOS_COL] == 0)).astype(int)
+    # <-- MODIFICADO: Lógica 'es_dia_de_pago' eliminada
 
-    # 7) ffill columnas clave
-    for c in [TARGET_TMO_NEW, FERIADOS_COL, 'es_pre_feriado', 'es_post_feriado']:
+    # 6) ffill columnas clave
+    # <-- MODIFICADO: 'es_dia_de_pago' eliminado de la lista
+    for c in [TARGET_TMO_NEW, "feriados",
+              "proporcion_comercial", "proporcion_tecnica", "tmo_comercial", "tmo_tecnico"]:
         if c in dfh.columns:
             dfh[c] = dfh[c].ffill()
 
-    # 8) Forecast (ahora llamará a la versión LSTM)
+    # 7) Forecast
     df_hourly = forecast_120d(
         dfh,
         horizon_days=horizonte_dias,
         holidays_set=holidays_set
     )
 
-    # 9) Alertas clima (sigue funcionando, si tienes los artefactos)
-    try:
-        from src.inferencia.alertas_clima import generar_alertas
-        generar_alertas(df_hourly[["calls"]])
-    except Exception as e:
-        print(f"WARN: No se pudieron generar alertas de clima. Error: {e}")
+    # 8) Alertas clima
+    from src.inferencia.alertas_clima import generar_alertas
+    generar_alertas(df_hourly[["calls"]])
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
