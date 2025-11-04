@@ -1,4 +1,4 @@
-# src/inferencia/inferencia_core.py (¡LÓGICA v7.1 - LSTM Multi-Step!)
+# src/inferencia/inferencia_core.py (¡LÓGICA v7.2 - LSTM Multi-Step!)
 import os
 import glob
 import pathlib
@@ -97,33 +97,21 @@ def _safe_ratio(num, den, fallback=1.0):
         return fallback
     return num / den
 
-# --- INICIO DE LA CORRECCIÓN ---
 def _series_is_holiday(idx, holidays_set: set) -> pd.Series:
-    """
-    Función corregida para manejar DatetimeIndex y Series de forma robusta.
-    """
     if not isinstance(idx, (pd.DatetimeIndex, pd.Series)):
         raise TypeError(f"Se esperaba DatetimeIndex o Series, pero se obtuvo {type(idx)}")
 
     idx_para_convertir = idx
-    # Si es una Series (como en 'add_time_parts'), conviértela a DatetimeIndex primero
     if isinstance(idx, pd.Series):
         idx_para_convertir = pd.to_datetime(idx, errors='coerce')
 
-    # 1. Asegurar que tenemos la zona horaria correcta
     try:
         idx_local = idx_para_convertir.tz_convert(TIMEZONE)
     except TypeError:
-        # Si es 'naive' (sin tz), localiza a UTC (estándar de pandas) y convierte
         idx_local = idx_para_convertir.tz_localize("UTC").tz_convert(TIMEZONE)
     
-    # 2. Ahora que está en la zona horaria correcta, extraer la fecha
-    # .date devuelve un numpy.ndarray de objetos datetime.date
     idx_dates = idx_local.date
-
-    # 3. Comparar con el set de feriados
     return pd.Series([d in holidays_set for d in idx_dates], index=idx, dtype=bool)
-# --- FIN DE LA CORRECCIÓN ---
 
 def compute_holiday_factors(df_hist, holidays_set,
                             col_calls=TARGET_CALLS, col_tmo=TARGET_TMO):
@@ -133,7 +121,6 @@ def compute_holiday_factors(df_hist, holidays_set,
         cols.append(col_tmo)
     dfh = add_time_parts(df_hist[cols].copy())
     
-    # Esta línea ahora usará la función corregida
     dfh["is_holiday"] = _series_is_holiday(dfh.index, holidays_set)
 
     med_hol_calls = dfh[dfh["is_holiday"]].groupby("hour")[col_calls].median()
@@ -177,7 +164,6 @@ def apply_holiday_adjustment(df_future, holidays_set,
                              factors_calls_by_hour, factors_tmo_by_hour,
                              col_calls_future="calls", col_tmo_future="tmo_s"):
     d = add_time_parts(df_future.copy())
-    # Esta línea también usará la función corregida
     is_hol = _series_is_holiday(d.index, holidays_set)
     hours = d["hour"].astype(int).values
     call_f = np.array([factors_calls_by_hour.get(int(h), 1.0) for h in hours])
@@ -374,7 +360,11 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     
     # Saneamiento final
     df_hourly["calls"] = df_hourly["calls"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    df_hourly["tmo_s"] = df_hourly["tmo_s"].replace([np.inf, -np.inf], np.nan).fillna(0.loc[0])
+    
+    # --- INICIO DE LA CORRECCIÓN (v7.2) ---
+    # El error SyntaxError estaba aquí.
+    df_hourly["tmo_s"] = df_hourly["tmo_s"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    # --- FIN DE LA CORRECCIÓN (v7.2) ---
     
     df_hourly["calls"] = np.round(df_hourly["calls"]).astype(int)
     df_hourly["tmo_s"] = np.round(df_hourly["tmo_s"]).astype(int)
