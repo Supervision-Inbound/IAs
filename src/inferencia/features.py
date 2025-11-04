@@ -69,70 +69,56 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
 # ------------------------------------------------------------
 # Partes de tiempo
 # ------------------------------------------------------------
-# --- MODIFICADO: add_time_parts con .dt y sin_day/cos_day ---
 def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
+    if not isinstance(df.index, pd.DatetimeIndex):
+        if "ts" in df.columns:
+            df = df.set_index(pd.to_datetime(df["ts"], errors="coerce", utc=True)).drop(columns=["ts"], errors="ignore")
+        else:
+            raise ValueError("add_time_parts requiere un índice datetime o una columna 'ts'.")
+
     d = df.copy()
-    
-    # 1. Get the datetime object, whether it's index or column
-    if isinstance(d.index, pd.DatetimeIndex):
-        idx = d.index
-    else:
-        # Asumimos que si no es índice, debe existir la columna 'ts'
-        idx = pd.to_datetime(d['ts'], errors='coerce')
+    try:
+        idx = d.index.tz_convert(TIMEZONE)
+    except Exception:
+        idx = d.index.tz_localize("UTC").tz_convert(TIMEZONE)
 
-    # 2. Get properties. DatetimeIndex has them directly,
-    #    Series has them under .dt
-    if isinstance(idx, pd.Series):
-        d["dow"]   = idx.dt.dayofweek
-        d["month"] = idx.dt.month
-        d["hour"]  = idx.dt.hour
-        d["day"]   = idx.dt.day
-        # <-- NUEVO: Obtenemos el número de días en el mes para normalizar
-        d["days_in_month"] = idx.dt.days_in_month
-    else: # Is a DatetimeIndex
-        d["dow"]   = idx.dayofweek
-        d["month"] = idx.month
-        d["hour"]  = idx.hour
-        d["day"]   = idx.day
-        # <-- NUEVO: Obtenemos el número de días en el mes para normalizar
-        d["days_in_month"] = idx.days_in_month
+    d["dow"]   = idx.weekday
+    d["month"] = idx.month
+    d["hour"]  = idx.hour
+    d["day"]   = idx.day
 
-    if d["hour"].isna().any():
-        raise ValueError("Error en add_time_parts: 'hour' no se pudo calcular. Verifique el índice de tiempo.")
-        
     d["sin_hour"] = np.sin(2*np.pi*d["hour"]/24.0)
     d["cos_hour"] = np.cos(2*np.pi*d["hour"]/24.0)
     d["sin_dow"]  = np.sin(2*np.pi*d["dow"]/7.0)
     d["cos_dow"]  = np.cos(2*np.pi*d["dow"]/7.0)
-    
-    # <-- NUEVO: Ciclo del día del mes
-    d["sin_day"] = np.sin(2*np.pi*d["day"]/d["days_in_month"])
-    d["cos_day"] = np.cos(2*np.pi*d["day"]/d["days_in_month"])
-    
-    # Limpiamos la columna auxiliar
-    d = d.drop(columns=['days_in_month'])
+
+    # <-- MODIFICADO: 'es_dia_de_pago' eliminado
     
     return d
 
 # ------------------------------------------------------------
-# Features de lags y medias móviles (Función v5, ya no se usa en v6)
+# Features de lags y medias móviles (Sin cambios)
 # ------------------------------------------------------------
 def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     d = df.copy()
     if target_col not in d.columns:
         d[target_col] = 0.0
     s = pd.to_numeric(d[target_col], errors="coerce")
+
     for k in [24, 48, 72, 168]:
         d[f"lag_{k}"] = s.shift(k)
+
     s1 = s.shift(1)
     for w in [24, 72, 168]:
         d[f"ma_{w}"] = s1.rolling(w, min_periods=1).mean()
+
     for c in [f"lag_{k}" for k in [24,48,72,168]] + [f"ma_{w}" for w in [24,72,168]]:
         d[c] = pd.to_numeric(d[c], errors="coerce")
+
     return d
 
 # ------------------------------------------------------------
-# Dummies + reindex (Sin cambios, sigue siendo necesario)
+# Dummies + reindex (Sin cambios)
 # ------------------------------------------------------------
 def dummies_and_reindex(df: pd.DataFrame, training_cols: list) -> pd.DataFrame:
     d = df.copy()
