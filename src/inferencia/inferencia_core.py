@@ -1,4 +1,4 @@
-# src/inferencia/inferencia_core.py (¡LÓGICA v7 - LSTM Multi-Step!)
+# src/inferencia/inferencia_core.py (¡LÓGICA v7.1 - LSTM Multi-Step!)
 import os
 import glob
 import pathlib
@@ -85,7 +85,7 @@ ENABLE_OUTLIER_CAP = True
 K_WEEKDAY = 6.0
 K_WEEKEND = 7.0
 
-# --- Utils feriados / outliers (Sin cambios, excepto eliminar 'apply_post_holiday_adjustment') ---
+# --- Utils feriados / outliers ---
 def _load_cols(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -97,16 +97,33 @@ def _safe_ratio(num, den, fallback=1.0):
         return fallback
     return num / den
 
-def _series_is_holiday(idx, holidays_set):
-    tz = getattr(idx, "tz", None)
-    # Usamos .dt.date para Series, .date para DatetimeIndex
+# --- INICIO DE LA CORRECCIÓN ---
+def _series_is_holiday(idx, holidays_set: set) -> pd.Series:
+    """
+    Función corregida para manejar DatetimeIndex y Series de forma robusta.
+    """
+    if not isinstance(idx, (pd.DatetimeIndex, pd.Series)):
+        raise TypeError(f"Se esperaba DatetimeIndex o Series, pero se obtuvo {type(idx)}")
+
+    idx_para_convertir = idx
+    # Si es una Series (como en 'add_time_parts'), conviértela a DatetimeIndex primero
+    if isinstance(idx, pd.Series):
+        idx_para_convertir = pd.to_datetime(idx, errors='coerce')
+
+    # 1. Asegurar que tenemos la zona horaria correcta
     try:
-        idx_dates = idx.dt.date
-    except AttributeError:
-        idx_dates = idx.date
-        
-    idx_dates = idx_dates.tz_convert(TIMEZONE).date if tz is not None else idx_dates
+        idx_local = idx_para_convertir.tz_convert(TIMEZONE)
+    except TypeError:
+        # Si es 'naive' (sin tz), localiza a UTC (estándar de pandas) y convierte
+        idx_local = idx_para_convertir.tz_localize("UTC").tz_convert(TIMEZONE)
+    
+    # 2. Ahora que está en la zona horaria correcta, extraer la fecha
+    # .date devuelve un numpy.ndarray de objetos datetime.date
+    idx_dates = idx_local.date
+
+    # 3. Comparar con el set de feriados
     return pd.Series([d in holidays_set for d in idx_dates], index=idx, dtype=bool)
+# --- FIN DE LA CORRECCIÓN ---
 
 def compute_holiday_factors(df_hist, holidays_set,
                             col_calls=TARGET_CALLS, col_tmo=TARGET_TMO):
@@ -115,6 +132,8 @@ def compute_holiday_factors(df_hist, holidays_set,
     if col_tmo in df_hist.columns:
         cols.append(col_tmo)
     dfh = add_time_parts(df_hist[cols].copy())
+    
+    # Esta línea ahora usará la función corregida
     dfh["is_holiday"] = _series_is_holiday(dfh.index, holidays_set)
 
     med_hol_calls = dfh[dfh["is_holiday"]].groupby("hour")[col_calls].median()
@@ -158,6 +177,7 @@ def apply_holiday_adjustment(df_future, holidays_set,
                              factors_calls_by_hour, factors_tmo_by_hour,
                              col_calls_future="calls", col_tmo_future="tmo_s"):
     d = add_time_parts(df_future.copy())
+    # Esta línea también usará la función corregida
     is_hol = _series_is_holiday(d.index, holidays_set)
     hours = d["hour"].astype(int).values
     call_f = np.array([factors_calls_by_hour.get(int(h), 1.0) for h in hours])
@@ -282,12 +302,8 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     # Generar *todos* los features en el histórico
     dfp = generate_features(df, TARGET_CALLS, TARGET_TMO, FERIADOS_COL)
     
-    # --- INICIO DE LA CORRECCIÓN ---
-    # El error KeyError ocurre porque `cols_pl` (con dummies)
-    # no puede usarse para indexar `dfp` (sin dummies).
-    # Rellenamos NaNs en todo `dfp` para curar los lags/MAs iniciales.
+    # Rellenar NaNs (para lags/MAs al inicio)
     dfp = dfp.fillna(0.0)
-    # --- FIN DE LA CORRECCIÓN ---
     
     last_ts = dfp.index.max()
     
@@ -296,8 +312,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     
     future_predictions = []
     
-    # Tomamos los últimos 168 pasos (7 días) como 'semilla'
-    # Usamos .iloc para asegurar 168 filas, incluso si hay huecos
     df_seed = dfp.iloc[-LOOKBACK_STEPS:].copy() 
     
     for i in range(horizon_days):
@@ -307,7 +321,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         input_df = df_seed
         
         # 2. Preparar Input del Planner
-        # Aquí es donde `dow` se convierte en `dow_0`, `dow_1`, etc.
         input_features_pl = pd.get_dummies(input_df, columns=['dow', 'month', 'hour'])
         input_features_pl = input_features_pl.reindex(columns=cols_pl, fill_value=0.0)
         input_scaled_pl = sc_pl.transform(input_features_pl)
@@ -341,17 +354,14 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         df_future_day[FERIADOS_COL] = df_future_day.index.to_series().apply(lambda ts: _is_holiday(ts, holidays_set))
         
         # 7. Apendizar al histórico (dfp) para la *siguiente* iteración
-        # Necesitamos generar los lags/MAs para este nuevo día
         df_seed_with_future = pd.concat([df_seed, df_future_day])
         df_seed_with_future = generate_features(df_seed_with_future, TARGET_CALLS, TARGET_TMO, FERIADOS_COL)
         
         # 8. Guardar las predicciones
-        # Guardamos solo las 24 filas nuevas, que ya tienen features
         pred_day_with_features = df_seed_with_future.iloc[-HORIZON_STEPS:]
         future_predictions.append(pred_day_with_features)
         
         # 9. Actualizar la 'seed' para el siguiente bucle:
-        # Quitamos las primeras 24h, añadimos las 24h nuevas
         df_seed = df_seed_with_future.iloc[-LOOKBACK_STEPS:]
 
     print("Predicción iterativa completada.")
@@ -364,7 +374,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     
     # Saneamiento final
     df_hourly["calls"] = df_hourly["calls"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    df_hourly["tmo_s"] = df_hourly["tmo_s"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    df_hourly["tmo_s"] = df_hourly["tmo_s"].replace([np.inf, -np.inf], np.nan).fillna(0.loc[0])
     
     df_hourly["calls"] = np.round(df_hourly["calls"]).astype(int)
     df_hourly["tmo_s"] = np.round(df_hourly["tmo_s"]).astype(int)
