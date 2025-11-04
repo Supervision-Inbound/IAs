@@ -1,4 +1,4 @@
-# src/inferencia/inferencia_core.py (¡LÓGICA v5 - SIN VOLATILIDAD NI DIA DE PAGO!)
+# src/inferencia/inferencia_core.py (¡LÓGICA v6 - CON PRE-FERIADO!)
 import os
 import glob
 import pathlib
@@ -245,6 +245,24 @@ def _is_holiday(ts, holidays_set: set) -> int:
         d = ts.date()
     return 1 if d in holidays_set else 0
 
+# <--- NUEVO: Función para detectar el día PREVIO al feriado
+def _is_pre_holiday(ts, holidays_set: set) -> int:
+    if not holidays_set:
+        return 0
+    try:
+        # Revisa si MAÑANA es feriado
+        next_day = (ts + pd.Timedelta(days=1)).tz_convert(TIMEZONE).date()
+        # Revisa si HOY es feriado
+        today = ts.tz_convert(TIMEZONE).date()
+    except Exception:
+        next_day = (ts + pd.Timedelta(days=1)).date()
+        today = ts.date()
+    
+    # Es pre-feriado SÓLO si mañana es feriado Y hoy NO lo es
+    if next_day in holidays_set and today not in holidays_set:
+        return 1
+    return 0
+
 # ---------- Núcleo ----------
 def forecast_120d(df_hist_joined: pd.DataFrame, 
                   horizon_days: int = 120, holidays_set: set | None = None):
@@ -273,11 +291,13 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         raise ValueError(f"Falta columna {TARGET_CALLS} en historical_data.csv")
     if "feriados" not in df.columns:
         df["feriados"] = 0
-    # <-- MODIFICADO: 'es_dia_de_pago' eliminado
+    if "es_pre_feriado" not in df.columns: # <--- NUEVO: Asegurar que la columna exista
+        df["es_pre_feriado"] = 0
 
     # Ventana reciente
-    # <-- MODIFICADO: 'es_dia_de_pago' eliminado
-    keep_cols = [TARGET_CALLS, TARGET_TMO, "feriados"] 
+    # <--- MODIFICADO: 'es_dia_de_pago' eliminado
+    # <--- MODIFICADO: Añadido 'es_pre_feriado'
+    keep_cols = [TARGET_CALLS, TARGET_TMO, "feriados", "es_pre_feriado"] 
     keep_cols_exist = [c for c in keep_cols if c in df.columns]
     
     idx = df.index
@@ -304,8 +324,9 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     for ts in future_ts:
         
         # --- 1. PREDECIR LLAMADAS (PLANNER) ---
-        # <-- MODIFICADO: 'es_dia_de_pago' eliminado
-        cols_planner = [TARGET_CALLS, TARGET_TMO, "feriados"]
+        # <--- MODIFICADO: 'es_dia_de_pago' eliminado
+        # <--- MODIFICADO: Añadido 'es_pre_feriado'
+        cols_planner = [TARGET_CALLS, TARGET_TMO, "feriados", "es_pre_feriado"]
         cols_planner_exist = [c for c in cols_planner if c in dfp.columns]
         tmp_planner = dfp[cols_planner_exist].copy()
         tmp_planner = pd.concat([tmp_planner, pd.DataFrame(index=[ts])])
@@ -314,6 +335,8 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
              tmp_planner[TARGET_TMO] = tmp_planner[TARGET_TMO].ffill()
         if "feriados" in tmp_planner.columns:
             tmp_planner.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
+        if "es_pre_feriado" in tmp_planner.columns: # <--- NUEVO
+            tmp_planner.loc[ts, "es_pre_feriado"] = _is_pre_holiday(ts, holidays_set) # <--- NUEVO
         
         tmp_planner = add_lags_mas(tmp_planner, TARGET_CALLS) 
         if TARGET_TMO in tmp_planner.columns:
@@ -327,14 +350,16 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         yhat_calls = max(0.0, yhat_calls)
 
 
-        # --- 2. PREDECIR TMO (DIRECTO v8 - SIN VOLATILIDAD) ---
+        # --- 2. PREDECIR TMO (DIRECTO v9 - CON PRE-FERIADO) ---
         
         # 2b. Crear Dataframe temporal para TMO
-        # <-- MODIFICADO: 'es_dia_de_pago' eliminado
+        # <--- MODIFICADO: 'es_dia_de_pago' eliminado
+        # <--- MODIFICADO: Añadido 'es_pre_feriado'
         cols_tmo_model = [
             TARGET_TMO,       # Pista 1 (TMO Total)
             TARGET_CALLS,     # Pista 2 (Volumen)
-            "feriados"
+            "feriados",
+            "es_pre_feriado"  # <--- NUEVO
         ]
         cols_tmo_model_exist = [c for c in cols_tmo_model if c in dfp.columns]
         tmp_tmo = dfp[cols_tmo_model_exist].copy()
@@ -348,17 +373,16 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         
         # Forzar feriados en la fila actual (ts)
         tmp_tmo.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
+        tmp_tmo.loc[ts, "es_pre_feriado"] = _is_pre_holiday(ts, holidays_set) # <--- NUEVO
 
         # 2e. Crear Pistas de Lags/MAs (SIN STDs)
-        # Pista 1: TMO Total
+        # (Sin cambios en esta sub-sección)
         s_tmo_total = tmp_tmo[TARGET_TMO]
         for lag in [1, 2, 3, 6, 12, 24, 168]:
             tmp_tmo[f"lag_tmo_total_{lag}"] = s_tmo_total.shift(lag)
         s_tmo_total_s1 = s_tmo_total.shift(1)
         for w in [6, 12, 24, 72]:
             tmp_tmo[f"ma_tmo_total_{w}"] = s_tmo_total_s1.rolling(w, min_periods=1).mean()
-
-        # Pista 2: Volumen
         s_contest = tmp_tmo[TARGET_CALLS]
         for lag in [1, 24, 48, 168]:
              tmp_tmo[f"lag_contest_{lag}"] = s_contest.shift(lag)
@@ -368,10 +392,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         
         # 2f. Predecir TMO (Directo)
         X_tmo = dummies_and_reindex(tmp_tmo.tail(1), cols_tmo)
-        
-        # Saneamiento (para NaN)
         X_tmo = X_tmo.replace([np.inf, -np.inf], np.nan).fillna(0.0)
-        
         yhat_tmo = float(m_tmo.predict(sc_tmo.transform(X_tmo), verbose=0).flatten()[0])
         yhat_tmo = max(0.0, yhat_tmo)
 
@@ -380,6 +401,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         dfp.loc[ts, TARGET_CALLS] = yhat_calls
         dfp.loc[ts, TARGET_TMO] = yhat_tmo 
         dfp.loc[ts, "feriados"] = _is_holiday(ts, holidays_set)
+        dfp.loc[ts, "es_pre_feriado"] = _is_pre_holiday(ts, holidays_set) # <--- NUEVO
         # <-- MODIFICADO: 'es_dia_de_pago' eliminado
 
     print("Predicción iterativa completada.")
@@ -387,13 +409,13 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     # ===== Salida horaria =====
     df_hourly = pd.DataFrame(index=future_ts)
     df_hourly["calls"] = np.round(dfp.loc[future_ts, TARGET_CALLS]).astype(int)
-    
-    # Saneamiento de NaNs/infs ANTES de convertir a int
     tmo_series = dfp.loc[future_ts, TARGET_TMO]
     tmo_series_clean = tmo_series.replace([np.inf, -np.inf], np.nan).fillna(0.0)
     df_hourly["tmo_s"] = np.round(tmo_series_clean).astype(int)
 
     # ===== Ajustes feriados / post-feriados (Sin cambios) =====
+    # NOTA: Los ajustes pre-feriado ya no son necesarios como "parche",
+    # porque el modelo aprendió a predecirlos directamente.
     if holidays_set and len(holidays_set) > 0:
         (f_calls_by_hour, f_tmo_by_hour, _gc, _gt, post_calls_by_hour) = compute_holiday_factors(
             df, holidays_set, col_calls=TARGET_CALLS, col_tmo=TARGET_TMO
