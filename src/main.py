@@ -76,7 +76,6 @@ def main(horizonte_dias: int):
     if TARGET_CALLS_NEW in dfh.columns:
         dfh = dfh.rename(columns={TARGET_CALLS_NEW: "target"})
     else:
-        # Si no existe, la creamos (aunque la V7-LSTM la necesita)
         if "target" not in dfh.columns:
             dfh["target"] = 0 
 
@@ -91,7 +90,7 @@ def main(horizonte_dias: int):
     # 4) Asegurar índice temporal (features.py lo limpia y maneja DST)
     dfh = ensure_ts(dfh)
 
-    # 5) Derivar calendario (feriados) - Necesario para V7
+    # 5) Derivar calendario (feriados)
     holidays_set = load_holidays(HOLIDAYS_FILE)
     if FERIADOS_COL not in dfh.columns:
         dfh[FERIADOS_COL] = mark_holidays_index(dfh.index, holidays_set).values
@@ -102,24 +101,24 @@ def main(horizonte_dias: int):
     dfh['es_pre_feriado'] = ((dfh[FERIADOS_COL].shift(-1).fillna(0) == 1) & (dfh[FERIADOS_COL] == 0)).astype(int)
 
     # 6) ffill columnas clave
-    for c in [TARGET_TMO_NEW, FERIADOS_COL, 'es_pre_feriado', 'es_post_feriado']:
+    for c in ["target", TARGET_TMO_NEW, FERIADOS_COL, 'es_pre_feriado', 'es_post_feriado']:
         if c in dfh.columns:
             dfh[c] = dfh[c].ffill()
 
     # 7) Forecast
     # 🚨 CORRECCIÓN DEL TypeError: 
-    # La V7 (inferencia_core) no acepta 'horizon_days' ni 'holidays_set' directamente.
-    # 'horizon_days' lo ignora (usa el de config) y 'holidays_set' lo espera en dfh.
+    # Llamamos a la V7 unificada, que SÍ acepta estos argumentos.
     df_hourly = forecast_120d(
-        dfh
-        # 'artifacts_path' usará el default de config.
+        dfh,
+        horizon_days=horizonte_dias,
+        holidays_set=holidays_set
+        # artifacts_path usará el default de config
     )
 
     # 8) Alertas clima (Asumiendo que alertas_clima.py existe)
     # from inferencia.alertas_clima import generar_alertas
-    # generar_alertas(df_hourly[["calls"]]) # V7 devuelve 'target_pred', no 'calls'
     
-    # (Opcional: Renombrar 'target_pred' a 'calls' si el resto del pipeline lo espera)
+    # Renombrar 'target_pred' a 'calls' si el resto del pipeline lo espera
     df_hourly = df_hourly.rename(columns={"target_pred": "calls"})
     print("Inferencia completada.")
     # print(df_hourly.head())
@@ -129,9 +128,5 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--horizonte", type=int, default=120)
     args = ap.parse_args()
-    
-    # 🚨 NOTA: El argumento 'horizonte' no se está usando en la V7.
-    # Si necesitas que se use, la V7 (inferencia_core) debe ser modificada 
-    # para aceptar 'horizon_days' (como en mi penúltima respuesta).
     
     main(args.horizonte)
