@@ -1,4 +1,4 @@
-# src/inferencia/inferencia_core.py (¡LÓGICA v7.2 - LSTM Multi-Step!)
+# src/inferencia/inferencia_core.py (¡LÓGICA v7.3 - LSTM Multi-Step!)
 import os
 import glob
 import pathlib
@@ -335,8 +335,10 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         df_future_day[TARGET_TMO] = np.maximum(0, yhat_tmo_24h)
         
         # 6. Generar "Known Future Features" (Calendario) para este nuevo día
-        df_future_day["ts"] = df_future_day.index
-        df_future_day = add_time_parts(df_future_day)
+        # --- INICIO DE LA CORRECCIÓN (v7.3) ---
+        # df_future_day["ts"] = df_future_day.index # <-- LÍNEA REDUNDANTE ELIMINADA
+        # --- FIN DE LA CORRECCIÓN (v7.3) ---
+        df_future_day = add_time_parts(df_future_day) # <-- Esta usa el índice
         df_future_day[FERIADOS_COL] = df_future_day.index.to_series().apply(lambda ts: _is_holiday(ts, holidays_set))
         
         # 7. Apendizar al histórico (dfp) para la *siguiente* iteración
@@ -360,11 +362,7 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     
     # Saneamiento final
     df_hourly["calls"] = df_hourly["calls"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    
-    # --- INICIO DE LA CORRECCIÓN (v7.2) ---
-    # El error SyntaxError estaba aquí.
     df_hourly["tmo_s"] = df_hourly["tmo_s"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    # --- FIN DE LA CORRECCIÓN (v7.2) ---
     
     df_hourly["calls"] = np.round(df_hourly["calls"]).astype(int)
     df_hourly["tmo_s"] = np.round(df_hourly["tmo_s"]).astype(int)
