@@ -7,8 +7,9 @@ import pandas as pd
 import tensorflow as tf
 
 from src.inferencia import features
-# 🚨 CORRECCIÓN FINAL: Usar importación local/directa para el módulo dentro del mismo directorio.
-import inference_config as config 
+# 🚨 CORRECCIÓN FINAL: Usar importación RELATIVA (el ".") 
+# para importar un módulo del mismo paquete (la misma carpeta).
+from . import inference_config as config 
 
 # ----------------------------------------------------------------------
 # Constantes
