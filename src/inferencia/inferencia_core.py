@@ -37,16 +37,20 @@ def load_all_artifacts(artifacts_path: str):
         return None, None, None
 
     try:
-        scaler = pd.read_pickle(scaler_path)
+        # Usamos joblib para pkl (más robusto que pd.read_pickle)
+        import joblib
+        scaler = joblib.load(scaler_path)
     except Exception as e:
         print(f"Error al cargar el scaler desde {scaler_path}: {e}")
         return model, None, None
 
     try:
         with open(cols_path, 'r') as f:
-            training_cols = [line.strip() for line in f if line.strip()]
+            # Leemos JSON, no un archivo de texto plano
+            import json
+            training_cols = json.load(f)
     except Exception as e:
-        print(f"Error al cargar las columnas de entrenamiento desde {cols_path}: {e}")
+        print(f"Error al cargar las columnas de entrenamiento (json) desde {cols_path}: {e}")
         return model, scaler, None
 
     return model, scaler, training_cols
@@ -98,7 +102,6 @@ def iterative_forecast(
     from . import inference_config as config 
     MAX_TIMESTAMPS = config.MAX_TIMESTAMPS
     
-    # Usamos el horizonte_pasos que viene como argumento
     HORIZONTE_PRED_DIAS = horizonte_pasos // 24 
 
     print(f"Iniciando predicción iterativa (LSTM) para {horizonte_pasos} pasos...")
@@ -126,7 +129,13 @@ def iterative_forecast(
 
         # a. Predicción
         y_scaled = model.predict(current_sequence, verbose=0)[0, 0]
-        y_pred_unscaled = scaler.inverse_transform([[y_scaled]])[0, 0]
+        
+        # Invertir escala (asumiendo que el scaler espera un array 2D)
+        # Creamos un array 'dummy' con el número correcto de features (columnas)
+        dummy_features = np.zeros((1, len(training_cols)))
+        # Asumimos que la 'target' es la PRIMERA columna (índice 0)
+        dummy_features[0, 0] = y_scaled 
+        y_pred_unscaled = scaler.inverse_transform(dummy_features)[0, 0]
         
         # b. Almacenar predicción
         future_ts = future_timestamps[step]
@@ -136,18 +145,14 @@ def iterative_forecast(
         new_row_data = {"target": y_pred_unscaled}
         new_row = pd.DataFrame(new_row_data, index=[future_ts])
         
-        # 🚨 FIX: La V7-LSTM no manejaba feriados en el bucle.
-        # Necesitamos añadirlos aquí usando el 'holidays_set'
-        
-        # Convertir a TZ (manejo de DST)
         try:
             new_row.index = new_row.index.tz_localize('UTC').tz_convert(TIMEZONE)
-        except Exception: # Manejo de DST en el bucle
+        except Exception: 
             new_row.index = new_row.index.tz_localize('UTC', ambiguous='infer', nonexistent='shift_forward').tz_convert(TIMEZONE)
             
         new_row.index.name = "ts"
         
-        # Añadir feriados (requerido por generate_features)
+        # Añadir feriados
         if holidays_set:
             new_row_date = new_row.index[0].date()
             new_row["feriados"] = 1 if new_row_date in holidays_set else 0
@@ -155,13 +160,11 @@ def iterative_forecast(
             new_row["feriados"] = 0
         
         dfw = pd.concat([dfw, new_row])
-        dfw = dfw[~dfw.index.duplicated(keep='last')] # Evitar duplicados
+        dfw = dfw[~dfw.index.duplicated(keep='last')] 
         
         # Generar features para el nuevo input
         df_next_input = dfw.tail(MAX_TIMESTAMPS).copy()
         df_next_input = features.add_time_parts(df_next_input)
-        
-        # (Asumiendo que 'generate_features' es la V1 que no necesita TMO/Planner)
         df_next_input = features.add_lags_mas(df_next_input, target_col="target")
         
         X_next_input = features.dummies_and_reindex(df_next_input, training_cols)
