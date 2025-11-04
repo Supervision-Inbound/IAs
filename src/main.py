@@ -42,8 +42,10 @@ def main(horizonte: int):
         holidays_set=feriados_set
     )
     
-    print(f"Éxito: Predicción para {horizonte} días completada.")
-    # Los JSONs se escriben dentro de forecast_120d, confirmamos que el flujo llegó hasta aquí.
+    if not df_hourly.empty:
+        print(f"Éxito: Predicción para {horizonte} días completada. Verifique los archivos en ./{PUBLIC_DIR}/")
+    else:
+        print("Advertencia: El DataFrame de predicción está vacío. Verifique la carga de modelos.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ejecuta la inferencia del modelo LSTM.")
