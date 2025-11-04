@@ -6,11 +6,11 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
-from src.inferencia import features
-
-# 🚨 CORRECCIÓN DE IMPORTACIÓN CIRCULAR:
-# Se elimina la importación global de 'inference_config' para romper el ciclo.
-# Se importará localmente (dentro de las funciones) cuando se necesite.
+# Importación relativa (evita ModuleNotFoundError)
+from . import features 
+# (Asumimos que erlang y utils_io existen en la misma carpeta si los necesitas)
+# from . import erlang 
+# from . import utils_io
 
 # ----------------------------------------------------------------------
 # Constantes (Las que no dependen de config)
@@ -22,7 +22,7 @@ TIMEZONE = features.TIMEZONE
 # ----------------------------------------------------------------------
 def load_all_artifacts(artifacts_path: str):
     """Carga el modelo Keras, el scaler y las columnas de entrenamiento."""
-    # Importación local
+    # Importación local (evita Circular Import)
     from . import inference_config as config 
     
     print("Cargando artefactos LSTM...")
@@ -71,6 +71,7 @@ def prepare_input_sequence(df_historic_raw: pd.DataFrame, training_cols: list):
     df_input = dfh.tail(MAX_TIMESTAMPS).copy()
     
     df_input = features.add_time_parts(df_input)
+    # Asumimos que la columna 'target' ya existe (main.py la prepara)
     df_input = features.add_lags_mas(df_input, target_col="target")
     
     X_input = features.dummies_and_reindex(df_input, training_cols)
@@ -87,7 +88,8 @@ def iterative_forecast(
     model: tf.keras.Model, 
     scaler: object, 
     training_cols: list, 
-    horizonte_pasos: int
+    horizonte_pasos: int,
+    holidays_set: set # Argumento añadido
 ) -> pd.DataFrame:
     """
     Realiza la predicción iterativa (paso a paso) de la serie temporal.
@@ -95,18 +97,20 @@ def iterative_forecast(
     # Importación local
     from . import inference_config as config 
     MAX_TIMESTAMPS = config.MAX_TIMESTAMPS
-    HORIZONTE_PRED_DIAS = config.HORIZONTE_PRED_DIAS
+    
+    # Usamos el horizonte_pasos que viene como argumento
+    HORIZONTE_PRED_DIAS = horizonte_pasos // 24 
 
     print(f"Iniciando predicción iterativa (LSTM) para {horizonte_pasos} pasos...")
     
-    # 1. Preparación de secuencias iniciales
+    # 1. Preparación
     last_known_target = df_historic_cleaned["target"].iloc[-1]
     last_known_ts = df_historic_cleaned.index[-1]
 
     X_input_scaled = scaler.transform(X_input_sequence)
     current_sequence = np.expand_dims(X_input_scaled, axis=0)
 
-    # 2. Inicialización del DataFrame de predicciones (dfp)
+    # 2. Inicialización
     future_timestamps = [last_known_ts + datetime.timedelta(hours=h) for h in range(1, horizonte_pasos + 1)]
     dfp = pd.DataFrame(index=future_timestamps, columns=["target_pred"])
     
@@ -132,31 +136,51 @@ def iterative_forecast(
         new_row_data = {"target": y_pred_unscaled}
         new_row = pd.DataFrame(new_row_data, index=[future_ts])
         
-        new_row.index = new_row.index.tz_localize('UTC').tz_convert(TIMEZONE)
+        # 🚨 FIX: La V7-LSTM no manejaba feriados en el bucle.
+        # Necesitamos añadirlos aquí usando el 'holidays_set'
+        
+        # Convertir a TZ (manejo de DST)
+        try:
+            new_row.index = new_row.index.tz_localize('UTC').tz_convert(TIMEZONE)
+        except Exception: # Manejo de DST en el bucle
+            new_row.index = new_row.index.tz_localize('UTC', ambiguous='infer', nonexistent='shift_forward').tz_convert(TIMEZONE)
+            
         new_row.index.name = "ts"
         
-        dfw = pd.concat([dfw, new_row])
-        dfw = dfw.sort_index().tail(MAX_TIMESTAMPS + step + 1)
+        # Añadir feriados (requerido por generate_features)
+        if holidays_set:
+            new_row_date = new_row.index[0].date()
+            new_row["feriados"] = 1 if new_row_date in holidays_set else 0
+        else:
+            new_row["feriados"] = 0
         
+        dfw = pd.concat([dfw, new_row])
+        dfw = dfw[~dfw.index.duplicated(keep='last')] # Evitar duplicados
+        
+        # Generar features para el nuevo input
         df_next_input = dfw.tail(MAX_TIMESTAMPS).copy()
         df_next_input = features.add_time_parts(df_next_input)
+        
+        # (Asumiendo que 'generate_features' es la V1 que no necesita TMO/Planner)
         df_next_input = features.add_lags_mas(df_next_input, target_col="target")
+        
         X_next_input = features.dummies_and_reindex(df_next_input, training_cols)
         
         X_next_input_scaled = scaler.transform(X_next_input.values)
         current_sequence = np.expand_dims(X_next_input_scaled, axis=0)
         
-    # 4. Finalización y limpieza
     dfp["target_pred"] = pd.to_numeric(dfp["target_pred"], errors="coerce")
     
     return dfp
 
 # ----------------------------------------------------------------------
-# Función principal de inferencia
+# Función principal de inferencia (UNIFICADA)
 # ----------------------------------------------------------------------
 def forecast_120d(
     df_historic_raw: pd.DataFrame, 
-    artifacts_path: str = None # Permitir None
+    horizon_days: int = 120, # 🚨 ACEPTA EL ARGUMENTO DE MAIN
+    holidays_set: set | None = None, # 🚨 ACEPTA EL ARGUMENTO DE MAIN
+    artifacts_path: str = None 
 ) -> pd.DataFrame:
     """
     Carga artefactos y realiza la predicción de 120 días (2880 pasos).
@@ -164,12 +188,10 @@ def forecast_120d(
     # Importación local
     from . import inference_config as config 
     
-    # Resolver la ruta de artefactos
     if artifacts_path is None:
         artifacts_path = config.ARTIFACTS_PATH
         
-    # Definir constantes que dependen de config
-    HORIZONTE_PRED_PASOS = config.HORIZONTE_PRED_DIAS * 24
+    HORIZONTE_PRED_PASOS = horizon_days * 24
     
     # 1. Cargar artefactos
     model, scaler, training_cols = load_all_artifacts(artifacts_path)
@@ -189,7 +211,8 @@ def forecast_120d(
         model, 
         scaler, 
         training_cols, 
-        HORIZONTE_PRED_PASOS
+        HORIZONTE_PRED_PASOS,
+        holidays_set # Pasamos el set de feriados
     )
     
     # 4. Generación de features para el DataFrame de Predicción (dfp)
@@ -199,7 +222,7 @@ def forecast_120d(
     dfp_with_future = pd.concat([df_historic_cleaned.drop(columns=["target"], errors="ignore"), dfp])
     dfp_with_future = features.add_time_parts(dfp_with_future)
     
-    dfp_with_future["target"] = dfp_with_future["target_pred"].combine_first(dfp_with_future["target"])
+    dfp_with_future["target"] = dfp_with_future["target_pred"].combine_first(df_historic_cleaned["target"])
     dfp_with_future = features.add_lags_mas(dfp_with_future, target_col="target")
     
     dfp_with_future = features.dummies_and_reindex(dfp_with_future, all_cols_expected)
