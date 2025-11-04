@@ -1,4 +1,4 @@
-# src/inferencia/inferencia_core.py (¡LÓGICA v7.5 - Saneamiento en Bucle!)
+# src/inferencia/inferencia_core.py (¡LÓGICA v7.6 - Corrección .median()!)
 import os
 import glob
 import pathlib
@@ -97,7 +97,6 @@ def _safe_ratio(num, den, fallback=1.0):
         return fallback
     return num / den
 
-# --- add_time_parts robusta (v7.4) ---
 def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     d = df.copy()
     
@@ -158,15 +157,21 @@ def compute_holiday_factors(df_hist, holidays_set,
     if col_tmo in dfh.columns:
         med_hol_tmo = dfh[dfh["is_holiday"]].groupby("hour")[col_tmo].median()
         med_nor_tmo = dfh[~dfh["is_holiday"]].groupby("hour")[col_tmo].median()
-        g_hol_tmo = dfh[dfh["is_holiday"]][col_tmo].median()
-        g_nor_tmo = dfh[~dfh["is_holiday"]].groupby("hour")[col_tmo].median()
+        
+        # --- INICIO DE LA CORRECCIÓN (v7.6) ---
+        # Forzamos los valores a ser 'float' para evitar el ValueError en _safe_ratio
+        # .median() puede devolver NaN si el grupo está vacío, y float(np.nan) es válido.
+        g_hol_tmo = float(dfh[dfh["is_holiday"]][col_tmo].median())
+        g_nor_tmo = float(dfh[~dfh["is_holiday"]][col_tmo].median())
+        # --- FIN DE LA CORRECCIÓN (v7.6) ---
+
         global_tmo_factor = _safe_ratio(g_hol_tmo, g_nor_tmo, fallback=1.00)
     else:
         global_tmo_factor = 1.00
 
-    g_hol_calls = dfh[dfh["is_holiday"]][col_calls].median()
-    g_nor_calls = dfh[~dfh["is_holiday"]][col_calls].median()
-    global_calls_factor = _safe_ratio(g_hol_calls, g_nor_calls, fallback=0.75)
+    g_hol_calls = float(dfh[dfh["is_holiday"]][col_calls].median())
+    g_nor_tmo = float(dfh[~dfh["is_holiday"]][col_calls].median())
+    global_calls_factor = _safe_ratio(g_hol_calls, g_nor_tmo, fallback=0.75)
 
     factors_calls_by_hour = {
         int(h): _safe_ratio(med_hol_calls.get(h, np.nan),
@@ -174,7 +179,7 @@ def compute_holiday_factors(df_hist, holidays_set,
                             fallback=global_calls_factor)
         for h in range(24)
     }
-    if med_hol_tmo is not None:
+    if med_hol_tmo is not None and med_nor_tmo is not None:
         factors_tmo_by_hour = {
             int(h): _safe_ratio(med_hol_tmo.get(h, np.nan),
                                 med_nor_tmo.get(h, np.nan),
@@ -335,10 +340,8 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         # 1. Preparar Ventana de Entrada (Input)
         input_df = df_seed
         
-        # --- INICIO DE LA CORRECCIÓN (v7.5) ---
         # Saneamos los NaNs (de los lags/MAs) ANTES de escalar y predecir
         input_df = input_df.fillna(0.0)
-        # --- FIN DE LA CORRECCIÓN (v7.5) ---
         
         # 2. Preparar Input del Planner
         input_features_pl = pd.get_dummies(input_df, columns=['dow', 'month', 'hour'])
