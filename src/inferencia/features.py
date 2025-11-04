@@ -8,45 +8,35 @@ TIMEZONE = "America/Santiago"
 # Utils de parseo temporal
 # ------------------------------------------------------------
 def _coerce_ts_series(s: pd.Series) -> pd.Series:
-    """
-    Parsea una serie de strings a datetime CONSCIENTE.
-    Utiliza utc=True para garantizar una base segura y luego convierte a TIMEZONE.
-    """
+    """Parsea una serie de strings a datetime CONSCIENTE (UTC inicial) y la convierte a TIMEZONE."""
     if s.dtype == "datetime64[ns]" or np.issubdtype(s.dtype, np.datetime64):
-        # Si ya es datetime, lo convertimos a UTC.
         dt = pd.to_datetime(s, errors="coerce", utc=True)
     else:
-        # Si es string, intentamos parsear con día primero y luego sin.
         dt = pd.to_datetime(s, errors="coerce", dayfirst=True, utc=True)
         if dt.isna().any():
             dt2 = pd.to_datetime(s, errors="coerce", dayfirst=False, utc=True)
             dt = dt.fillna(dt2)
     
-    # CORRECCIÓN: Como 'dt' ya es tz-aware (UTC), solo necesitamos tz_convert.
+    # Convierte a la zona horaria final.
     return dt.dt.tz_convert(TIMEZONE)
 
 def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Asegura que el DataFrame tenga un índice DatetimeIndex redondeado a la hora,
-    consciente de la zona horaria y libre de duplicados.
-    """
+    """Asegura un índice DatetimeIndex redondeado, tz-aware y sin duplicados."""
     d = df.copy()
     
     # Caso 1: El índice ya es DatetimeIndex
     if isinstance(d.index, pd.DatetimeIndex):
-        
         idx = d.index
-        # 1. Quitar la zona horaria actual (convertir a ingenuo/naive basado en UTC)
+        # 1. Convertir a naive (UTC-based)
         if idx.tz is not None:
-             # Convertir a UTC antes de quitar la TZ para tener una base consistente
              idx_naive = idx.tz_convert('UTC').tz_localize(None) 
         else:
-             idx_naive = idx # Asumir que ya es ingenuo si no tiene TZ
+             idx_naive = idx
         
         # 2. Redondear el tiempo ingenuo a la hora más cercana
         idx_naive_rounded = idx_naive.round('h') 
         
-        # 3. LÓGICA FINAL DE TZ: Localizar de nuevo a UTC (seguro, sin DST) y CONVERTIR a TIMEZONE
+        # 3. Localizar a UTC y CONVERTIR a TIMEZONE
         idx_aware = idx_naive_rounded.tz_localize('UTC').tz_convert(TIMEZONE)
         
         d.index = idx_aware
@@ -74,7 +64,7 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
         ts = _coerce_ts_series(d[ts_col].astype(str))
     elif fecha_col is not None and hora_col is not None:
         s = (d[fecha_col].astype(str).str.strip() + " " + d[hora_col].astype(str).str.strip()).str.strip()
-        ts = _coerce_ts_series(s) # 'ts' es tz-aware (America/Santiago)
+        ts = _coerce_ts_series(s)
     else:
         raise ValueError("No se pudo construir 'ts'. Aporta 'ts' o 'fecha'+'hora'.")
 
@@ -82,15 +72,13 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(d.index, pd.MultiIndex) and "ts" in d.index.names:
         d.index = d.index.droplevel(d.index.names.index("ts"))
     
-    # LÓGICA FINAL DE TZ (idéntica al Caso 1):
-    
     # 1. Convertir 'ts' a naive (UTC-based)
     ts_naive = ts.dt.tz_convert('UTC').dt.tz_localize(None)
     
     # 2. Redondear (naive)
     ts_naive_rounded = ts_naive.round('h')
     
-    # 3. Localizar de nuevo a UTC (seguro) y CONVERTIR a TIMEZONE
+    # 3. Localizar a UTC y CONVERTIR a TIMEZONE
     ts_rounded_aware = ts_naive_rounded.dt.tz_localize('UTC').dt.tz_convert(TIMEZONE)
     
     # Establecer índice y limpiar
@@ -100,29 +88,27 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     return d
 
 # ------------------------------------------------------------
-# Partes de tiempo (sin cambios)
+# Partes de tiempo (Corregido el manejo de TZ en caso de naive)
 # ------------------------------------------------------------
 def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     if not isinstance(df.index, pd.DatetimeIndex):
         if "ts" in df.columns:
-            # Asegurar base UTC antes de set_index
             df = df.set_index(pd.to_datetime(df["ts"], errors="coerce", utc=True)).drop(columns=["ts"], errors="ignore")
         else:
             raise ValueError("add_time_parts requiere un índice datetime o una columna 'ts'.")
 
     d = df.copy()
     
-    # Asegurar que el índice esté en la TIMEZONE correcta para extraer las partes.
     idx = d.index
     if idx.tz is None:
         try: 
+            # Asumir UTC y convertir
             idx = idx.tz_localize('UTC').tz_convert(TIMEZONE)
         except Exception: 
-            # Si hay un error de DST, ignorar y convertir directamente si es posible
+            # Manejo de DST en caso de ambigüedad
             idx = idx.tz_localize('UTC', ambiguous='infer', nonexistent='shift_forward').tz_convert(TIMEZONE)
     else:
         idx = idx.tz_convert(TIMEZONE)
-
 
     d["dow"] = idx.weekday
     d["month"] = idx.month
@@ -150,7 +136,7 @@ def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     return d
 
 # ------------------------------------------------------------
-# Dummies + reindex (CORREGIDO)
+# Dummies + reindex (Corregida la lista de columnas duplicadas)
 # ------------------------------------------------------------
 def dummies_and_reindex(df: pd.DataFrame, training_cols: list) -> pd.DataFrame:
     d = df.copy()
