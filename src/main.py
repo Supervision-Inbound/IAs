@@ -13,7 +13,7 @@ HOLIDAYS_FILE = "data/Feriados_Chilev2.csv"
 # ======= Claves de negocio =======
 TARGET_CALLS_NEW = "recibidos_nacional"
 TARGET_TMO_NEW   = "tmo_general"
-FERIADOS_COL = "feriados" # <-- Nombre estandarizado
+FERIADOS_COL = "feriados" 
 TZ = "America/Santiago"
 
 def smart_read_historical(path: str) -> pd.DataFrame:
@@ -90,7 +90,7 @@ def main(horizonte_dias: int):
     dfh[FERIADOS_COL] = pd.to_numeric(dfh[FERIADOS_COL], errors="coerce").fillna(0).astype(int)
     
     # 6) Añadir features pre/post feriado a los datos históricos
-    dfh = dfh.sort_index() # Asegurar orden temporal
+    dfh = dfh.sort_index() 
     dfh['es_post_feriado'] = ((dfh[FERIADOS_COL].shift(1).fillna(0) == 1) & (dfh[FERIADOS_COL] == 0)).astype(int)
     dfh['es_pre_feriado'] = ((dfh[FERIADOS_COL].shift(-1).fillna(0) == 1) & (dfh[FERIADOS_COL] == 0)).astype(int)
 
