@@ -100,7 +100,11 @@ def _safe_ratio(num, den, fallback=1.0):
 def _series_is_holiday(idx, holidays_set):
     tz = getattr(idx, "tz", None)
     # Usamos .dt.date para Series, .date para DatetimeIndex
-    idx_dates = idx.dt.date if hasattr(idx, 'dt') else idx.date
+    try:
+        idx_dates = idx.dt.date
+    except AttributeError:
+        idx_dates = idx.date
+        
     idx_dates = idx_dates.tz_convert(TIMEZONE).date if tz is not None else idx_dates
     return pd.Series([d in holidays_set for d in idx_dates], index=idx, dtype=bool)
 
@@ -202,7 +206,6 @@ def apply_outlier_cap(df_future, base_median_mad, holidays_set,
     K = np.where(is_weekend, k_weekend, k_weekday).astype(float)
     upper = capped["med"].values + K * capped["mad"].values
     
-    # El modelo ya aprendió pre/post feriado, pero aún no queremos capear picos en esos días
     mask = (~is_hol.values) & (~is_post_hol.values) & (capped[col_calls_future].astype(float).values > upper)
     capped.loc[mask, col_calls_future] = np.round(upper[mask]).astype(int)
 
@@ -279,9 +282,12 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
     # Generar *todos* los features en el histórico
     dfp = generate_features(df, TARGET_CALLS, TARGET_TMO, FERIADOS_COL)
     
-    # ffill inicial (para lags y MAs al inicio)
-    dfp[cols_pl] = dfp[cols_pl].fillna(0.0)
-    dfp[cols_tmo] = dfp[cols_tmo].fillna(0.0)
+    # --- INICIO DE LA CORRECCIÓN ---
+    # El error KeyError ocurre porque `cols_pl` (con dummies)
+    # no puede usarse para indexar `dfp` (sin dummies).
+    # Rellenamos NaNs en todo `dfp` para curar los lags/MAs iniciales.
+    dfp = dfp.fillna(0.0)
+    # --- FIN DE LA CORRECCIÓN ---
     
     last_ts = dfp.index.max()
     
@@ -298,17 +304,17 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         print(f"Prediciendo Día {i+1}/{horizon_days}...")
         
         # 1. Preparar Ventana de Entrada (Input)
-        # La 'seed' siempre tiene 168 filas
         input_df = df_seed
         
         # 2. Preparar Input del Planner
-        input_features_pl = pd.get_dummies(input_df[cols_pl], columns=['dow', 'month', 'hour'])
+        # Aquí es donde `dow` se convierte en `dow_0`, `dow_1`, etc.
+        input_features_pl = pd.get_dummies(input_df, columns=['dow', 'month', 'hour'])
         input_features_pl = input_features_pl.reindex(columns=cols_pl, fill_value=0.0)
         input_scaled_pl = sc_pl.transform(input_features_pl)
         input_lstm_pl = input_scaled_pl.reshape((1, LOOKBACK_STEPS, len(cols_pl)))
         
         # 3. Preparar Input del TMO
-        input_features_tmo = pd.get_dummies(input_df[cols_tmo], columns=['dow', 'month', 'hour'])
+        input_features_tmo = pd.get_dummies(input_df, columns=['dow', 'month', 'hour'])
         input_features_tmo = input_features_tmo.reindex(columns=cols_tmo, fill_value=0.0)
         input_scaled_tmo = sc_tmo.transform(input_features_tmo)
         input_lstm_tmo = input_scaled_tmo.reshape((1, LOOKBACK_STEPS, len(cols_tmo)))
