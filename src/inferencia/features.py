@@ -44,7 +44,6 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
         if "ts" in d.columns: d = d.drop(columns=["ts"])
         d = d.sort_index()
         d.index.name = "ts"
-        # Limpieza de duplicados en el índice
         d = d[~d.index.duplicated(keep='last')] 
         return d
 
@@ -73,14 +72,16 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(d.index, pd.MultiIndex) and "ts" in d.index.names:
         d.index = d.index.droplevel(d.index.names.index("ts"))
     
-    # 1. Convertir 'ts' a naive (UTC-based)
+    # 🚨 LÓGICA CORREGIDA (TYPOS)
+    
+    # 1. Convertir 'ts' (Serie) a naive (UTC-based)
     ts_naive = ts.dt.tz_convert('UTC').dt.tz_localize(None)
     
-    # 2. Redondear (naive)
-    ts_naive_rounded = ts_naive.round('h')
+    # 2. Redondear (naive) - FIX 1: Añadido .dt
+    ts_naive_rounded = ts_naive.dt.round('h')
     
-    # 3. Localizar a UTC y CONVERTIR a TIMEZONE
-    ts_rounded_aware = ts_naive_rounded.dt.tz_localize('UTC').tz_convert(TIMEZONE)
+    # 3. Localizar a UTC y CONVERTIR a TIMEZONE - FIX 2: Añadido .dt
+    ts_rounded_aware = ts_naive_rounded.dt.tz_localize('UTC').dt.tz_convert(TIMEZONE)
     
     # Establecer índice y limpiar
     d = d.dropna(subset=["ts"]).sort_values("ts").set_index(ts_rounded_aware) 
@@ -112,7 +113,6 @@ def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     d["month"] = idx.month
     d["hour"] = idx.hour
     d["day"] = idx.day
-
     d["sin_hour"] = np.sin(2*np.pi*d["hour"]/24.0)
     d["cos_hour"] = np.cos(2*np.pi*d["hour"]/24.0)
     d["sin_dow"] = np.sin(2*np.pi*d["dow"]/7.0)
