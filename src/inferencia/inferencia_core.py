@@ -7,7 +7,7 @@ import pandas as pd
 import tensorflow as tf
 
 from src.inferencia import features
-# 🚨 CORRECCIÓN: Usar importación local/directa para el módulo dentro del mismo directorio.
+# 🚨 CORRECCIÓN FINAL: Usar importación local/directa para el módulo dentro del mismo directorio.
 import inference_config as config 
 
 # ----------------------------------------------------------------------
@@ -96,23 +96,20 @@ def iterative_forecast(
     print(f"Iniciando predicción iterativa (LSTM) para {horizonte_pasos} pasos...")
     
     # 1. Preparación de secuencias iniciales
-    # Tomar el último target conocido y el último índice (timestamp)
     last_known_target = df_historic_cleaned["target"].iloc[-1]
     last_known_ts = df_historic_cleaned.index[-1]
 
-    # Tomar la secuencia de input escalada y darle la forma correcta (1, timesteps, features)
+    # Tomar la secuencia de input escalada y darle la forma correcta 
     X_input_scaled = scaler.transform(X_input_sequence)
-    current_sequence = np.expand_dims(X_input_scaled, axis=0) # Shape: (1, 168, N_FEATURES)
+    current_sequence = np.expand_dims(X_input_scaled, axis=0)
 
     # 2. Inicialización del DataFrame de predicciones (dfp)
-    
-    # Crear la lista de Timestamps futuros
     future_timestamps = [last_known_ts + datetime.timedelta(hours=h) for h in range(1, horizonte_pasos + 1)]
     dfp = pd.DataFrame(index=future_timestamps, columns=["target_pred"])
     
-    # Crear un DataFrame temporal de trabajo (dfw) con la historia + el futuro para generar features
+    # Crear un DataFrame temporal de trabajo (dfw)
     dfw = df_historic_cleaned.copy()
-    dfw["target"] = dfw["target"].astype(float) # Asegurar float
+    dfw["target"] = dfw["target"].astype(float)
     
     # 3. Bucle de predicción
     for step in range(horizonte_pasos):
@@ -130,8 +127,6 @@ def iterative_forecast(
         dfp.loc[future_ts, "target_pred"] = y_pred_unscaled
 
         # c. Preparar el input para el siguiente paso
-        
-        # Generar el registro futuro (temporalmente con la predicción)
         new_row_data = {"target": y_pred_unscaled}
         new_row = pd.DataFrame(new_row_data, index=[future_ts])
         
@@ -141,14 +136,12 @@ def iterative_forecast(
         
         # Agregar la nueva fila al DataFrame de trabajo (dfw)
         dfw = pd.concat([dfw, new_row])
-        dfw = dfw.sort_index().tail(MAX_TIMESTAMPS + step + 1) # Mantener historial suficiente
+        dfw = dfw.sort_index().tail(MAX_TIMESTAMPS + step + 1)
         
         # Generar features para el nuevo input
         df_next_input = dfw.tail(MAX_TIMESTAMPS).copy()
         df_next_input = features.add_time_parts(df_next_input)
         df_next_input = features.add_lags_mas(df_next_input, target_col="target")
-        
-        # Crear dummies y reindexar (usando la función de features)
         X_next_input = features.dummies_and_reindex(df_next_input, training_cols)
         
         # Escalar y preparar la secuencia
@@ -194,9 +187,8 @@ def forecast_120d(
     
     # 4. Generación de features para el DataFrame de Predicción (dfp)
 
-    # Crear una lista unificada de todas las columnas esperadas
     all_cols_expected = training_cols + ["target_pred"]
-    all_cols_expected = list(dict.fromkeys(all_cols_expected)) # Limpieza final de duplicados
+    all_cols_expected = list(dict.fromkeys(all_cols_expected))
 
     # Unir la historia limpia y las predicciones
     dfp_with_future = pd.concat([df_historic_cleaned.drop(columns=["target"], errors="ignore"), dfp])
@@ -204,15 +196,14 @@ def forecast_120d(
     # Crear features de tiempo para el futuro (dfp)
     dfp_with_future = features.add_time_parts(dfp_with_future)
     
-    # Crear features de lags y MAs (necesita la historia previa)
-    # Usamos target_pred como la columna para lags/MAs en el futuro, y target para el pasado
+    # Crear features de lags y MAs
     dfp_with_future["target"] = dfp_with_future["target_pred"].combine_first(dfp_with_future["target"])
     dfp_with_future = features.add_lags_mas(dfp_with_future, target_col="target")
     
     # Crear Dummies y asegurar el orden de las columnas de entrenamiento
     dfp_with_future = features.dummies_and_reindex(dfp_with_future, all_cols_expected)
 
-    # CORRECCIÓN DE DUPLICADOS EN EL ÍNDICE (para el error anterior)
+    # CORRECCIÓN DE DUPLICADOS EN EL ÍNDICE (prevención del ValueError)
     if dfp_with_future.index.duplicated().any():
         print("Advertencia: Se encontraron y eliminaron duplicados en el índice antes del reindexado de columnas.")
         dfp_with_future = dfp_with_future[~dfp_with_future.index.duplicated(keep='last')]
@@ -223,7 +214,6 @@ def forecast_120d(
     # 5. Filtrar solo las predicciones y limpiar
     df_hourly = dfp_with_future.loc[dfp.index].copy()
     
-    # Asegurar que la columna de predicción esté presente
     if "target_pred" not in df_hourly.columns:
         df_hourly["target_pred"] = 0.0
 
