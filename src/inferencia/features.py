@@ -26,6 +26,7 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     
     # Caso 1: El índice ya es DatetimeIndex
     if isinstance(d.index, pd.DatetimeIndex):
+        
         idx = d.index
         # 1. Convertir a naive (UTC-based)
         if idx.tz is not None:
@@ -79,16 +80,15 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
     ts_naive_rounded = ts_naive.round('h')
     
     # 3. Localizar a UTC y CONVERTIR a TIMEZONE
-    ts_rounded_aware = ts_naive_rounded.dt.tz_localize('UTC').dt.tz_convert(TIMEZONE)
+    ts_rounded_aware = ts_naive_rounded.dt.tz_localize('UTC').tz_convert(TIMEZONE)
     
     # Establecer índice y limpiar
     d = d.dropna(subset=["ts"]).sort_values("ts").set_index(ts_rounded_aware) 
-    # Limpieza de duplicados en el índice
     d = d[~d.index.duplicated(keep='last')] 
     return d
 
 # ------------------------------------------------------------
-# Partes de tiempo (Corregido el manejo de TZ en caso de naive)
+# Partes de tiempo
 # ------------------------------------------------------------
 def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     if not isinstance(df.index, pd.DatetimeIndex):
@@ -102,10 +102,8 @@ def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     idx = d.index
     if idx.tz is None:
         try: 
-            # Asumir UTC y convertir
             idx = idx.tz_localize('UTC').tz_convert(TIMEZONE)
         except Exception: 
-            # Manejo de DST en caso de ambigüedad
             idx = idx.tz_localize('UTC', ambiguous='infer', nonexistent='shift_forward').tz_convert(TIMEZONE)
     else:
         idx = idx.tz_convert(TIMEZONE)
@@ -123,7 +121,7 @@ def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     return d
 
 # ------------------------------------------------------------
-# Features de lags y medias móviles (sin cambios)
+# Features de lags y medias móviles
 # ------------------------------------------------------------
 def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     d = df.copy()
@@ -136,7 +134,7 @@ def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     return d
 
 # ------------------------------------------------------------
-# Dummies + reindex (Corregida la lista de columnas duplicadas)
+# Dummies + reindex
 # ------------------------------------------------------------
 def dummies_and_reindex(df: pd.DataFrame, training_cols: list) -> pd.DataFrame:
     d = df.copy()
