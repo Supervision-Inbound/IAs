@@ -7,10 +7,10 @@
 ARTIFACTS_PATH = "models" 
 
 # --- Nombres de Archivos de Artefactos ---
-MODEL_FILENAME = "modelo_planner.keras" # Ajusta si el nombre es diferente
-SCALER_FILENAME = "scaler_planner.pkl" # Ajusta si el nombre es diferente
-TRAINING_COLS_FILENAME = "training_columns_planner.json" # Ajusta si el nombre es diferente
+MODEL_FILENAME = "modelo_planner.keras" 
+SCALER_FILENAME = "scaler_planner.pkl" 
+TRAINING_COLS_FILENAME = "training_columns_planner.json" 
 
 # --- Parámetros del Modelo LSTM ---
-# Estos valores DEBEN coincidir con los usados durante el entrenamiento
+# Este valor DEBE coincidir con el usado durante el entrenamiento
 MAX_TIMESTAMPS = 168 # (7 días * 24 horas) -> Lookback
