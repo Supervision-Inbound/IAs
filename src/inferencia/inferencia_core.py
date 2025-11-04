@@ -1,246 +1,152 @@
-# -*- coding: utf-8 -*-
-import datetime
-import os
 import re
 import numpy as np
 import pandas as pd
-import tensorflow as tf
 
-# Importación relativa (evita ModuleNotFoundError)
-from . import features 
-# (Asumimos que erlang y utils_io existen en la misma carpeta si los necesitas)
-# from . import erlang 
-# from . import utils_io
+TIMEZONE = "America/Santiago"
 
-# ----------------------------------------------------------------------
-# Constantes (Las que no dependen de config)
-# ----------------------------------------------------------------------
-TIMEZONE = features.TIMEZONE
-
-# ----------------------------------------------------------------------
-# Carga de modelos y datos
-# ----------------------------------------------------------------------
-def load_all_artifacts(artifacts_path: str):
-    """Carga el modelo Keras, el scaler y las columnas de entrenamiento."""
-    # Importación local (evita Circular Import)
-    from . import inference_config as config 
+# ------------------------------------------------------------
+# Utils de parseo temporal
+# ------------------------------------------------------------
+def _coerce_ts_series(s: pd.Series) -> pd.Series:
+    """Parsea una serie de strings a datetime CONSCIENTE (UTC inicial) y la convierte a TIMEZONE."""
+    if s.dtype == "datetime64[ns]" or np.issubdtype(s.dtype, np.datetime64):
+        dt = pd.to_datetime(s, errors="coerce", utc=True)
+    else:
+        dt = pd.to_datetime(s, errors="coerce", dayfirst=True, utc=True)
+        if dt.isna().any():
+            dt2 = pd.to_datetime(s, errors="coerce", dayfirst=False, utc=True)
+            dt = dt.fillna(dt2)
     
-    print("Cargando artefactos LSTM...")
-    model_path = os.path.join(artifacts_path, config.MODEL_FILENAME)
-    scaler_path = os.path.join(artifacts_path, config.SCALER_FILENAME)
-    cols_path = os.path.join(artifacts_path, config.TRAINING_COLS_FILENAME)
+    # Convierte a la zona horaria final.
+    return dt.dt.tz_convert(TIMEZONE)
 
-    try:
-        model = tf.keras.models.load_model(model_path, compile=False)
-    except Exception as e:
-        print(f"Error al cargar el modelo Keras desde {model_path}: {e}")
-        return None, None, None
-
-    try:
-        # Usamos joblib para pkl (más robusto que pd.read_pickle)
-        import joblib
-        scaler = joblib.load(scaler_path)
-    except Exception as e:
-        print(f"Error al cargar el scaler desde {scaler_path}: {e}")
-        return model, None, None
-
-    try:
-        with open(cols_path, 'r') as f:
-            # Leemos JSON, no un archivo de texto plano
-            import json
-            training_cols = json.load(f)
-    except Exception as e:
-        print(f"Error al cargar las columnas de entrenamiento (json) desde {cols_path}: {e}")
-        return model, scaler, None
-
-    return model, scaler, training_cols
-
-# ----------------------------------------------------------------------
-# Preparación de datos (Input Sequence)
-# ----------------------------------------------------------------------
-def prepare_input_sequence(df_historic_raw: pd.DataFrame, training_cols: list):
-    """
-    Prepara la secuencia histórica y la escala para la inferencia.
-    """
-    # Importación local
-    from . import inference_config as config 
-    MAX_TIMESTAMPS = config.MAX_TIMESTAMPS
+def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
+    """Asegura un índice DatetimeIndex redondeado, tz-aware y sin duplicados."""
+    d = df.copy()
     
-    dfh = features.ensure_ts(df_historic_raw)
-    dfh = dfh.sort_index()
-
-    if len(dfh) < MAX_TIMESTAMPS:
-        raise ValueError(f"Datos históricos insuficientes. Se requieren al menos {MAX_TIMESTAMPS} puntos.")
-
-    df_input = dfh.tail(MAX_TIMESTAMPS).copy()
-    
-    df_input = features.add_time_parts(df_input)
-    # Asumimos que la columna 'target' ya existe (main.py la prepara)
-    df_input = features.add_lags_mas(df_input, target_col="target")
-    
-    X_input = features.dummies_and_reindex(df_input, training_cols)
-    X_input = X_input[training_cols]
-    
-    return df_input, X_input.values
-
-# ----------------------------------------------------------------------
-# Predicción iterativa (Step-by-Step)
-# ----------------------------------------------------------------------
-def iterative_forecast(
-    df_historic_cleaned: pd.DataFrame, 
-    X_input_sequence: np.ndarray, 
-    model: tf.keras.Model, 
-    scaler: object, 
-    training_cols: list, 
-    horizonte_pasos: int,
-    holidays_set: set # Argumento añadido
-) -> pd.DataFrame:
-    """
-    Realiza la predicción iterativa (paso a paso) de la serie temporal.
-    """
-    # Importación local
-    from . import inference_config as config 
-    MAX_TIMESTAMPS = config.MAX_TIMESTAMPS
-    
-    HORIZONTE_PRED_DIAS = horizonte_pasos // 24 
-
-    print(f"Iniciando predicción iterativa (LSTM) para {horizonte_pasos} pasos...")
-    
-    # 1. Preparación
-    last_known_target = df_historic_cleaned["target"].iloc[-1]
-    last_known_ts = df_historic_cleaned.index[-1]
-
-    X_input_scaled = scaler.transform(X_input_sequence)
-    current_sequence = np.expand_dims(X_input_scaled, axis=0)
-
-    # 2. Inicialización
-    future_timestamps = [last_known_ts + datetime.timedelta(hours=h) for h in range(1, horizonte_pasos + 1)]
-    dfp = pd.DataFrame(index=future_timestamps, columns=["target_pred"])
-    
-    dfw = df_historic_cleaned.copy()
-    dfw["target"] = dfw["target"].astype(float)
-    
-    # 3. Bucle de predicción
-    for step in range(horizonte_pasos):
+    # Caso 1: El índice ya es DatetimeIndex
+    if isinstance(d.index, pd.DatetimeIndex):
         
-        day = (step // 24) + 1
-        if step % 24 == 0:
-            print(f"Prediciendo Día {day}/{HORIZONTE_PRED_DIAS}...")
-
-        # a. Predicción
-        y_scaled = model.predict(current_sequence, verbose=0)[0, 0]
-        
-        # Invertir escala (asumiendo que el scaler espera un array 2D)
-        # Creamos un array 'dummy' con el número correcto de features (columnas)
-        dummy_features = np.zeros((1, len(training_cols)))
-        # Asumimos que la 'target' es la PRIMERA columna (índice 0)
-        dummy_features[0, 0] = y_scaled 
-        y_pred_unscaled = scaler.inverse_transform(dummy_features)[0, 0]
-        
-        # b. Almacenar predicción
-        future_ts = future_timestamps[step]
-        dfp.loc[future_ts, "target_pred"] = y_pred_unscaled
-
-        # c. Preparar el input para el siguiente paso
-        new_row_data = {"target": y_pred_unscaled}
-        new_row = pd.DataFrame(new_row_data, index=[future_ts])
-        
-        try:
-            new_row.index = new_row.index.tz_localize('UTC').tz_convert(TIMEZONE)
-        except Exception: 
-            new_row.index = new_row.index.tz_localize('UTC', ambiguous='infer', nonexistent='shift_forward').tz_convert(TIMEZONE)
-            
-        new_row.index.name = "ts"
-        
-        # Añadir feriados
-        if holidays_set:
-            new_row_date = new_row.index[0].date()
-            new_row["feriados"] = 1 if new_row_date in holidays_set else 0
+        idx = d.index
+        # 1. Convertir a naive (UTC-based)
+        if idx.tz is not None:
+             idx_naive = idx.tz_convert('UTC').tz_localize(None) 
         else:
-            new_row["feriados"] = 0
+             idx_naive = idx
         
-        dfw = pd.concat([dfw, new_row])
-        dfw = dfw[~dfw.index.duplicated(keep='last')] 
+        # 2. Redondear el tiempo ingenuo a la hora más cercana
+        idx_naive_rounded = idx_naive.round('h') 
         
-        # Generar features para el nuevo input
-        df_next_input = dfw.tail(MAX_TIMESTAMPS).copy()
-        df_next_input = features.add_time_parts(df_next_input)
-        df_next_input = features.add_lags_mas(df_next_input, target_col="target")
+        # 3. Localizar a UTC y CONVERTIR a TIMEZONE
+        idx_aware = idx_naive_rounded.tz_localize('UTC').tz_convert(TIMEZONE)
         
-        X_next_input = features.dummies_and_reindex(df_next_input, training_cols)
-        
-        X_next_input_scaled = scaler.transform(X_next_input.values)
-        current_sequence = np.expand_dims(X_next_input_scaled, axis=0)
-        
-    dfp["target_pred"] = pd.to_numeric(dfp["target_pred"], errors="coerce")
-    
-    return dfp
+        d.index = idx_aware
+        if "ts" in d.columns: d = d.drop(columns=["ts"])
+        d = d.sort_index()
+        d.index.name = "ts"
+        # Limpieza de duplicados en el índice
+        d = d[~d.index.duplicated(keep='last')] 
+        return d
 
-# ----------------------------------------------------------------------
-# Función principal de inferencia (UNIFICADA)
-# ----------------------------------------------------------------------
-def forecast_120d(
-    df_historic_raw: pd.DataFrame, 
-    horizon_days: int = 120, # 🚨 ACEPTA EL ARGUMENTO DE MAIN
-    holidays_set: set | None = None, # 🚨 ACEPTA EL ARGUMENTO DE MAIN
-    artifacts_path: str = None 
-) -> pd.DataFrame:
-    """
-    Carga artefactos y realiza la predicción de 120 días (2880 pasos).
-    """
-    # Importación local
-    from . import inference_config as config 
-    
-    if artifacts_path is None:
-        artifacts_path = config.ARTIFACTS_PATH
-        
-    HORIZONTE_PRED_PASOS = horizon_days * 24
-    
-    # 1. Cargar artefactos
-    model, scaler, training_cols = load_all_artifacts(artifacts_path)
-    if model is None or scaler is None or training_cols is None:
-        raise RuntimeError("No se pudieron cargar todos los artefactos de inferencia.")
+    # Caso 2: El índice no es DatetimeIndex (Construir desde columnas)
+    cols = {c.lower().strip(): c for c in d.columns}
+    ts_col = None
+    for cand in ["ts"]:
+        if cand in cols: ts_col = cols[cand]; break
+    fecha_col = None
+    hora_col = None
+    if ts_col is None:
+        for cand in ["fecha", "date", "dia", "día"]:
+            if cand in cols: fecha_col = cols[cand]; break
+        for cand in ["hora", "hour"]:
+            if cand in cols: hora_col = cols[cand]; break
 
-    # 2. Preparar secuencia de input (historia)
-    df_historic_cleaned, X_input_sequence = prepare_input_sequence(
-        df_historic_raw, 
-        training_cols
-    )
-    
-    # 3. Realizar predicción iterativa
-    dfp = iterative_forecast(
-        df_historic_cleaned, 
-        X_input_sequence, 
-        model, 
-        scaler, 
-        training_cols, 
-        HORIZONTE_PRED_PASOS,
-        holidays_set # Pasamos el set de feriados
-    )
-    
-    # 4. Generación de features para el DataFrame de Predicción (dfp)
-    all_cols_expected = training_cols + ["target_pred"]
-    all_cols_expected = list(dict.fromkeys(all_cols_expected))
+    if ts_col is not None:
+        ts = _coerce_ts_series(d[ts_col].astype(str))
+    elif fecha_col is not None and hora_col is not None:
+        s = (d[fecha_col].astype(str).str.strip() + " " + d[hora_col].astype(str).str.strip()).str.strip()
+        ts = _coerce_ts_series(s)
+    else:
+        raise ValueError("No se pudo construir 'ts'. Aporta 'ts' o 'fecha'+'hora'.")
 
-    dfp_with_future = pd.concat([df_historic_cleaned.drop(columns=["target"], errors="ignore"), dfp])
-    dfp_with_future = features.add_time_parts(dfp_with_future)
+    d["ts"] = ts
+    if isinstance(d.index, pd.MultiIndex) and "ts" in d.index.names:
+        d.index = d.index.droplevel(d.index.names.index("ts"))
     
-    dfp_with_future["target"] = dfp_with_future["target_pred"].combine_first(df_historic_cleaned["target"])
-    dfp_with_future = features.add_lags_mas(dfp_with_future, target_col="target")
+    # 1. Convertir 'ts' a naive (UTC-based)
+    ts_naive = ts.dt.tz_convert('UTC').dt.tz_localize(None)
     
-    dfp_with_future = features.dummies_and_reindex(dfp_with_future, all_cols_expected)
+    # 2. Redondear (naive)
+    ts_naive_rounded = ts_naive.round('h')
+    
+    # 3. Localizar a UTC y CONVERTIR a TIMEZONE
+    ts_rounded_aware = ts_naive_rounded.dt.tz_localize('UTC').tz_convert(TIMEZONE)
+    
+    # Establecer índice y limpiar
+    d = d.dropna(subset=["ts"]).sort_values("ts").set_index(ts_rounded_aware) 
+    d = d[~d.index.duplicated(keep='last')] 
+    return d
 
-    # CORRECCIÓN DE DUPLICADOS EN EL ÍNDICE (prevención del ValueError)
-    if dfp_with_future.index.duplicated().any():
-        print("Advertencia: Se encontraron y eliminaron duplicados en el índice antes del reindexado de columnas.")
-        dfp_with_future = dfp_with_future[~dfp_with_future.index.duplicated(keep='last')]
-    
-    dfp_with_future = dfp_with_future.reindex(columns=all_cols_expected, fill_value=0.0) 
-    
-    # 5. Filtrar solo las predicciones y limpiar
-    df_hourly = dfp_with_future.loc[dfp.index].copy()
-    
-    if "target_pred" not in df_hourly.columns:
-        df_hourly["target_pred"] = 0.0
+# ------------------------------------------------------------
+# Partes de tiempo
+# ------------------------------------------------------------
+def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
+    if not isinstance(df.index, pd.DatetimeIndex):
+        if "ts" in df.columns:
+            df = df.set_index(pd.to_datetime(df["ts"], errors="coerce", utc=True)).drop(columns=["ts"], errors="ignore")
+        else:
+            raise ValueError("add_time_parts requiere un índice datetime o una columna 'ts'.")
 
-    return df_hourly[["target_pred"]]
+    d = df.copy()
+    
+    idx = d.index
+    if idx.tz is None:
+        try: 
+            idx = idx.tz_localize('UTC').tz_convert(TIMEZONE)
+        except Exception: 
+            idx = idx.tz_localize('UTC', ambiguous='infer', nonexistent='shift_forward').tz_convert(TIMEZONE)
+    else:
+        idx = idx.tz_convert(TIMEZONE)
+
+    d["dow"] = idx.weekday
+    d["month"] = idx.month
+    d["hour"] = idx.hour
+    d["day"] = idx.day
+
+    d["sin_hour"] = np.sin(2*np.pi*d["hour"]/24.0)
+    d["cos_hour"] = np.cos(2*np.pi*d["hour"]/24.0)
+    d["sin_dow"] = np.sin(2*np.pi*d["dow"]/7.0)
+    d["cos_dow"] = np.cos(2*np.pi*d["dow"]/7.0)
+    
+    return d
+
+# ------------------------------------------------------------
+# Features de lags y medias móviles
+# ------------------------------------------------------------
+def add_lags_mas(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
+    d = df.copy()
+    if target_col not in d.columns: d[target_col] = 0.0
+    s = pd.to_numeric(d[target_col], errors="coerce")
+    for k in [24, 48, 72, 168]: d[f"lag_{k}"] = s.shift(k)
+    s1 = s.shift(1)
+    for w in [24, 72, 168]: d[f"ma_{w}"] = s1.rolling(w, min_periods=1).mean()
+    for c in [f"lag_{k}" for k in [24,48,72,168]] + [f"ma_{w}" for w in [24,72,168]]: d[c] = pd.to_numeric(d[c], errors="coerce")
+    return d
+
+# ------------------------------------------------------------
+# Dummies + reindex
+# ------------------------------------------------------------
+def dummies_and_reindex(df: pd.DataFrame, training_cols: list) -> pd.DataFrame:
+    d = df.copy()
+    cat_cols = []
+    for c in ["dow", "month", "hour"]:
+        if c in d.columns: cat_cols.append(c)
+    if cat_cols: d = pd.get_dummies(d, columns=cat_cols, drop_first=False)
+    for c in d.columns: d[c] = pd.to_numeric(d[c], errors="coerce")
+    
+    # CORRECCIÓN: Eliminar duplicados de la lista de columnas esperadas
+    unique_training_cols = list(dict.fromkeys(training_cols))
+    
+    X = d.reindex(columns=unique_training_cols, fill_value=0.0)
+    X = X.ffill().fillna(0.0)
+    return X
