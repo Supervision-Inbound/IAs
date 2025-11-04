@@ -1,4 +1,4 @@
-# src/inferencia/inferencia_core.py (¡LÓGICA v7.4 - add_time_parts CORREGIDO!)
+# src/inferencia/inferencia_core.py (¡LÓGICA v7.5 - Saneamiento en Bucle!)
 import os
 import glob
 import pathlib
@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
-from .features import ensure_ts, dummies_and_reindex # Quitamos add_time_parts de aquí
+from .features import ensure_ts, dummies_and_reindex
 from .erlang import required_agents, schedule_agents
 from .utils_io import write_daily_json, write_hourly_json
 
@@ -97,20 +97,15 @@ def _safe_ratio(num, den, fallback=1.0):
         return fallback
     return num / den
 
-# --- INICIO DE LA CORRECCIÓN (v7.4) ---
-# Esta es la función add_time_parts robusta que faltaba
+# --- add_time_parts robusta (v7.4) ---
 def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     d = df.copy()
     
-    # 1. Get the datetime object, whether it's index or column
     if isinstance(d.index, pd.DatetimeIndex):
         idx = d.index
     else:
-        # Asumimos que si no es índice, debe existir la columna 'ts'
         idx = pd.to_datetime(d['ts'], errors='coerce')
 
-    # 2. Get properties. DatetimeIndex has them directly,
-    #    Series has them under .dt
     if isinstance(idx, pd.Series):
         d["dow"]   = idx.dt.dayofweek
         d["month"] = idx.dt.month
@@ -122,8 +117,6 @@ def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
         d["hour"]  = idx.hour
         d["day"]   = idx.day
 
-    # 3. Recalcular senos/cosenos
-    # Verificamos que no sean NaN (lo que pasaría si idx falla)
     if d["hour"].isna().any():
         raise ValueError("Error en add_time_parts: 'hour' no se pudo calcular. Verifique el índice de tiempo.")
         
@@ -132,7 +125,6 @@ def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     d["sin_dow"]  = np.sin(2*np.pi*d["dow"]/7.0)
     d["cos_dow"]  = np.cos(2*np.pi*d["dow"]/7.0)
     return d
-# --- FIN DE LA CORRECCIÓN (v7.4) ---
 
 def _series_is_holiday(idx, holidays_set: set) -> pd.Series:
     if not isinstance(idx, (pd.DatetimeIndex, pd.Series)):
@@ -167,7 +159,7 @@ def compute_holiday_factors(df_hist, holidays_set,
         med_hol_tmo = dfh[dfh["is_holiday"]].groupby("hour")[col_tmo].median()
         med_nor_tmo = dfh[~dfh["is_holiday"]].groupby("hour")[col_tmo].median()
         g_hol_tmo = dfh[dfh["is_holiday"]][col_tmo].median()
-        g_nor_tmo = dfh[~dfh["is_holiday"]][col_tmo].median()
+        g_nor_tmo = dfh[~dfh["is_holiday"]].groupby("hour")[col_tmo].median()
         global_tmo_factor = _safe_ratio(g_hol_tmo, g_nor_tmo, fallback=1.00)
     else:
         global_tmo_factor = 1.00
@@ -343,6 +335,11 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         # 1. Preparar Ventana de Entrada (Input)
         input_df = df_seed
         
+        # --- INICIO DE LA CORRECCIÓN (v7.5) ---
+        # Saneamos los NaNs (de los lags/MAs) ANTES de escalar y predecir
+        input_df = input_df.fillna(0.0)
+        # --- FIN DE LA CORRECCIÓN (v7.5) ---
+        
         # 2. Preparar Input del Planner
         input_features_pl = pd.get_dummies(input_df, columns=['dow', 'month', 'hour'])
         input_features_pl = input_features_pl.reindex(columns=cols_pl, fill_value=0.0)
@@ -372,7 +369,6 @@ def forecast_120d(df_hist_joined: pd.DataFrame,
         df_future_day[TARGET_TMO] = np.maximum(0, yhat_tmo_24h)
         
         # 6. Generar "Known Future Features" (Calendario) para este nuevo día
-        # 'add_time_parts' ahora usa el ÍNDICE (future_index), que es un DatetimeIndex
         df_future_day = add_time_parts(df_future_day)
         df_future_day[FERIADOS_COL] = df_future_day.index.to_series().apply(lambda ts: _is_holiday(ts, holidays_set))
         
