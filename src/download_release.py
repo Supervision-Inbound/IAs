@@ -10,7 +10,9 @@ TARGET_NAMES = {
     "tmo_baseline_dow_hour.csv","tmo_residual_meta.json",
     # Otros opcionales
     "modelo_riesgos.keras","scaler_riesgos.pkl","training_columns_riesgos.json",
-    "baselines_clima.pkl"
+    "baselines_clima.pkl",
+    # <--- ¡AÑADIDO! Este es el nuevo artefacto que faltaba
+    "pre_holiday_factors.json" 
 }
 
 def _sha256_bytes(b: bytes) -> str:
@@ -73,5 +75,4 @@ if __name__ == "__main__":
     ap.add_argument("--tag", default=None, help="Tag específico del release (si se omite usa 'latest').")
     args = ap.parse_args()
     download_assets(args.owner, args.repo, args.out, tag=args.tag)
-
 
