@@ -6,13 +6,13 @@
         "fecha": "2025-11-05",
         "hora_inicio": 18,
         "hora_fin": 21,
-        "impacto_llamadas_adicionales": 7
+        "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2025-11-09",
         "hora_inicio": 18,
         "hora_fin": 18,
-        "impacto_llamadas_adicionales": 1
+        "impacto_llamadas_adicionales": 0
       }
     ]
   },
