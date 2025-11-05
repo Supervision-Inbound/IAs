@@ -11,8 +11,6 @@ TARGET_NAMES = {
     # Otros opcionales
     "modelo_riesgos.keras","scaler_riesgos.pkl","training_columns_riesgos.json",
     "baselines_clima.pkl"
-    # <--- ELIMINADO (v8): Ya no necesitamos este artefacto
-    # "pre_holiday_factors.json" 
 }
 
 def _sha256_bytes(b: bytes) -> str:
@@ -32,10 +30,10 @@ def download_assets(owner: str, repo: str, out_dir: str = "models",
     sess.headers["Accept"] = "application/vnd.github+json"
 
     if tag:
-        rel = _gh_get(sess, f"https.api.github.com/repos/{owner}/{repo}/releases/tags/{tag}")
+        rel = _gh_get(sess, f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}")
         print(f"▶ Release por TAG: {tag}")
     else:
-        rel = _gh_get(sess, f"https.api.github.com/repos/{owner}/{repo}/releases/latest")
+        rel = _gh_get(sess, f"https://api.github.com/repos/{owner}/{repo}/releases/latest")
         print("▶ Release: latest")
 
     assets = rel.get("assets", [])
