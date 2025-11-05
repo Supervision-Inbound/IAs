@@ -68,6 +68,7 @@ def ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
 
 # ------------------------------------------------------------
 # Partes de tiempo
+# <--- ESTA ES LA SECCIÓN MODIFICADA (v11)
 # ------------------------------------------------------------
 def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     if not isinstance(df.index, pd.DatetimeIndex):
@@ -86,13 +87,21 @@ def add_time_parts(df: pd.DataFrame) -> pd.DataFrame:
     d["month"] = idx.month
     d["hour"]  = idx.hour
     d["day"]   = idx.day
-
+    
+    # <--- NUEVO (v11): Coordenadas de tiempo cíclicas
+    d["dayofyear"] = idx.dayofyear
+    d["weekofyear"] = idx.isocalendar().week.astype(float)
+    
     d["sin_hour"] = np.sin(2*np.pi*d["hour"]/24.0)
     d["cos_hour"] = np.cos(2*np.pi*d["hour"]/24.0)
     d["sin_dow"]  = np.sin(2*np.pi*d["dow"]/7.0)
     d["cos_dow"]  = np.cos(2*np.pi*d["dow"]/7.0)
-
-    # <-- MODIFICADO: 'es_dia_de_pago' eliminado
+    
+    # <--- NUEVO (v11): Features de contexto anual/semanal
+    d["sin_dayofyear"] = np.sin(2*np.pi*d["dayofyear"]/365.25)
+    d["cos_dayofyear"] = np.cos(2*np.pi*d["dayofyear"]/365.25)
+    d["sin_weekofyear"] = np.sin(2*np.pi*d["weekofyear"]/52.18)
+    d["cos_weekofyear"] = np.cos(2*np.pi*d["weekofyear"]/52.18)
     
     return d
 
@@ -124,6 +133,8 @@ def dummies_and_reindex(df: pd.DataFrame, training_cols: list) -> pd.DataFrame:
     d = df.copy()
 
     cat_cols = []
+    # <--- MODIFICADO (v11): No convertir 'dayofyear' o 'weekofyear'
+    # 'day' tampoco (los usaremos cíclicos)
     for c in ["dow", "month", "hour"]:
         if c in d.columns:
             cat_cols.append(c)
