@@ -1,28 +1,6 @@
 [
   {
-    "comuna": "Chile Chico",
-    "rango_alertas": [
-      {
-        "fecha": "2025-11-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Coyhaique",
-    "rango_alertas": [
-      {
-        "fecha": "2025-11-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Rio Ibañez",
+    "comuna": "Puerto Cisnes",
     "rango_alertas": [
       {
         "fecha": "2025-11-15",
@@ -36,21 +14,9 @@
     "comuna": "Villarrica",
     "rango_alertas": [
       {
-        "fecha": "2025-11-13",
-        "hora_inicio": 18,
-        "hora_fin": 19,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
         "fecha": "2025-11-14",
         "hora_inicio": 18,
         "hora_fin": 19,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2025-11-17",
-        "hora_inicio": 18,
-        "hora_fin": 20,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -104,6 +70,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Chile Chico",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Cholchol",
     "rango_alertas": []
   },
@@ -133,6 +103,10 @@
   },
   {
     "comuna": "Corral",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Coyhaique",
     "rango_alertas": []
   },
   {
@@ -352,10 +326,6 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Puerto Cisnes",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Puerto Montt",
     "rango_alertas": []
   },
@@ -421,6 +391,10 @@
   },
   {
     "comuna": "Rio Bueno",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Rio Ibañez",
     "rango_alertas": []
   },
   {
