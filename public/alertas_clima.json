@@ -1,9 +1,37 @@
 [
   {
-    "comuna": "Puerto Cisnes",
+    "comuna": "Cochrane",
+    "rango_alertas": [
+      {
+        "fecha": "2025-11-17",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Ohiggins",
     "rango_alertas": [
       {
         "fecha": "2025-11-15",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2025-11-17",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Rio Ibañez",
+    "rango_alertas": [
+      {
+        "fecha": "2025-11-17",
         "hora_inicio": 0,
         "hora_fin": 0,
         "impacto_llamadas_adicionales": 0
@@ -17,6 +45,12 @@
         "fecha": "2025-11-14",
         "hora_inicio": 18,
         "hora_fin": 19,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2025-11-17",
+        "hora_inicio": 18,
+        "hora_fin": 18,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -83,10 +117,6 @@
   },
   {
     "comuna": "Cochamo",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Cochrane",
     "rango_alertas": []
   },
   {
@@ -282,10 +312,6 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Ohiggins",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Osorno",
     "rango_alertas": []
   },
@@ -323,6 +349,10 @@
   },
   {
     "comuna": "Pucon",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Puerto Cisnes",
     "rango_alertas": []
   },
   {
@@ -391,10 +421,6 @@
   },
   {
     "comuna": "Rio Bueno",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Rio Ibañez",
     "rango_alertas": []
   },
   {
