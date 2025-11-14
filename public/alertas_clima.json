@@ -14,7 +14,24 @@
     "comuna": "Ohiggins",
     "rango_alertas": [
       {
+        "fecha": "2025-11-17",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Rio Ibañez",
+    "rango_alertas": [
+      {
         "fecha": "2025-11-15",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2025-11-17",
         "hora_inicio": 0,
         "hora_fin": 0,
         "impacto_llamadas_adicionales": 0
@@ -27,17 +44,17 @@
       {
         "fecha": "2025-11-14",
         "hora_inicio": 18,
-        "hora_fin": 19,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2025-11-17",
-        "hora_inicio": 18,
         "hora_fin": 20,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2025-11-20",
+        "hora_inicio": 17,
+        "hora_fin": 21,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2025-11-21",
         "hora_inicio": 18,
         "hora_fin": 19,
         "impacto_llamadas_adicionales": 0
@@ -410,10 +427,6 @@
   },
   {
     "comuna": "Rio Bueno",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Rio Ibañez",
     "rango_alertas": []
   },
   {
