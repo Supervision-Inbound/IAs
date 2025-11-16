@@ -1,23 +1,23 @@
 [
   {
-    "comuna": "Cochrane",
-    "rango_alertas": [
-      {
-        "fecha": "2025-11-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 1
-      }
-    ]
-  },
-  {
     "comuna": "Ohiggins",
     "rango_alertas": [
       {
         "fecha": "2025-11-17",
         "hora_inicio": 0,
         "hora_fin": 0,
-        "impacto_llamadas_adicionales": 1
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Puerto Cisnes",
+    "rango_alertas": [
+      {
+        "fecha": "2025-11-17",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
       }
     ]
   },
@@ -25,16 +25,10 @@
     "comuna": "Rio Ibañez",
     "rango_alertas": [
       {
-        "fecha": "2025-11-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 1
-      },
-      {
         "fecha": "2025-11-17",
         "hora_inicio": 0,
         "hora_fin": 0,
-        "impacto_llamadas_adicionales": 1
+        "impacto_llamadas_adicionales": 0
       }
     ]
   },
@@ -43,9 +37,21 @@
     "rango_alertas": [
       {
         "fecha": "2025-11-21",
-        "hora_inicio": 17,
+        "hora_inicio": 18,
         "hora_fin": 20,
-        "impacto_llamadas_adicionales": 34
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2025-11-22",
+        "hora_inicio": 18,
+        "hora_fin": 19,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2025-11-23",
+        "hora_inicio": 16,
+        "hora_fin": 19,
+        "impacto_llamadas_adicionales": 0
       }
     ]
   },
@@ -111,6 +117,10 @@
   },
   {
     "comuna": "Cochamo",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Cochrane",
     "rango_alertas": []
   },
   {
@@ -343,10 +353,6 @@
   },
   {
     "comuna": "Pucon",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Puerto Cisnes",
     "rango_alertas": []
   },
   {
