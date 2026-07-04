@@ -22,7 +22,7 @@
     ]
   },
   {
-    "comuna": "Curarrehue",
+    "comuna": "Freire",
     "rango_alertas": [
       {
         "fecha": "2026-07-08",
@@ -44,7 +44,7 @@
     ]
   },
   {
-    "comuna": "Lanco",
+    "comuna": "Lonquimay",
     "rango_alertas": [
       {
         "fecha": "2026-07-08",
@@ -55,7 +55,7 @@
     ]
   },
   {
-    "comuna": "Mariquina",
+    "comuna": "Nueva Imperial",
     "rango_alertas": [
       {
         "fecha": "2026-07-08",
@@ -66,7 +66,18 @@
     ]
   },
   {
-    "comuna": "Melipeuco",
+    "comuna": "Panguipulli",
+    "rango_alertas": [
+      {
+        "fecha": "2026-07-08",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Pitrufquen",
     "rango_alertas": [
       {
         "fecha": "2026-07-08",
@@ -91,14 +102,25 @@
     "comuna": "San Rosendo",
     "rango_alertas": [
       {
+        "fecha": "2026-07-08",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Temuco",
+    "rango_alertas": [
+      {
         "fecha": "2026-07-07",
-        "hora_inicio": 23,
-        "hora_fin": 23,
+        "hora_inicio": 5,
+        "hora_fin": 6,
         "impacto_llamadas_adicionales": 0
       },
       {
-        "fecha": "2026-07-08",
-        "hora_inicio": 9,
+        "fecha": "2026-07-07",
+        "hora_inicio": 10,
         "hora_fin": 11,
         "impacto_llamadas_adicionales": 0
       }
@@ -116,12 +138,12 @@
     ]
   },
   {
-    "comuna": "Tome",
+    "comuna": "Tolten",
     "rango_alertas": [
       {
         "fecha": "2026-07-08",
-        "hora_inicio": 12,
-        "hora_fin": 14,
+        "hora_inicio": 0,
+        "hora_fin": 0,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -137,14 +159,20 @@
       },
       {
         "fecha": "2026-07-07",
-        "hora_inicio": 5,
-        "hora_fin": 5,
+        "hora_inicio": 7,
+        "hora_fin": 11,
         "impacto_llamadas_adicionales": 0
       },
       {
-        "fecha": "2026-07-07",
-        "hora_inicio": 12,
-        "hora_fin": 23,
+        "fecha": "2026-07-08",
+        "hora_inicio": 3,
+        "hora_fin": 8,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-08",
+        "hora_inicio": 10,
+        "hora_fin": 11,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -154,14 +182,8 @@
     "rango_alertas": [
       {
         "fecha": "2026-07-07",
-        "hora_inicio": 6,
+        "hora_inicio": 5,
         "hora_fin": 8,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-07",
-        "hora_inicio": 17,
-        "hora_fin": 17,
         "impacto_llamadas_adicionales": 0
       },
       {
@@ -173,19 +195,25 @@
       {
         "fecha": "2026-07-08",
         "hora_inicio": 0,
-        "hora_fin": 10,
+        "hora_fin": 12,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-08",
-        "hora_inicio": 12,
-        "hora_fin": 13,
+        "hora_inicio": 16,
+        "hora_fin": 17,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-08",
         "hora_inicio": 20,
-        "hora_fin": 20,
+        "hora_fin": 23,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-09",
+        "hora_inicio": 0,
+        "hora_fin": 1,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -287,6 +315,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Curarrehue",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Dalcahue",
     "rango_alertas": []
   },
@@ -300,10 +332,6 @@
   },
   {
     "comuna": "Florida",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Freire",
     "rango_alertas": []
   },
   {
@@ -351,6 +379,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Lanco",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Lautaro",
     "rango_alertas": []
   },
@@ -364,10 +396,6 @@
   },
   {
     "comuna": "Loncoche",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Lonquimay",
     "rango_alertas": []
   },
   {
@@ -403,7 +431,15 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Mariquina",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Maullin",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Melipeuco",
     "rango_alertas": []
   },
   {
@@ -416,10 +452,6 @@
   },
   {
     "comuna": "Negrete",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Nueva Imperial",
     "rango_alertas": []
   },
   {
@@ -443,10 +475,6 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Panguipulli",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Pemuco",
     "rango_alertas": []
   },
@@ -456,10 +484,6 @@
   },
   {
     "comuna": "Pinto",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Pitrufquen",
     "rango_alertas": []
   },
   {
@@ -567,15 +591,11 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Temuco",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Teodoro Schmidt",
     "rango_alertas": []
   },
   {
-    "comuna": "Tolten",
+    "comuna": "Tome",
     "rango_alertas": []
   },
   {
