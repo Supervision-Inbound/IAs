@@ -1,6 +1,6 @@
 [
   {
-    "comuna": "Alto Bio Bio",
+    "comuna": "Calbuco",
     "rango_alertas": [
       {
         "fecha": "2026-07-08",
@@ -11,7 +11,7 @@
     ]
   },
   {
-    "comuna": "Collipulli",
+    "comuna": "Cochamo",
     "rango_alertas": [
       {
         "fecha": "2026-07-08",
@@ -22,7 +22,7 @@
     ]
   },
   {
-    "comuna": "Cunco",
+    "comuna": "Fresia",
     "rango_alertas": [
       {
         "fecha": "2026-07-08",
@@ -33,7 +33,7 @@
     ]
   },
   {
-    "comuna": "Curacautin",
+    "comuna": "Llanquihue",
     "rango_alertas": [
       {
         "fecha": "2026-07-08",
@@ -44,7 +44,7 @@
     ]
   },
   {
-    "comuna": "Curarrehue",
+    "comuna": "Maullin",
     "rango_alertas": [
       {
         "fecha": "2026-07-08",
@@ -55,7 +55,7 @@
     ]
   },
   {
-    "comuna": "Ercilla",
+    "comuna": "Puerto Montt",
     "rango_alertas": [
       {
         "fecha": "2026-07-08",
@@ -66,73 +66,7 @@
     ]
   },
   {
-    "comuna": "Freire",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Frutillar",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Gorbea",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Lonquimay",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Melipeuco",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Pitrufquen",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Pucon",
+    "comuna": "Puerto Varas",
     "rango_alertas": [
       {
         "fecha": "2026-07-08",
@@ -146,42 +80,9 @@
     "comuna": "San Rosendo",
     "rango_alertas": [
       {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Teodoro Schmidt",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Tirua",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Tolten",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
+        "fecha": "2026-07-09",
+        "hora_inicio": 8,
+        "hora_fin": 8,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -198,36 +99,19 @@
       {
         "fecha": "2026-07-07",
         "hora_inicio": 8,
-        "hora_fin": 17,
+        "hora_fin": 15,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-07",
+        "hora_inicio": 17,
+        "hora_fin": 19,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-08",
-        "hora_inicio": 7,
-        "hora_fin": 7,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 10,
-        "hora_fin": 10,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 13,
-        "hora_fin": 13,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Vilcun",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
+        "hora_inicio": 4,
+        "hora_fin": 4,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -249,47 +133,63 @@
       },
       {
         "fecha": "2026-07-07",
-        "hora_inicio": 13,
-        "hora_fin": 13,
+        "hora_inicio": 12,
+        "hora_fin": 12,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-07",
-        "hora_inicio": 17,
-        "hora_fin": 22,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 1,
-        "hora_fin": 14,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 16,
-        "hora_fin": 17,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-08",
         "hora_inicio": 20,
         "hora_fin": 21,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-08",
-        "hora_inicio": 23,
-        "hora_fin": 23,
+        "hora_inicio": 1,
+        "hora_fin": 8,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-08",
+        "hora_inicio": 12,
+        "hora_fin": 12,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-08",
+        "hora_inicio": 16,
+        "hora_fin": 16,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-08",
+        "hora_inicio": 20,
+        "hora_fin": 22,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-09",
-        "hora_inicio": 0,
-        "hora_fin": 2,
+        "hora_inicio": 1,
+        "hora_fin": 1,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-13",
+        "hora_inicio": 9,
+        "hora_fin": 9,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-13",
+        "hora_inicio": 11,
+        "hora_fin": 14,
         "impacto_llamadas_adicionales": 0
       }
     ]
+  },
+  {
+    "comuna": "Alto Bio Bio",
+    "rango_alertas": []
   },
   {
     "comuna": "Ancud",
@@ -313,10 +213,6 @@
   },
   {
     "comuna": "Cabrero",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Calbuco",
     "rango_alertas": []
   },
   {
@@ -348,11 +244,11 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Cochamo",
+    "comuna": "Cochrane",
     "rango_alertas": []
   },
   {
-    "comuna": "Cochrane",
+    "comuna": "Collipulli",
     "rango_alertas": []
   },
   {
@@ -372,11 +268,23 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Cunco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Curacautin",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Curaco De Velez",
     "rango_alertas": []
   },
   {
     "comuna": "Curanilahue",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Curarrehue",
     "rango_alertas": []
   },
   {
@@ -388,11 +296,19 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Ercilla",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Florida",
     "rango_alertas": []
   },
   {
-    "comuna": "Fresia",
+    "comuna": "Freire",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Frutillar",
     "rango_alertas": []
   },
   {
@@ -405,6 +321,10 @@
   },
   {
     "comuna": "Galvarino",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Gorbea",
     "rango_alertas": []
   },
   {
@@ -444,11 +364,11 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Llanquihue",
+    "comuna": "Loncoche",
     "rango_alertas": []
   },
   {
-    "comuna": "Loncoche",
+    "comuna": "Lonquimay",
     "rango_alertas": []
   },
   {
@@ -488,7 +408,7 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Maullin",
+    "comuna": "Melipeuco",
     "rango_alertas": []
   },
   {
@@ -544,19 +464,19 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Pitrufquen",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Pucon",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Puerto Cisnes",
     "rango_alertas": []
   },
   {
-    "comuna": "Puerto Montt",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Puerto Octay",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Puerto Varas",
     "rango_alertas": []
   },
   {
@@ -652,6 +572,18 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Teodoro Schmidt",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Tirua",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Tolten",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Tome",
     "rango_alertas": []
   },
@@ -665,6 +597,10 @@
   },
   {
     "comuna": "Victoria",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Vilcun",
     "rango_alertas": []
   },
   {
