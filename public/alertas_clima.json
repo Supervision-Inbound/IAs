@@ -1,6 +1,6 @@
 [
   {
-    "comuna": "Calbuco",
+    "comuna": "La Union",
     "rango_alertas": [
       {
         "fecha": "2026-07-08",
@@ -11,7 +11,7 @@
     ]
   },
   {
-    "comuna": "Cochamo",
+    "comuna": "Osorno",
     "rango_alertas": [
       {
         "fecha": "2026-07-08",
@@ -22,7 +22,7 @@
     ]
   },
   {
-    "comuna": "Fresia",
+    "comuna": "Puyehue",
     "rango_alertas": [
       {
         "fecha": "2026-07-08",
@@ -33,40 +33,7 @@
     ]
   },
   {
-    "comuna": "Llanquihue",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Maullin",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Puerto Montt",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Puerto Varas",
+    "comuna": "San Juan De La Costa",
     "rango_alertas": [
       {
         "fecha": "2026-07-08",
@@ -80,9 +47,20 @@
     "comuna": "San Rosendo",
     "rango_alertas": [
       {
-        "fecha": "2026-07-09",
-        "hora_inicio": 8,
-        "hora_fin": 8,
+        "fecha": "2026-07-10",
+        "hora_inicio": 9,
+        "hora_fin": 9,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Temuco",
+    "rango_alertas": [
+      {
+        "fecha": "2026-07-07",
+        "hora_inicio": 5,
+        "hora_fin": 5,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -92,26 +70,32 @@
     "rango_alertas": [
       {
         "fecha": "2026-07-07",
-        "hora_inicio": 2,
-        "hora_fin": 3,
+        "hora_inicio": 1,
+        "hora_fin": 2,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-07",
-        "hora_inicio": 8,
-        "hora_fin": 15,
+        "hora_inicio": 11,
+        "hora_fin": 11,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-07",
-        "hora_inicio": 17,
+        "hora_inicio": 15,
         "hora_fin": 19,
         "impacto_llamadas_adicionales": 0
       },
       {
+        "fecha": "2026-07-07",
+        "hora_inicio": 21,
+        "hora_fin": 22,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
         "fecha": "2026-07-08",
-        "hora_inicio": 4,
-        "hora_fin": 4,
+        "hora_inicio": 1,
+        "hora_fin": 1,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -122,67 +106,31 @@
       {
         "fecha": "2026-07-07",
         "hora_inicio": 2,
-        "hora_fin": 2,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-07",
-        "hora_inicio": 5,
         "hora_fin": 5,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-07",
-        "hora_inicio": 12,
-        "hora_fin": 12,
+        "hora_inicio": 13,
+        "hora_fin": 14,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-07",
-        "hora_inicio": 20,
+        "hora_inicio": 17,
+        "hora_fin": 17,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-07",
+        "hora_inicio": 19,
         "hora_fin": 21,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-08",
         "hora_inicio": 1,
-        "hora_fin": 8,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 12,
         "hora_fin": 12,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 16,
-        "hora_fin": 16,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 20,
-        "hora_fin": 22,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-09",
-        "hora_inicio": 1,
-        "hora_fin": 1,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-13",
-        "hora_inicio": 9,
-        "hora_fin": 9,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-13",
-        "hora_inicio": 11,
-        "hora_fin": 14,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -216,6 +164,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Calbuco",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Carahue",
     "rango_alertas": []
   },
@@ -241,6 +193,10 @@
   },
   {
     "comuna": "Chonchi",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Cochamo",
     "rango_alertas": []
   },
   {
@@ -308,6 +264,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Fresia",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Frutillar",
     "rango_alertas": []
   },
@@ -336,10 +296,6 @@
     "rango_alertas": []
   },
   {
-    "comuna": "La Union",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Lago Ranco",
     "rango_alertas": []
   },
@@ -361,6 +317,10 @@
   },
   {
     "comuna": "Lebu",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Llanquihue",
     "rango_alertas": []
   },
   {
@@ -408,6 +368,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Maullin",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Melipeuco",
     "rango_alertas": []
   },
@@ -429,10 +393,6 @@
   },
   {
     "comuna": "Ohiggins",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Osorno",
     "rango_alertas": []
   },
   {
@@ -476,7 +436,15 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Puerto Montt",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Puerto Octay",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Puerto Varas",
     "rango_alertas": []
   },
   {
@@ -489,10 +457,6 @@
   },
   {
     "comuna": "Purranque",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Puyehue",
     "rango_alertas": []
   },
   {
@@ -552,10 +516,6 @@
     "rango_alertas": []
   },
   {
-    "comuna": "San Juan De La Costa",
-    "rango_alertas": []
-  },
-  {
     "comuna": "San Pablo",
     "rango_alertas": []
   },
@@ -565,10 +525,6 @@
   },
   {
     "comuna": "Santa Juana",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Temuco",
     "rango_alertas": []
   },
   {
