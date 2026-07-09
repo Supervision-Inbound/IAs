@@ -1,9 +1,9 @@
 [
   {
-    "comuna": "Fresia",
+    "comuna": "Futaleufu",
     "rango_alertas": [
       {
-        "fecha": "2026-07-08",
+        "fecha": "2026-07-13",
         "hora_inicio": 0,
         "hora_fin": 0,
         "impacto_llamadas_adicionales": 0
@@ -11,65 +11,10 @@
     ]
   },
   {
-    "comuna": "Los Lagos",
+    "comuna": "Palena",
     "rango_alertas": [
       {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Osorno",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Puerto Octay",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Purranque",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Rio Negro",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "San Juan De La Costa",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-08",
+        "fecha": "2026-07-13",
         "hora_inicio": 0,
         "hora_fin": 0,
         "impacto_llamadas_adicionales": 0
@@ -80,9 +25,9 @@
     "comuna": "San Rosendo",
     "rango_alertas": [
       {
-        "fecha": "2026-07-10",
-        "hora_inicio": 4,
-        "hora_fin": 4,
+        "fecha": "2026-07-14",
+        "hora_inicio": 6,
+        "hora_fin": 8,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -92,8 +37,8 @@
     "rango_alertas": [
       {
         "fecha": "2026-07-10",
-        "hora_inicio": 3,
-        "hora_fin": 3,
+        "hora_inicio": 4,
+        "hora_fin": 4,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -102,8 +47,14 @@
     "comuna": "Tome",
     "rango_alertas": [
       {
-        "fecha": "2026-07-08",
-        "hora_inicio": 8,
+        "fecha": "2026-07-10",
+        "hora_inicio": 0,
+        "hora_fin": 1,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-14",
+        "hora_inicio": 5,
         "hora_fin": 8,
         "impacto_llamadas_adicionales": 0
       }
@@ -113,27 +64,33 @@
     "comuna": "Villarrica",
     "rango_alertas": [
       {
-        "fecha": "2026-07-08",
-        "hora_inicio": 2,
-        "hora_fin": 9,
+        "fecha": "2026-07-13",
+        "hora_inicio": 12,
+        "hora_fin": 14,
         "impacto_llamadas_adicionales": 0
       },
       {
-        "fecha": "2026-07-08",
-        "hora_inicio": 16,
+        "fecha": "2026-07-13",
+        "hora_inicio": 21,
+        "hora_fin": 23,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-14",
+        "hora_inicio": 2,
+        "hora_fin": 2,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-16",
+        "hora_inicio": 18,
         "hora_fin": 18,
         "impacto_llamadas_adicionales": 0
       },
       {
-        "fecha": "2026-07-08",
-        "hora_inicio": 21,
-        "hora_fin": 21,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-08",
-        "hora_inicio": 23,
-        "hora_fin": 23,
+        "fecha": "2026-07-16",
+        "hora_inicio": 20,
+        "hora_fin": 20,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -267,11 +224,11 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Frutillar",
+    "comuna": "Fresia",
     "rango_alertas": []
   },
   {
-    "comuna": "Futaleufu",
+    "comuna": "Frutillar",
     "rango_alertas": []
   },
   {
@@ -343,6 +300,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Los Lagos",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Los Muermos",
     "rango_alertas": []
   },
@@ -395,15 +356,15 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Osorno",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Padre Las Casas",
     "rango_alertas": []
   },
   {
     "comuna": "Paillaco",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Palena",
     "rango_alertas": []
   },
   {
@@ -439,6 +400,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Puerto Octay",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Puerto Varas",
     "rango_alertas": []
   },
@@ -448,6 +413,10 @@
   },
   {
     "comuna": "Puren",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Purranque",
     "rango_alertas": []
   },
   {
@@ -499,11 +468,19 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Rio Negro",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Saavedra",
     "rango_alertas": []
   },
   {
     "comuna": "San Ignacio",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "San Juan De La Costa",
     "rango_alertas": []
   },
   {
