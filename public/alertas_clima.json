@@ -1,5 +1,38 @@
 [
   {
+    "comuna": "Carahue",
+    "rango_alertas": [
+      {
+        "fecha": "2026-07-15",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Chile Chico",
+    "rango_alertas": [
+      {
+        "fecha": "2026-07-13",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Coyhaique",
+    "rango_alertas": [
+      {
+        "fecha": "2026-07-13",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
     "comuna": "Futaleufu",
     "rango_alertas": [
       {
@@ -11,7 +44,7 @@
     ]
   },
   {
-    "comuna": "Palena",
+    "comuna": "Lago Verde",
     "rango_alertas": [
       {
         "fecha": "2026-07-13",
@@ -22,12 +55,41 @@
     ]
   },
   {
+    "comuna": "Saavedra",
+    "rango_alertas": [
+      {
+        "fecha": "2026-07-15",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
     "comuna": "San Rosendo",
     "rango_alertas": [
       {
-        "fecha": "2026-07-14",
-        "hora_inicio": 6,
-        "hora_fin": 8,
+        "fecha": "2026-07-15",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-15",
+        "hora_inicio": 12,
+        "hora_fin": 12,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-15",
+        "hora_inicio": 14,
+        "hora_fin": 14,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-16",
+        "hora_inicio": 9,
+        "hora_fin": 14,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -36,9 +98,32 @@
     "comuna": "Temuco",
     "rango_alertas": [
       {
-        "fecha": "2026-07-10",
-        "hora_inicio": 4,
-        "hora_fin": 4,
+        "fecha": "2026-07-15",
+        "hora_inicio": 6,
+        "hora_fin": 7,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-15",
+        "hora_inicio": 9,
+        "hora_fin": 14,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-16",
+        "hora_inicio": 13,
+        "hora_fin": 13,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Teodoro Schmidt",
+    "rango_alertas": [
+      {
+        "fecha": "2026-07-15",
+        "hora_inicio": 0,
+        "hora_fin": 0,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -48,14 +133,61 @@
     "rango_alertas": [
       {
         "fecha": "2026-07-10",
-        "hora_inicio": 0,
-        "hora_fin": 1,
+        "hora_inicio": 6,
+        "hora_fin": 7,
         "impacto_llamadas_adicionales": 0
       },
       {
-        "fecha": "2026-07-14",
-        "hora_inicio": 5,
+        "fecha": "2026-07-15",
+        "hora_inicio": 3,
+        "hora_fin": 4,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-15",
+        "hora_inicio": 6,
         "hora_fin": 8,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-15",
+        "hora_inicio": 12,
+        "hora_fin": 17,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-15",
+        "hora_inicio": 19,
+        "hora_fin": 20,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-16",
+        "hora_inicio": 3,
+        "hora_fin": 3,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-16",
+        "hora_inicio": 5,
+        "hora_fin": 11,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-16",
+        "hora_inicio": 14,
+        "hora_fin": 14,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Valdivia",
+    "rango_alertas": [
+      {
+        "fecha": "2026-07-15",
+        "hora_inicio": 3,
+        "hora_fin": 5,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -65,14 +197,8 @@
     "rango_alertas": [
       {
         "fecha": "2026-07-13",
-        "hora_inicio": 12,
-        "hora_fin": 14,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-13",
         "hora_inicio": 21,
-        "hora_fin": 23,
+        "hora_fin": 21,
         "impacto_llamadas_adicionales": 0
       },
       {
@@ -82,14 +208,8 @@
         "impacto_llamadas_adicionales": 0
       },
       {
-        "fecha": "2026-07-16",
-        "hora_inicio": 18,
-        "hora_fin": 18,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-16",
-        "hora_inicio": 20,
+        "fecha": "2026-07-15",
+        "hora_inicio": 1,
         "hora_fin": 20,
         "impacto_llamadas_adicionales": 0
       }
@@ -128,10 +248,6 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Carahue",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Castro",
     "rango_alertas": []
   },
@@ -141,10 +257,6 @@
   },
   {
     "comuna": "Chaiten",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Chile Chico",
     "rango_alertas": []
   },
   {
@@ -177,10 +289,6 @@
   },
   {
     "comuna": "Corral",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Coyhaique",
     "rango_alertas": []
   },
   {
@@ -257,10 +365,6 @@
   },
   {
     "comuna": "Lago Ranco",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Lago Verde",
     "rango_alertas": []
   },
   {
@@ -368,6 +472,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Palena",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Panguipulli",
     "rango_alertas": []
   },
@@ -472,10 +580,6 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Saavedra",
-    "rango_alertas": []
-  },
-  {
     "comuna": "San Ignacio",
     "rango_alertas": []
   },
@@ -496,10 +600,6 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Teodoro Schmidt",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Tirua",
     "rango_alertas": []
   },
@@ -513,10 +613,6 @@
   },
   {
     "comuna": "Tucapel",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Valdivia",
     "rango_alertas": []
   },
   {
