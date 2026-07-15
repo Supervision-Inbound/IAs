@@ -1,5 +1,16 @@
 [
   {
+    "comuna": "Alto Bio Bio",
+    "rango_alertas": [
+      {
+        "fecha": "2026-07-15",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
     "comuna": "Antuco",
     "rango_alertas": [
       {
@@ -11,7 +22,7 @@
     ]
   },
   {
-    "comuna": "Cunco",
+    "comuna": "Cabrero",
     "rango_alertas": [
       {
         "fecha": "2026-07-15",
@@ -22,7 +33,7 @@
     ]
   },
   {
-    "comuna": "Curacautin",
+    "comuna": "Curarrehue",
     "rango_alertas": [
       {
         "fecha": "2026-07-15",
@@ -34,39 +45,6 @@
   },
   {
     "comuna": "El Carmen",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Ercilla",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Florida",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Frutillar",
     "rango_alertas": [
       {
         "fecha": "2026-07-15",
@@ -99,7 +77,7 @@
     ]
   },
   {
-    "comuna": "Nacimiento",
+    "comuna": "Mulchen",
     "rango_alertas": [
       {
         "fecha": "2026-07-15",
@@ -110,7 +88,7 @@
     ]
   },
   {
-    "comuna": "Negrete",
+    "comuna": "Perquenco",
     "rango_alertas": [
       {
         "fecha": "2026-07-15",
@@ -121,7 +99,7 @@
     ]
   },
   {
-    "comuna": "Pemuco",
+    "comuna": "Quillon",
     "rango_alertas": [
       {
         "fecha": "2026-07-15",
@@ -132,18 +110,7 @@
     ]
   },
   {
-    "comuna": "Pinto",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-20",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Pucon",
+    "comuna": "Ranquil",
     "rango_alertas": [
       {
         "fecha": "2026-07-15",
@@ -154,18 +121,7 @@
     ]
   },
   {
-    "comuna": "Renaico",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "San Pablo",
+    "comuna": "San Ignacio",
     "rango_alertas": [
       {
         "fecha": "2026-07-15",
@@ -179,91 +135,9 @@
     "comuna": "San Rosendo",
     "rango_alertas": [
       {
-        "fecha": "2026-07-14",
-        "hora_inicio": 15,
-        "hora_fin": 17,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-14",
-        "hora_inicio": 21,
-        "hora_fin": 23,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
         "fecha": "2026-07-15",
         "hora_inicio": 0,
         "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-16",
-        "hora_inicio": 11,
-        "hora_fin": 13,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-19",
-        "hora_inicio": 9,
-        "hora_fin": 11,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Temuco",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-16",
-        "hora_inicio": 10,
-        "hora_fin": 13,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-19",
-        "hora_inicio": 13,
-        "hora_fin": 13,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Tome",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-14",
-        "hora_inicio": 16,
-        "hora_fin": 16,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-14",
-        "hora_inicio": 23,
-        "hora_fin": 23,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 1,
-        "hora_fin": 1,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-16",
-        "hora_inicio": 11,
-        "hora_fin": 11,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-16",
-        "hora_inicio": 13,
-        "hora_fin": 14,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-19",
-        "hora_inicio": 12,
-        "hora_fin": 14,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -280,30 +154,7 @@
     ]
   },
   {
-    "comuna": "Valdivia",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-16",
-        "hora_inicio": 1,
-        "hora_fin": 3,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-16",
-        "hora_inicio": 5,
-        "hora_fin": 5,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-16",
-        "hora_inicio": 11,
-        "hora_fin": 11,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Vilcun",
+    "comuna": "Victoria",
     "rango_alertas": [
       {
         "fecha": "2026-07-15",
@@ -317,62 +168,51 @@
     "comuna": "Villarrica",
     "rango_alertas": [
       {
-        "fecha": "2026-07-14",
-        "hora_inicio": 2,
-        "hora_fin": 3,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-14",
-        "hora_inicio": 19,
-        "hora_fin": 21,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
         "fecha": "2026-07-15",
         "hora_inicio": 8,
-        "hora_fin": 10,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 12,
         "hora_fin": 13,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-15",
         "hora_inicio": 16,
+        "hora_fin": 16,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-15",
+        "hora_inicio": 19,
+        "hora_fin": 19,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-15",
+        "hora_inicio": 22,
         "hora_fin": 23,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-16",
         "hora_inicio": 0,
-        "hora_fin": 0,
+        "hora_fin": 1,
         "impacto_llamadas_adicionales": 0
       },
       {
-        "fecha": "2026-07-16",
-        "hora_inicio": 9,
-        "hora_fin": 9,
+        "fecha": "2026-07-20",
+        "hora_inicio": 21,
+        "hora_fin": 22,
         "impacto_llamadas_adicionales": 0
       },
       {
-        "fecha": "2026-07-16",
-        "hora_inicio": 20,
-        "hora_fin": 20,
+        "fecha": "2026-07-21",
+        "hora_inicio": 2,
+        "hora_fin": 2,
         "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Yumbel",
-    "rango_alertas": [
+      },
       {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
+        "fecha": "2026-07-22",
+        "hora_inicio": 7,
+        "hora_fin": 8,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -389,10 +229,6 @@
     ]
   },
   {
-    "comuna": "Alto Bio Bio",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Ancud",
     "rango_alertas": []
   },
@@ -406,10 +242,6 @@
   },
   {
     "comuna": "Bulnes",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Cabrero",
     "rango_alertas": []
   },
   {
@@ -473,6 +305,14 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Cunco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Curacautin",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Curaco De Velez",
     "rango_alertas": []
   },
@@ -481,11 +321,15 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Curarrehue",
+    "comuna": "Dalcahue",
     "rango_alertas": []
   },
   {
-    "comuna": "Dalcahue",
+    "comuna": "Ercilla",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Florida",
     "rango_alertas": []
   },
   {
@@ -494,6 +338,10 @@
   },
   {
     "comuna": "Fresia",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Frutillar",
     "rango_alertas": []
   },
   {
@@ -597,7 +445,11 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Mulchen",
+    "comuna": "Nacimiento",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Negrete",
     "rango_alertas": []
   },
   {
@@ -629,11 +481,19 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Perquenco",
+    "comuna": "Pemuco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Pinto",
     "rango_alertas": []
   },
   {
     "comuna": "Pitrufquen",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Pucon",
     "rango_alertas": []
   },
   {
@@ -689,15 +549,11 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Quillon",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Quinchao",
     "rango_alertas": []
   },
   {
-    "comuna": "Ranquil",
+    "comuna": "Renaico",
     "rango_alertas": []
   },
   {
@@ -717,11 +573,11 @@
     "rango_alertas": []
   },
   {
-    "comuna": "San Ignacio",
+    "comuna": "San Juan De La Costa",
     "rango_alertas": []
   },
   {
-    "comuna": "San Juan De La Costa",
+    "comuna": "San Pablo",
     "rango_alertas": []
   },
   {
@@ -730,6 +586,10 @@
   },
   {
     "comuna": "Santa Juana",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Temuco",
     "rango_alertas": []
   },
   {
@@ -745,11 +605,23 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Tome",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Traiguen",
     "rango_alertas": []
   },
   {
-    "comuna": "Victoria",
+    "comuna": "Valdivia",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Vilcun",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Yumbel",
     "rango_alertas": []
   }
 ]
