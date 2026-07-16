@@ -1,9 +1,9 @@
 [
   {
-    "comuna": "Alto Bio Bio",
+    "comuna": "Los Angeles",
     "rango_alertas": [
       {
-        "fecha": "2026-07-15",
+        "fecha": "2026-07-18",
         "hora_inicio": 0,
         "hora_fin": 0,
         "impacto_llamadas_adicionales": 0
@@ -11,155 +11,34 @@
     ]
   },
   {
-    "comuna": "Antuco",
+    "comuna": "Temuco",
     "rango_alertas": [
       {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
+        "fecha": "2026-07-16",
+        "hora_inicio": 10,
+        "hora_fin": 10,
         "impacto_llamadas_adicionales": 0
       }
     ]
   },
   {
-    "comuna": "Cabrero",
+    "comuna": "Tome",
     "rango_alertas": [
       {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
+        "fecha": "2026-07-16",
+        "hora_inicio": 10,
+        "hora_fin": 10,
         "impacto_llamadas_adicionales": 0
       }
     ]
   },
   {
-    "comuna": "Curarrehue",
+    "comuna": "Valdivia",
     "rango_alertas": [
       {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "El Carmen",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Lonquimay",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Melipeuco",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Mulchen",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Perquenco",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Quillon",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Ranquil",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "San Ignacio",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "San Rosendo",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Tucapel",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Victoria",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
+        "fecha": "2026-07-16",
+        "hora_inicio": 2,
+        "hora_fin": 4,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -168,43 +47,13 @@
     "comuna": "Villarrica",
     "rango_alertas": [
       {
-        "fecha": "2026-07-15",
-        "hora_inicio": 8,
-        "hora_fin": 13,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 16,
-        "hora_fin": 16,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 19,
-        "hora_fin": 19,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 22,
-        "hora_fin": 23,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
         "fecha": "2026-07-16",
         "hora_inicio": 0,
-        "hora_fin": 1,
+        "hora_fin": 3,
         "impacto_llamadas_adicionales": 0
       },
       {
-        "fecha": "2026-07-20",
-        "hora_inicio": 21,
-        "hora_fin": 22,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-21",
+        "fecha": "2026-07-22",
         "hora_inicio": 2,
         "hora_fin": 2,
         "impacto_llamadas_adicionales": 0
@@ -212,21 +61,14 @@
       {
         "fecha": "2026-07-22",
         "hora_inicio": 7,
-        "hora_fin": 8,
+        "hora_fin": 9,
         "impacto_llamadas_adicionales": 0
       }
     ]
   },
   {
-    "comuna": "Yungay",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-15",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
+    "comuna": "Alto Bio Bio",
+    "rango_alertas": []
   },
   {
     "comuna": "Ancud",
@@ -237,11 +79,19 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Antuco",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Arauco",
     "rango_alertas": []
   },
   {
     "comuna": "Bulnes",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Cabrero",
     "rango_alertas": []
   },
   {
@@ -321,7 +171,15 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Curarrehue",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Dalcahue",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "El Carmen",
     "rango_alertas": []
   },
   {
@@ -405,11 +263,11 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Los Alamos",
+    "comuna": "Lonquimay",
     "rango_alertas": []
   },
   {
-    "comuna": "Los Angeles",
+    "comuna": "Los Alamos",
     "rango_alertas": []
   },
   {
@@ -442,6 +300,14 @@
   },
   {
     "comuna": "Maullin",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Melipeuco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Mulchen",
     "rango_alertas": []
   },
   {
@@ -482,6 +348,10 @@
   },
   {
     "comuna": "Pemuco",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Perquenco",
     "rango_alertas": []
   },
   {
@@ -549,7 +419,15 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Quillon",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Quinchao",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Ranquil",
     "rango_alertas": []
   },
   {
@@ -573,6 +451,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "San Ignacio",
+    "rango_alertas": []
+  },
+  {
     "comuna": "San Juan De La Costa",
     "rango_alertas": []
   },
@@ -581,15 +463,15 @@
     "rango_alertas": []
   },
   {
+    "comuna": "San Rosendo",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Santa Barbara",
     "rango_alertas": []
   },
   {
     "comuna": "Santa Juana",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Temuco",
     "rango_alertas": []
   },
   {
@@ -605,15 +487,15 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Tome",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Traiguen",
     "rango_alertas": []
   },
   {
-    "comuna": "Valdivia",
+    "comuna": "Tucapel",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Victoria",
     "rango_alertas": []
   },
   {
@@ -622,6 +504,10 @@
   },
   {
     "comuna": "Yumbel",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Yungay",
     "rango_alertas": []
   }
 ]
