@@ -1,22 +1,29 @@
 [
   {
-    "comuna": "Los Angeles",
+    "comuna": "San Rosendo",
     "rango_alertas": [
       {
         "fecha": "2026-07-18",
         "hora_inicio": 0,
         "hora_fin": 0,
         "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Temuco",
-    "rango_alertas": [
+      },
       {
-        "fecha": "2026-07-16",
-        "hora_inicio": 10,
-        "hora_fin": 10,
+        "fecha": "2026-07-21",
+        "hora_inicio": 8,
+        "hora_fin": 8,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-22",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-24",
+        "hora_inicio": 7,
+        "hora_fin": 8,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -25,20 +32,9 @@
     "comuna": "Tome",
     "rango_alertas": [
       {
-        "fecha": "2026-07-16",
-        "hora_inicio": 10,
-        "hora_fin": 10,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Valdivia",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-16",
-        "hora_inicio": 2,
-        "hora_fin": 4,
+        "fecha": "2026-07-17",
+        "hora_inicio": 23,
+        "hora_fin": 23,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -47,21 +43,15 @@
     "comuna": "Villarrica",
     "rango_alertas": [
       {
-        "fecha": "2026-07-16",
-        "hora_inicio": 0,
-        "hora_fin": 3,
+        "fecha": "2026-07-18",
+        "hora_inicio": 6,
+        "hora_fin": 6,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-22",
-        "hora_inicio": 2,
-        "hora_fin": 2,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-22",
-        "hora_inicio": 7,
-        "hora_fin": 9,
+        "hora_inicio": 8,
+        "hora_fin": 8,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -271,6 +261,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Los Angeles",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Los Lagos",
     "rango_alertas": []
   },
@@ -463,15 +457,15 @@
     "rango_alertas": []
   },
   {
-    "comuna": "San Rosendo",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Santa Barbara",
     "rango_alertas": []
   },
   {
     "comuna": "Santa Juana",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Temuco",
     "rango_alertas": []
   },
   {
@@ -492,6 +486,10 @@
   },
   {
     "comuna": "Tucapel",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Valdivia",
     "rango_alertas": []
   },
   {
