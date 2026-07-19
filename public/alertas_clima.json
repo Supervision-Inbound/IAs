@@ -1,33 +1,35 @@
 [
   {
-    "comuna": "Pinto",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-18",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "San Rosendo",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-21",
-        "hora_inicio": 8,
-        "hora_fin": 8,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
     "comuna": "Villarrica",
     "rango_alertas": [
       {
-        "fecha": "2026-07-23",
-        "hora_inicio": 10,
-        "hora_fin": 12,
+        "fecha": "2026-07-22",
+        "hora_inicio": 2,
+        "hora_fin": 3,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-22",
+        "hora_inicio": 6,
+        "hora_fin": 9,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-25",
+        "hora_inicio": 21,
+        "hora_fin": 23,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-26",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-26",
+        "hora_inicio": 9,
+        "hora_fin": 9,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -325,6 +327,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "Pinto",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Pitrufquen",
     "rango_alertas": []
   },
@@ -426,6 +432,10 @@
   },
   {
     "comuna": "San Pablo",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "San Rosendo",
     "rango_alertas": []
   },
   {
