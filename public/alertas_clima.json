@@ -11,25 +11,13 @@
       {
         "fecha": "2026-07-22",
         "hora_inicio": 6,
-        "hora_fin": 9,
+        "hora_fin": 11,
         "impacto_llamadas_adicionales": 0
       },
       {
-        "fecha": "2026-07-25",
+        "fecha": "2026-07-27",
         "hora_inicio": 21,
-        "hora_fin": 23,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-26",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-26",
-        "hora_inicio": 9,
-        "hora_fin": 9,
+        "hora_fin": 22,
         "impacto_llamadas_adicionales": 0
       }
     ]
