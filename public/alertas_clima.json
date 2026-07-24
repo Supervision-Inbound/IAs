@@ -3,9 +3,9 @@
     "comuna": "San Rosendo",
     "rango_alertas": [
       {
-        "fecha": "2026-07-30",
-        "hora_inicio": 15,
-        "hora_fin": 15,
+        "fecha": "2026-07-26",
+        "hora_inicio": 17,
+        "hora_fin": 17,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -15,8 +15,8 @@
     "rango_alertas": [
       {
         "fecha": "2026-07-26",
-        "hora_inicio": 2,
-        "hora_fin": 2,
+        "hora_inicio": 18,
+        "hora_fin": 18,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -26,14 +26,14 @@
     "rango_alertas": [
       {
         "fecha": "2026-07-24",
-        "hora_inicio": 8,
-        "hora_fin": 9,
+        "hora_inicio": 12,
+        "hora_fin": 12,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-25",
-        "hora_inicio": 3,
-        "hora_fin": 3,
+        "hora_inicio": 9,
+        "hora_fin": 9,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -42,27 +42,27 @@
     "comuna": "Villarrica",
     "rango_alertas": [
       {
-        "fecha": "2026-07-24",
-        "hora_inicio": 23,
-        "hora_fin": 23,
+        "fecha": "2026-07-25",
+        "hora_inicio": 0,
+        "hora_fin": 0,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-26",
-        "hora_inicio": 6,
-        "hora_fin": 6,
+        "hora_inicio": 8,
+        "hora_fin": 9,
         "impacto_llamadas_adicionales": 0
       },
       {
-        "fecha": "2026-07-26",
-        "hora_inicio": 9,
-        "hora_fin": 10,
+        "fecha": "2026-07-27",
+        "hora_inicio": 21,
+        "hora_fin": 22,
         "impacto_llamadas_adicionales": 0
       },
       {
-        "fecha": "2026-07-30",
-        "hora_inicio": 20,
-        "hora_fin": 20,
+        "fecha": "2026-07-28",
+        "hora_inicio": 2,
+        "hora_fin": 2,
         "impacto_llamadas_adicionales": 0
       }
     ]
