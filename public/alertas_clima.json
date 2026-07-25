@@ -1,39 +1,17 @@
 [
   {
-    "comuna": "San Rosendo",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-26",
-        "hora_inicio": 17,
-        "hora_fin": 17,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
-    "comuna": "Tome",
-    "rango_alertas": [
-      {
-        "fecha": "2026-07-26",
-        "hora_inicio": 18,
-        "hora_fin": 18,
-        "impacto_llamadas_adicionales": 0
-      }
-    ]
-  },
-  {
     "comuna": "Valdivia",
     "rango_alertas": [
       {
-        "fecha": "2026-07-24",
-        "hora_inicio": 12,
-        "hora_fin": 12,
+        "fecha": "2026-07-25",
+        "hora_inicio": 3,
+        "hora_fin": 5,
         "impacto_llamadas_adicionales": 0
       },
       {
-        "fecha": "2026-07-25",
-        "hora_inicio": 9,
-        "hora_fin": 9,
+        "fecha": "2026-07-27",
+        "hora_inicio": 16,
+        "hora_fin": 17,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -42,27 +20,27 @@
     "comuna": "Villarrica",
     "rango_alertas": [
       {
-        "fecha": "2026-07-25",
-        "hora_inicio": 0,
-        "hora_fin": 0,
+        "fecha": "2026-07-26",
+        "hora_inicio": 7,
+        "hora_fin": 7,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-26",
-        "hora_inicio": 8,
-        "hora_fin": 9,
+        "hora_inicio": 9,
+        "hora_fin": 10,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-27",
         "hora_inicio": 21,
-        "hora_fin": 22,
+        "hora_fin": 23,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-28",
         "hora_inicio": 2,
-        "hora_fin": 2,
+        "hora_fin": 3,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -468,6 +446,10 @@
     "rango_alertas": []
   },
   {
+    "comuna": "San Rosendo",
+    "rango_alertas": []
+  },
+  {
     "comuna": "Santa Barbara",
     "rango_alertas": []
   },
@@ -489,6 +471,10 @@
   },
   {
     "comuna": "Tolten",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Tome",
     "rango_alertas": []
   },
   {
