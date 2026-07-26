@@ -1,17 +1,80 @@
 [
   {
-    "comuna": "Valdivia",
+    "comuna": "San Rosendo",
     "rango_alertas": [
       {
-        "fecha": "2026-07-25",
+        "fecha": "2026-07-26",
+        "hora_inicio": 6,
+        "hora_fin": 6,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-26",
+        "hora_inicio": 17,
+        "hora_fin": 17,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-28",
+        "hora_inicio": 7,
+        "hora_fin": 7,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-31",
         "hora_inicio": 3,
         "hora_fin": 5,
         "impacto_llamadas_adicionales": 0
       },
       {
-        "fecha": "2026-07-27",
+        "fecha": "2026-07-31",
+        "hora_inicio": 7,
+        "hora_fin": 8,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Temuco",
+    "rango_alertas": [
+      {
+        "fecha": "2026-07-31",
+        "hora_inicio": 0,
+        "hora_fin": 2,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-31",
+        "hora_inicio": 4,
+        "hora_fin": 5,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Tome",
+    "rango_alertas": [
+      {
+        "fecha": "2026-07-26",
         "hora_inicio": 16,
-        "hora_fin": 17,
+        "hora_fin": 16,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-31",
+        "hora_inicio": 3,
+        "hora_fin": 7,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Valdivia",
+    "rango_alertas": [
+      {
+        "fecha": "2026-07-30",
+        "hora_inicio": 18,
+        "hora_fin": 20,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -22,12 +85,6 @@
       {
         "fecha": "2026-07-26",
         "hora_inicio": 7,
-        "hora_fin": 7,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-26",
-        "hora_inicio": 9,
         "hora_fin": 10,
         "impacto_llamadas_adicionales": 0
       },
@@ -40,7 +97,31 @@
       {
         "fecha": "2026-07-28",
         "hora_inicio": 2,
+        "hora_fin": 2,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-30",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-31",
+        "hora_inicio": 0,
         "hora_fin": 3,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-31",
+        "hora_inicio": 6,
+        "hora_fin": 6,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-31",
+        "hora_inicio": 8,
+        "hora_fin": 8,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -446,19 +527,11 @@
     "rango_alertas": []
   },
   {
-    "comuna": "San Rosendo",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Santa Barbara",
     "rango_alertas": []
   },
   {
     "comuna": "Santa Juana",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Temuco",
     "rango_alertas": []
   },
   {
@@ -471,10 +544,6 @@
   },
   {
     "comuna": "Tolten",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Tome",
     "rango_alertas": []
   },
   {
