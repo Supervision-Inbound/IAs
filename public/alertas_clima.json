@@ -1,11 +1,28 @@
 [
   {
-    "comuna": "Temuco",
+    "comuna": "Cabrero",
+    "rango_alertas": [
+      {
+        "fecha": "2026-08-02",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "San Rosendo",
     "rango_alertas": [
       {
         "fecha": "2026-07-30",
-        "hora_inicio": 18,
-        "hora_fin": 18,
+        "hora_inicio": 14,
+        "hora_fin": 15,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-08-01",
+        "hora_inicio": 23,
+        "hora_fin": 23,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -15,8 +32,8 @@
     "rango_alertas": [
       {
         "fecha": "2026-07-30",
-        "hora_inicio": 18,
-        "hora_fin": 20,
+        "hora_inicio": 15,
+        "hora_fin": 15,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -25,20 +42,14 @@
     "comuna": "Valdivia",
     "rango_alertas": [
       {
-        "fecha": "2026-07-27",
-        "hora_inicio": 12,
-        "hora_fin": 12,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-27",
-        "hora_inicio": 15,
-        "hora_fin": 17,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
         "fecha": "2026-07-30",
-        "hora_inicio": 15,
+        "hora_inicio": 7,
+        "hora_fin": 8,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-08-01",
+        "hora_inicio": 18,
         "hora_fin": 19,
         "impacto_llamadas_adicionales": 0
       }
@@ -48,33 +59,44 @@
     "comuna": "Villarrica",
     "rango_alertas": [
       {
-        "fecha": "2026-07-27",
-        "hora_inicio": 21,
-        "hora_fin": 23,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
-        "fecha": "2026-07-28",
-        "hora_inicio": 0,
-        "hora_fin": 0,
-        "impacto_llamadas_adicionales": 0
-      },
-      {
         "fecha": "2026-07-28",
         "hora_inicio": 2,
         "hora_fin": 3,
         "impacto_llamadas_adicionales": 0
       },
       {
-        "fecha": "2026-07-28",
-        "hora_inicio": 5,
-        "hora_fin": 5,
+        "fecha": "2026-07-29",
+        "hora_inicio": 22,
+        "hora_fin": 22,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-07-30",
-        "hora_inicio": 17,
-        "hora_fin": 20,
+        "hora_inicio": 8,
+        "hora_fin": 8,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-30",
+        "hora_inicio": 10,
+        "hora_fin": 12,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-07-30",
+        "hora_inicio": 18,
+        "hora_fin": 18,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Yumbel",
+    "rango_alertas": [
+      {
+        "fecha": "2026-08-02",
+        "hora_inicio": 0,
+        "hora_fin": 0,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -101,10 +123,6 @@
   },
   {
     "comuna": "Bulnes",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Cabrero",
     "rango_alertas": []
   },
   {
@@ -480,15 +498,15 @@
     "rango_alertas": []
   },
   {
-    "comuna": "San Rosendo",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Santa Barbara",
     "rango_alertas": []
   },
   {
     "comuna": "Santa Juana",
+    "rango_alertas": []
+  },
+  {
+    "comuna": "Temuco",
     "rango_alertas": []
   },
   {
@@ -517,10 +535,6 @@
   },
   {
     "comuna": "Vilcun",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Yumbel",
     "rango_alertas": []
   },
   {
