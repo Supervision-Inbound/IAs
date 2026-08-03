@@ -1,17 +1,68 @@
 [
   {
+    "comuna": "Pinto",
+    "rango_alertas": [
+      {
+        "fecha": "2026-08-03",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Temuco",
+    "rango_alertas": [
+      {
+        "fecha": "2026-08-05",
+        "hora_inicio": 17,
+        "hora_fin": 17,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Tome",
+    "rango_alertas": [
+      {
+        "fecha": "2026-08-05",
+        "hora_inicio": 19,
+        "hora_fin": 19,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
     "comuna": "Villarrica",
     "rango_alertas": [
       {
         "fecha": "2026-08-03",
         "hora_inicio": 21,
-        "hora_fin": 21,
+        "hora_fin": 23,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-08-04",
+        "hora_inicio": 2,
+        "hora_fin": 2,
         "impacto_llamadas_adicionales": 0
       },
       {
         "fecha": "2026-08-05",
         "hora_inicio": 8,
-        "hora_fin": 8,
+        "hora_fin": 10,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-08-05",
+        "hora_inicio": 12,
+        "hora_fin": 23,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-08-10",
+        "hora_inicio": 21,
+        "hora_fin": 21,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -309,10 +360,6 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Pinto",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Pitrufquen",
     "rango_alertas": []
   },
@@ -429,10 +476,6 @@
     "rango_alertas": []
   },
   {
-    "comuna": "Temuco",
-    "rango_alertas": []
-  },
-  {
     "comuna": "Teodoro Schmidt",
     "rango_alertas": []
   },
@@ -442,10 +485,6 @@
   },
   {
     "comuna": "Tolten",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Tome",
     "rango_alertas": []
   },
   {
