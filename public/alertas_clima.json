@@ -1,5 +1,16 @@
 [
   {
+    "comuna": "Valdivia",
+    "rango_alertas": [
+      {
+        "fecha": "2026-08-20",
+        "hora_inicio": 6,
+        "hora_fin": 7,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
     "comuna": "Alto Bio Bio",
     "rango_alertas": []
   },
@@ -437,10 +448,6 @@
   },
   {
     "comuna": "Tucapel",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Valdivia",
     "rango_alertas": []
   },
   {
