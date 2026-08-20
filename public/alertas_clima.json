@@ -4,8 +4,25 @@
     "rango_alertas": [
       {
         "fecha": "2026-08-25",
-        "hora_inicio": 8,
-        "hora_fin": 8,
+        "hora_inicio": 23,
+        "hora_fin": 23,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-08-26",
+        "hora_inicio": 0,
+        "hora_fin": 0,
+        "impacto_llamadas_adicionales": 0
+      }
+    ]
+  },
+  {
+    "comuna": "Tome",
+    "rango_alertas": [
+      {
+        "fecha": "2026-08-25",
+        "hora_inicio": 17,
+        "hora_fin": 17,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -15,8 +32,14 @@
     "rango_alertas": [
       {
         "fecha": "2026-08-24",
-        "hora_inicio": 18,
-        "hora_fin": 22,
+        "hora_inicio": 21,
+        "hora_fin": 23,
+        "impacto_llamadas_adicionales": 0
+      },
+      {
+        "fecha": "2026-08-25",
+        "hora_inicio": 0,
+        "hora_fin": 0,
         "impacto_llamadas_adicionales": 0
       },
       {
@@ -34,7 +57,7 @@
       {
         "fecha": "2026-08-26",
         "hora_inicio": 8,
-        "hora_fin": 8,
+        "hora_fin": 9,
         "impacto_llamadas_adicionales": 0
       }
     ]
@@ -461,10 +484,6 @@
   },
   {
     "comuna": "Tolten",
-    "rango_alertas": []
-  },
-  {
-    "comuna": "Tome",
     "rango_alertas": []
   },
   {
