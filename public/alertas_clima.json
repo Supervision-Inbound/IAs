@@ -5,7 +5,7 @@
       {
         "fecha": "2026-08-31",
         "hora_inicio": 21,
-        "hora_fin": 23,
+        "hora_fin": 21,
         "impacto_llamadas_adicionales": 0
       },
       {
@@ -16,8 +16,8 @@
       },
       {
         "fecha": "2026-09-02",
-        "hora_inicio": 7,
-        "hora_fin": 9,
+        "hora_inicio": 8,
+        "hora_fin": 8,
         "impacto_llamadas_adicionales": 0
       }
     ]
